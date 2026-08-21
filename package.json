@@ -1,0 +1,30 @@
+{
+  "name": "omp-plugins",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Monorepo for standalone oh-my-pi plugins installable from GitHub or publishable as separate packages.",
+  "packageManager": "bun@1.4.0",
+  "workspaces": ["packages/*"],
+  "engines": {
+    "bun": ">=1.4.0"
+  },
+  "omp": {
+    "extensions": [
+      "./packages/headroom/index.ts",
+      "./packages/prompt-border-style/src/main.ts"
+    ]
+  },
+  "scripts": {
+    "list": "bun pm ls --all",
+    "check": "bun run scripts/check-workspace.mjs",
+    "typecheck": "bun run --workspaces --if-present check:types",
+    "test": "bun run --workspaces --if-present test",
+    "pack:check": "bun run --workspaces --if-present pack:check",
+    "verify": "bun run typecheck && bun run test && bun run check && bun run pack:check",
+    "publish:headroom": "bun run verify && bun publish --cwd packages/headroom --access public",
+    "publish:prompt-border-style": "bun run verify && bun publish --cwd packages/prompt-border-style --access public",
+    "publish:theme-catppuccin": "bun run verify && bun publish --cwd packages/theme-catppuccin --access public",
+    "publish:all": "bun run verify && bun publish --cwd packages/headroom --access public && bun publish --cwd packages/prompt-border-style --access public && bun publish --cwd packages/theme-catppuccin --access public"
+  }
+}

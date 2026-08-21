@@ -1,0 +1,40 @@
+{
+  "type": "module",
+  "name": "@codesook/omp-theme-catppuccin",
+  "version": "1.0.1",
+  "description": "Catppuccin theme pack for oh-my-pi",
+  "homepage": "https://catppuccin.com/palette/",
+  "author": "Catppuccin and oh-my-pi contributors",
+  "license": "MIT",
+  "keywords": [
+    "oh-my-pi",
+    "omp",
+    "theme",
+    "catppuccin"
+  ],
+  "engines": {
+    "bun": ">=1.4.0"
+  },
+  "bin": {
+    "omp-theme-catppuccin": "./bin/install.js"
+  },
+  "scripts": {
+    "pack:check": "bun pm pack --dry-run --quiet"
+  },
+  "omp": {
+    "themes": [
+      "./themes/catppuccin-latte.json",
+      "./themes/catppuccin-frappe.json",
+      "./themes/catppuccin-macchiato.json",
+      "./themes/catppuccin-mocha.json"
+    ]
+  },
+  "files": [
+    "bin",
+    "themes",
+    "README.md"
+  ],
+  "publishConfig": {
+    "access": "public"
+  }
+}

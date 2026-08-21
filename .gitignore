@@ -1,0 +1,15 @@
+node_modules/
+dist/
+coverage/
+*.tsbuildinfo
+*.log
+.env
+.env.*
+!.env.example
+.DS_Store
+.vscode/
+.idea/
+graphify-out/
+*.tgz
+packages/*/bun.lock
+packages/*/bun.lockb

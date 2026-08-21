@@ -1,0 +1,37 @@
+{
+	"name": "@codesook/omp-headroom",
+	"version": "1.0.0",
+	"type": "module",
+	"description": "Headroom context compression bridge for oh-my-pi",
+	"license": "MIT",
+	"scripts": {
+		"check:types": "tsc -p tsconfig.json --noEmit",
+		"test": "bun test",
+		"pack:check": "bun pm pack --dry-run --quiet"
+	},
+	"files": [
+		"index.ts",
+		"types.ts",
+		"config.ts",
+		"display.ts",
+		"init.ts",
+		"bridge.ts",
+		"client.ts",
+		"proxy-manager.ts",
+		"README.md"
+	],
+	"peerDependencies": {
+		"@oh-my-pi/pi-coding-agent": ">=16.1.7",
+		"@oh-my-pi/pi-tui": ">=16.1.7",
+		"@oh-my-pi/pi-ai": ">=16.1.7"
+	},
+	"devDependencies": {
+		"@oh-my-pi/pi-coding-agent": ">=16.1.7",
+		"@oh-my-pi/pi-tui": ">=16.1.7",
+		"@oh-my-pi/pi-ai": ">=16.1.7",
+		"bun-types": "latest",
+		"typescript": "latest"
+	},
+	"omp": { "extensions": ["./index.ts"] },
+	"publishConfig": { "access": "public" }
+}
