@@ -33,23 +33,41 @@ is optional.
 
 ## Install extensions from GitHub
 
-Install both TypeScript extensions:
+Install both current TypeScript extensions using the default feature set:
 
 ```bash
 omp plugin install github:seenark/omp-plugins
 ```
 
-Install only one extension. Keep the target quoted because `[` and `]` have
-special meaning in many shells:
+Select multiple extensions explicitly:
+
+```bash
+omp plugin install 'github:seenark/omp-plugins[headroom,prompt-border-style]'
+```
+
+Install every feature declared by the repository, including future features:
+
+```bash
+omp plugin install 'github:seenark/omp-plugins[*]'
+```
+
+Install only one extension:
 
 ```bash
 omp plugin install 'github:seenark/omp-plugins[headroom]'
 omp plugin install 'github:seenark/omp-plugins[prompt-border-style]'
 ```
 
-The bracketed names are OMP feature names, not GitHub subdirectories. This
-keeps all plugins in the same repository while allowing separate installation
-choices.
+For a future feature named `new-package`, add it to the selector:
+
+```bash
+omp plugin install 'github:seenark/omp-plugins[headroom,prompt-border-style,new-package]'
+```
+
+Keep targets containing `[` and `]` quoted because those characters have
+special meaning in many shells. The bracketed names are OMP feature names, not
+GitHub subdirectories. Re-run the install command to change the selected
+features of an existing installation.
 
 Verify the installation:
 
