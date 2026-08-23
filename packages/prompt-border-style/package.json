@@ -1,6 +1,6 @@
 {
     "name": "@codesook/omp-prompt-border-style",
-    "version": "1.0.1",
+    "version": "1.0.2",
     "type": "module",
     "description": "Prompt input border styles for oh-my-pi",
     "license": "MIT",

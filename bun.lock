@@ -23,7 +23,7 @@
     },
     "packages/prompt-border-style": {
       "name": "@codesook/omp-prompt-border-style",
-      "version": "1.0.1",
+      "version": "1.0.2",
       "devDependencies": {
         "@oh-my-pi/pi-coding-agent": ">=18.0.3",
         "@oh-my-pi/pi-tui": ">=18.0.3",
