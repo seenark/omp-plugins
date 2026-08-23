@@ -14,38 +14,42 @@ packages/
   theme-catppuccin/     # Catppuccin theme installer
 ```
 
-The repository root exposes the Headroom and Prompt Border Style extensions to
-OMP's plugin manager.
+The root plugin uses OMP feature selection. A normal install enables both
+TypeScript extensions; a feature selector enables only the requested one.
 
 ## Requirements
 
-- [mise](https://mise.jdx.dev/)
-- Bun 1.4.0, installed from `mise.toml`
+- Bun 1.4.0
 - OMP 16.1.7 or newer with plugin support
 
-Install the pinned Bun version and confirm it:
+Any Bun installation method is supported. Confirm the active version:
 
 ```bash
-mise install
-mise exec -- bun --version
+bun --version
 ```
 
-The version command must print `1.4.0`.
+This repository includes `mise.toml` for contributors who use mise, but mise
+is optional.
 
-## Install the extensions from GitHub
+## Install extensions from GitHub
 
-Install this repository as one OMP plugin. The root manifest registers both
-TypeScript extensions:
+Install both TypeScript extensions:
 
 ```bash
 omp plugin install github:seenark/omp-plugins
 ```
 
-For a project-scoped installation:
+Install only one extension. Keep the target quoted because `[` and `]` have
+special meaning in many shells:
 
 ```bash
-omp plugin install --scope project github:seenark/omp-plugins
+omp plugin install 'github:seenark/omp-plugins[headroom]'
+omp plugin install 'github:seenark/omp-plugins[prompt-border-style]'
 ```
+
+The bracketed names are OMP feature names, not GitHub subdirectories. This
+keeps all plugins in the same repository while allowing separate installation
+choices.
 
 Verify the installation:
 
@@ -54,34 +58,18 @@ omp plugin list
 omp plugin doctor
 ```
 
-Install only one extension from a local checkout:
+## Install one extension from a local checkout
 
 ```bash
 git clone https://github.com/seenark/omp-plugins.git
 cd omp-plugins
-mise install
-mise exec -- bun install
+bun install
 
 # Headroom only
 omp plugin install "$PWD/packages/headroom"
 
 # Prompt Border Style only
 omp plugin install "$PWD/packages/prompt-border-style"
-```
-
-OMP does not support installing a GitHub subdirectory as an individual plugin.
-This does not select a package:
-
-```bash
-omp plugin install github:seenark/omp-plugins/packages/headroom
-```
-
-For individual remote GitHub installs, each extension must be in its own
-public repository:
-
-```bash
-omp plugin install github:seenark/omp-headroom
-omp plugin install github:seenark/omp-prompt-border-style
 ```
 
 ## Install the Catppuccin themes
@@ -91,14 +79,14 @@ the theme package copies its JSON files there instead of registering them as
 plugin extensions. From a checkout of this repository, run:
 
 ```bash
-mise exec -- bun packages/theme-catppuccin/bin/install.js
+bun packages/theme-catppuccin/bin/install.js
 ```
 
 For a non-destructive test, use a temporary OMP data directory:
 
 ```bash
 tmp="$(mktemp -d)"
-PI_CODING_AGENT_DIR="$tmp/agent" mise exec -- bun packages/theme-catppuccin/bin/install.js
+PI_CODING_AGENT_DIR="$tmp/agent" bun packages/theme-catppuccin/bin/install.js
 rm -rf "$tmp"
 ```
 
@@ -106,22 +94,21 @@ Then open OMP, run `/settings`, and choose the Catppuccin light or dark theme.
 
 ## Workspace development
 
-Install dependencies with the Bun version managed by mise:
+Install dependencies:
 
 ```bash
-mise install
-mise exec -- bun install
+bun install
 ```
 
 Run the available checks:
 
 ```bash
-mise exec -- bun run list
-mise exec -- bun run check
-mise exec -- bun run typecheck
-mise exec -- bun run test
-mise exec -- bun run pack:check
-mise exec -- bun run verify
+bun run list
+bun run check
+bun run typecheck
+bun run test
+bun run pack:check
+bun run verify
 ```
 
 - `bun run check` validates package names, versions, publication state, and
@@ -143,7 +130,7 @@ omp plugin link "$PWD/packages/prompt-border-style"
 Run the theme installer locally:
 
 ```bash
-mise exec -- bun packages/theme-catppuccin/bin/install.js
+bun packages/theme-catppuccin/bin/install.js
 ```
 
 ## Optional npm publication
@@ -152,8 +139,8 @@ Publishing is not required for GitHub installation. If these packages are
 published later, the root scripts use Bun:
 
 ```bash
-mise exec -- bun run publish:headroom
-mise exec -- bun run publish:prompt-border-style
-mise exec -- bun run publish:theme-catppuccin
-mise exec -- bun run publish:all
+bun run publish:headroom
+bun run publish:prompt-border-style
+bun run publish:theme-catppuccin
+bun run publish:all
 ```
