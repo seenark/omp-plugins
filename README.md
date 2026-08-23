@@ -54,6 +54,36 @@ omp plugin list
 omp plugin doctor
 ```
 
+Install only one extension from a local checkout:
+
+```bash
+git clone https://github.com/seenark/omp-plugins.git
+cd omp-plugins
+mise install
+mise exec -- bun install
+
+# Headroom only
+omp plugin install "$PWD/packages/headroom"
+
+# Prompt Border Style only
+omp plugin install "$PWD/packages/prompt-border-style"
+```
+
+OMP does not support installing a GitHub subdirectory as an individual plugin.
+This does not select a package:
+
+```bash
+omp plugin install github:seenark/omp-plugins/packages/headroom
+```
+
+For individual remote GitHub installs, each extension must be in its own
+public repository:
+
+```bash
+omp plugin install github:seenark/omp-headroom
+omp plugin install github:seenark/omp-prompt-border-style
+```
+
 ## Install the Catppuccin themes
 
 The current OMP runtime discovers custom themes from its theme directory, so
