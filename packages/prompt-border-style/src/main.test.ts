@@ -3,7 +3,7 @@ import { mkdtemp } from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
 import type { ExtensionAPI } from "@oh-my-pi/pi-coding-agent";
-import type { AutocompleteProvider, EditorTheme } from "@oh-my-pi/pi-tui";
+import { CURSOR_MARKER, type AutocompleteProvider, type EditorTheme } from "@oh-my-pi/pi-tui";
 import promptBorderStyle, {
 	DEFAULT_PROMPT_BORDER_CONFIG,
 	PromptBorderEditor,
@@ -244,6 +244,24 @@ describe("PromptBorderEditor", () => {
 		expect(lines[0]).toBe("╔══════╗");
 		expect(lines[1]).toBe("║  ▌   ║");
 		expect(lines.at(-1)).toBe("╚══════╝");
+	});
+
+	test("keeps the upstream IME-safe tail inside the custom bottom layout", () => {
+		const editor = new PromptBorderEditor(theme, { style: "round", layout: "full" });
+		editor.setUseTerminalCursor(true);
+		editor.setImeSafeCursorLayout(true);
+		editor.focused = true;
+
+		expect(editor.render(8)).toEqual(["╭──────╮", `│  ${CURSOR_MARKER}`, "╰──────╯"]);
+	});
+
+	test("normalizes an upstream merged last row before the synthetic border", () => {
+		const editor = new PromptBorderEditor(theme, { style: "round", layout: "full" });
+		editor.setTheme(theme);
+		editor.setUseTerminalCursor(true);
+		editor.focused = true;
+
+		expect(editor.render(8)).toEqual(["╭──────╮", `│  ${CURSOR_MARKER}    │`, "╰──────╯"]);
 	});
 
 	test("restyles status gap horizontal runs to the selected border glyph", () => {

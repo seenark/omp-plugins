@@ -742,6 +742,73 @@ function withSeparateBottomGlyphs(glyphs: PromptBorderGlyphs): PromptBorderGlyph
 }
 
 const ANSI_SGR_PATTERN = /\x1b\[[0-9;:]*m/g;
+function isUpstreamBottomBorderRow(line: string, width: number, glyphs: PromptBorderGlyphs): boolean {
+	const plain = line.replace(ANSI_SGR_PATTERN, "");
+	return (
+		plain === renderBottomBorderLine(width, glyphs, value => value) ||
+		plain === renderBottomBorderLine(width, withSeparateBottomGlyphs(glyphs), value => value)
+	);
+}
+
+function isUpstreamMergedBottomBodyRow(line: string, glyphs: PromptBorderGlyphs): boolean {
+	const plain = line.replace(ANSI_SGR_PATTERN, "");
+	const chars = [...plain];
+	return (
+		chars.length >= 4 &&
+		chars[0] === glyphs.bottomLeft &&
+		chars[1] === glyphs.horizontal &&
+		chars.at(-2) === glyphs.horizontal &&
+		chars.at(-1) === glyphs.bottomRight
+	);
+}
+
+function isBodyOrUpstreamBottomBorderRow(line: string, width: number, glyphs: PromptBorderGlyphs): boolean {
+	const plain = line.replace(ANSI_SGR_PATTERN, "");
+	return (
+		plain.startsWith(glyphs.vertical) ||
+		isUpstreamBottomBorderRow(line, width, glyphs) ||
+		isUpstreamMergedBottomBodyRow(line, glyphs)
+	);
+}
+
+function normalizeUpstreamMergedBottomBodyRow(line: string, glyphs: PromptBorderGlyphs): string {
+	if (!isUpstreamMergedBottomBodyRow(line, glyphs)) return line;
+	const plain = line.replace(ANSI_SGR_PATTERN, "");
+	const lastIndex = [...plain].length - 1;
+	let visibleIndex = 0;
+	return line.replace(/\x1b\[[0-9;:]*m|./gu, token => {
+		if (token.startsWith("\x1b[")) return token;
+		const replacement =
+			visibleIndex === 0 || visibleIndex === lastIndex
+				? glyphs.vertical
+				: visibleIndex === 1 || visibleIndex === lastIndex - 1
+					? " "
+					: token;
+		visibleIndex += 1;
+		return replacement;
+	});
+}
+
+function hideSideBorderGlyphs(line: string, glyphs: PromptBorderGlyphs): string {
+	const plain = line.replace(ANSI_SGR_PATTERN, "");
+	const chars = [...plain];
+	const hasLeftBorder = chars[0] === glyphs.vertical;
+	const hasRightBorder = chars.at(-1) === glyphs.vertical;
+	if ((!hasLeftBorder && !hasRightBorder) || chars.length < 2) return line;
+	const leftPaddingIndex = hasLeftBorder ? 1 : -1;
+	const rightPaddingIndex = hasRightBorder ? chars.length - 2 : -1;
+	let visibleIndex = 0;
+	return line.replace(/\x1b\[[0-9;:]*m|./gu, token => {
+		if (token.startsWith("\x1b[")) return token;
+		const shouldReplace =
+			(token === glyphs.vertical &&
+				((hasLeftBorder && visibleIndex === 0) || (hasRightBorder && visibleIndex === chars.length - 1))) ||
+			(token === glyphs.horizontal &&
+				(visibleIndex === leftPaddingIndex || visibleIndex === rightPaddingIndex));
+		visibleIndex += 1;
+		return shouldReplace ? " " : token;
+	});
+}
 
 function stripSideRowHorizontalPadding(line: string, glyphs: PromptBorderGlyphs): string {
 	const plain = line.replace(ANSI_SGR_PATTERN, "");
@@ -764,22 +831,6 @@ function restyleTopBorderHorizontalRuns(line: string, glyphs: PromptBorderGlyphs
 	return line.replace(/([─━╌╍═-])\1+/gu, match => glyphs.horizontal.repeat([...match].length));
 }
 
-function hideSideBorderGlyphs(line: string, glyphs: PromptBorderGlyphs): string {
-	const plain = line.replace(ANSI_SGR_PATTERN, "");
-	const chars = [...plain];
-	if (chars.length < 2 || chars[0] !== glyphs.vertical || chars.at(-1) !== glyphs.vertical) return line;
-	const leftPaddingIndex = 1;
-	const rightPaddingIndex = chars.length - 2;
-	let visibleIndex = 0;
-	return line.replace(/\x1b\[[0-9;:]*m|./gu, token => {
-		if (token.startsWith("\x1b[")) return token;
-		const shouldReplace =
-			(token === glyphs.vertical && (visibleIndex === 0 || visibleIndex === chars.length - 1)) ||
-			(token === glyphs.horizontal && (visibleIndex === leftPaddingIndex || visibleIndex === rightPaddingIndex));
-		visibleIndex += 1;
-		return shouldReplace ? " " : token;
-	});
-}
 function hideTopBorderLine(line: string, glyphs: PromptBorderGlyphs, topBorder: EditorTopBorder | undefined): string | null {
 	const plain = line.replace(ANSI_SGR_PATTERN, "");
 	const chars = [...plain];
@@ -1156,13 +1207,18 @@ export class PromptBorderEditor extends CustomEditor {
 					? []
 					: [hiddenTopRow];
 		const bodyAndAutocompleteRows = lines.slice(1);
-		const splitIndex = bodyAndAutocompleteRows.findIndex(line => {
-			const plain = line.replace(ANSI_SGR_PATTERN, "");
-			return !plain.startsWith(this.#glyphs.vertical) || !plain.endsWith(this.#glyphs.vertical);
-		});
-		const borderedBodyRows =
+		const splitIndex = bodyAndAutocompleteRows.findIndex(
+			line => !isBodyOrUpstreamBottomBorderRow(line, width, this.#glyphs),
+		);
+		const bodyRowsWithUpstreamChrome =
 			splitIndex === -1 ? bodyAndAutocompleteRows : bodyAndAutocompleteRows.slice(0, splitIndex);
-		const sideOnlyBodyRows = borderedBodyRows.map(line => stripSideRowHorizontalPadding(line, this.#glyphs));
+		const borderedBodyRows = bodyRowsWithUpstreamChrome.filter(
+			line => !isUpstreamBottomBorderRow(line, width, this.#glyphs),
+		);
+		const autocompleteRows = splitIndex === -1 ? [] : bodyAndAutocompleteRows.slice(splitIndex);
+		const sideOnlyBodyRows = borderedBodyRows.map(line =>
+			stripSideRowHorizontalPadding(normalizeUpstreamMergedBottomBodyRow(line, this.#glyphs), this.#glyphs),
+		);
 		const normalizedBodyRows =
 			this.#state.layout === "top-bottom"
 				? sideOnlyBodyRows.map(line => hideSideBorderGlyphs(line, this.#glyphs))
@@ -1178,12 +1234,8 @@ export class PromptBorderEditor extends CustomEditor {
 			rightFrame,
 			borderLine,
 		);
-		if (this.#state.layout === "sides") {
-			if (splitIndex === -1) return [...topRows, ...glyphRows];
-			return [...topRows, ...glyphRows, ...bodyAndAutocompleteRows.slice(splitIndex)];
-		}
-		if (splitIndex === -1) return [...topRows, ...glyphRows, borderLine];
-		return [...topRows, ...glyphRows, borderLine, ...bodyAndAutocompleteRows.slice(splitIndex)];
+		if (this.#state.layout === "sides") return [...topRows, ...glyphRows, ...autocompleteRows];
+		return [...topRows, ...glyphRows, borderLine, ...autocompleteRows];
 	}
 	dispose(): void {
 		if (this.#leftGlyphTimer !== undefined) clearTimeout(this.#leftGlyphTimer);
