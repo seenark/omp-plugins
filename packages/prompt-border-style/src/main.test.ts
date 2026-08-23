@@ -255,13 +255,24 @@ describe("PromptBorderEditor", () => {
 		expect(editor.render(8)).toEqual(["╭──────╮", `│  ${CURSOR_MARKER}`, "╰──────╯"]);
 	});
 
-	test("normalizes an upstream merged last row before the synthetic border", () => {
+	test("reapplies selected border glyphs after a theme refresh", () => {
 		const editor = new PromptBorderEditor(theme, { style: "round", layout: "full" });
 		editor.setTheme(theme);
 		editor.setUseTerminalCursor(true);
 		editor.focused = true;
 
 		expect(editor.render(8)).toEqual(["╭──────╮", `│  ${CURSOR_MARKER}    │`, "╰──────╯"]);
+	});
+
+	test("keeps unfocused blank body rows for space-horizontal styles", () => {
+		for (const style of ["vertical", "double-vertical", "horizontal", "double-horizontal", "block"] as const) {
+			const editor = new PromptBorderEditor(theme, { style, layout: "full" });
+			editor.setUseTerminalCursor(true);
+			editor.setImeSafeCursorLayout(true);
+			editor.focused = false;
+
+			expect(editor.render(8)).toHaveLength(3);
+		}
 	});
 
 	test("restyles status gap horizontal runs to the selected border glyph", () => {

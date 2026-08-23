@@ -762,10 +762,17 @@ function isUpstreamMergedBottomBodyRow(line: string, glyphs: PromptBorderGlyphs)
 	);
 }
 
+function isImeSafeCursorTailRow(line: string, glyphs: PromptBorderGlyphs): boolean {
+	const plain = line.replace(ANSI_SGR_PATTERN, "");
+	return line.includes(CURSOR_MARKER) && plain.startsWith(glyphs.vertical) && !plain.endsWith(glyphs.vertical);
+}
+
 function isBodyOrUpstreamBottomBorderRow(line: string, width: number, glyphs: PromptBorderGlyphs): boolean {
 	const plain = line.replace(ANSI_SGR_PATTERN, "");
+	const hasBothSideBorders = plain.startsWith(glyphs.vertical) && plain.endsWith(glyphs.vertical);
 	return (
-		plain.startsWith(glyphs.vertical) ||
+		hasBothSideBorders ||
+		isImeSafeCursorTailRow(line, glyphs) ||
 		isUpstreamBottomBorderRow(line, width, glyphs) ||
 		isUpstreamMergedBottomBodyRow(line, glyphs)
 	);
@@ -1111,6 +1118,13 @@ export class PromptBorderEditor extends CustomEditor {
 		this.#glyphs = glyphs;
 		this.#config = config;
 	}
+	override setTheme(theme: EditorTheme): void {
+		const editorTheme =
+			this.#state.layout === "default"
+				? withPromptBorder(theme, this.#state)
+				: withPromptBorder(theme, this.#state, withSeparateBottomGlyphs(this.#glyphs));
+		super.setTheme(editorTheme);
+	}
 	override setTopBorder(content: EditorTopBorder | undefined): void {
 		this.#topBorder = content;
 		this.#renderedTopBorder = content;
@@ -1213,7 +1227,9 @@ export class PromptBorderEditor extends CustomEditor {
 		const bodyRowsWithUpstreamChrome =
 			splitIndex === -1 ? bodyAndAutocompleteRows : bodyAndAutocompleteRows.slice(0, splitIndex);
 		const borderedBodyRows = bodyRowsWithUpstreamChrome.filter(
-			line => !isUpstreamBottomBorderRow(line, width, this.#glyphs),
+			(line, index, rows) =>
+				!isUpstreamBottomBorderRow(line, width, this.#glyphs) ||
+				!isImeSafeCursorTailRow(rows[index - 1] ?? "", this.#glyphs),
 		);
 		const autocompleteRows = splitIndex === -1 ? [] : bodyAndAutocompleteRows.slice(splitIndex);
 		const sideOnlyBodyRows = borderedBodyRows.map(line =>
