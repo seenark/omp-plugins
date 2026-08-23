@@ -1,5 +1,5 @@
 {
-  "$schema": "https://raw.githubusercontent.com/can1357/oh-my-pi/main/packages/coding-agent/theme-schema.json",
+  "$schema": "https://raw.githubusercontent.com/can1357/oh-my-pi/main/packages/coding-agent/src/modes/theme/theme-schema.json",
   "name": "catppuccin-macchiato",
   "vars": {
     "rosewater": "#f4dbd6",
@@ -50,7 +50,6 @@
     "toolPendingBg": "surface0",
     "toolSuccessBg": "mantle",
     "toolErrorBg": "crust",
-    "toolText": "",
     "toolTitle": "lavender",
     "toolOutput": "overlay1",
     "mdHeading": "peach",
@@ -66,7 +65,6 @@
     "toolDiffAdded": "green",
     "toolDiffRemoved": "red",
     "toolDiffContext": "overlay1",
-    "link": "blue",
     "syntaxComment": "overlay0",
     "syntaxKeyword": "mauve",
     "syntaxFunction": "blue",

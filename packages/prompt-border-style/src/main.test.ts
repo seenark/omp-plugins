@@ -253,6 +253,17 @@ describe("PromptBorderEditor", () => {
 		expect(lines[0]).toBe("╔══left ═════ r…═══╗");
 	});
 
+
+	test("uses lazy top-border providers in non-full layouts", () => {
+		for (const layout of ["bottom", "sides"] as const) {
+			const editor = new PromptBorderEditor(theme, { style: "double", layout });
+			editor.setTopBorderProvider(() => ({ content: "left ───── right", width: 16 }));
+
+			const lines = editor.render(20);
+
+			expect(lines.some(line => line.includes("left"))).toBe(true);
+		}
+	});
 	test("renders only side borders in sides layout", () => {
 		const editor = new PromptBorderEditor(theme, { style: "sharp", layout: "sides" });
 		const lines = editor.render(8);
@@ -264,7 +275,7 @@ describe("PromptBorderEditor", () => {
 		const editor = new PromptBorderEditor(theme, { style: "double", layout: "bottom" });
 		editor.setTopBorder({ content: "left ───── right", width: 16 });
 		const lines = editor.render(20);
-		expect(lines[0]).toBe("               …    ");
+		expect(lines[0]).toBe("   left ═════ r…    ");
 		expect(lines[1]).toBe("║  ▌               ║");
 		expect(lines.at(-1)).toBe("╚══════════════════╝");
 	});
@@ -273,7 +284,7 @@ describe("PromptBorderEditor", () => {
 		const editor = new PromptBorderEditor(theme, { style: "double", layout: "sides" });
 		editor.setTopBorder({ content: "left ───── right", width: 16 });
 		const lines = editor.render(20);
-		expect(lines).toEqual(["               …    ", "║  ▌               ║"]);
+		expect(lines).toEqual(["   left ═════ r…    ", "║  ▌               ║"]);
 	});
 
 	test("preserves edge-aligned status glyphs when bottom layout hides top border chrome", () => {
@@ -1035,8 +1046,29 @@ test("prompt-loading-glyphs debug demo mounts a widget without calling the model
 		},
 	});
 
-	expect(widgetCalls.at(-1)?.key).toBe("prompt-loading-glyphs-debug");
-	expect(widgetCalls.at(-1)?.value).toBeTruthy();
+	const widget = widgetCalls.at(-1);
+	expect(widget?.key).toBe("prompt-loading-glyphs-debug");
+	expect(widget?.value).toBeTruthy();
+	if (typeof widget?.value !== "function") return;
+
+	vi.useFakeTimers();
+	try {
+		const repaints: unknown[] = [];
+		const component = (widget.value as (tui: unknown, theme: unknown) => { dispose?(): void })(
+			{
+				requestComponentRender(value: unknown) {
+					repaints.push(value);
+				},
+			},
+			{},
+		);
+		const repaintCountBeforeDispose = repaints.length;
+		component.dispose?.();
+		vi.advanceTimersByTime(1000);
+		expect(repaints).toHaveLength(repaintCountBeforeDispose);
+	} finally {
+		vi.useRealTimers();
+	}
 });
 
 test("prompt-loading-glyphs debug on and off set and clear the working message", async () => {

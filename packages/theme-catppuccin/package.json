@@ -19,7 +19,8 @@
     "omp-theme-catppuccin": "./bin/install.js"
   },
   "scripts": {
-    "pack:check": "bun pm pack --dry-run --quiet"
+    "pack:check": "bun pm pack --dry-run --quiet",
+    "test": "bun test"
   },
   "omp": {
     "themes": [

@@ -23,8 +23,8 @@ The default active state is:
 ## Requirements
 
 - `omp` with plugin support
-- `@oh-my-pi/pi-coding-agent` `>=16.1.7`
-- `@oh-my-pi/pi-tui` `>=16.1.7`
+- `@oh-my-pi/pi-coding-agent` `>=18.0.1`
+- `@oh-my-pi/pi-tui` `>=18.0.1`
 
 This package declares the OMP packages as peer dependencies because it extends the host editor UI.
 

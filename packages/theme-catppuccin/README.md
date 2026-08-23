@@ -22,7 +22,8 @@ Then type `/settings`, set Light Theme to `catppuccin-latte`, and set Dark Theme
 ## Destination directory
 
 - default: `~/.omp/agent/themes`
-- if `PI_CODING_AGENT_DIR` is set: `$PI_CODING_AGENT_DIR/themes`
+- if `PI_CODING_AGENT_DIR` is set for the default profile: `$PI_CODING_AGENT_DIR/themes`
+- if `OMP_PROFILE` or `PI_PROFILE` is set: `~/.omp/profiles/<profile>/agent/themes` (or `$PI_CONFIG_DIR/profiles/<profile>/agent/themes` when `PI_CONFIG_DIR` is set)
 - running the installer overwrites only these four files: `catppuccin-latte.json`, `catppuccin-frappe.json`, `catppuccin-macchiato.json`, `catppuccin-mocha.json`
 
 ## Local development
@@ -36,7 +37,8 @@ Non-destructive test:
 ```sh
 tmp="$(mktemp -d)"
 PI_CODING_AGENT_DIR="$tmp/agent" bun packages/theme-catppuccin/bin/install.js
-[packages/theme-catppuccin/README.md#7FDA]
+rm -rf "$tmp"
+```
 
 ## Publish to npm
 

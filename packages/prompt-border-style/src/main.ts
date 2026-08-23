@@ -296,19 +296,32 @@ function mountPromptLoadingGlyphDebugWidget(
 	const { setWidget } = ctx.ui;
 	setWidget("prompt-loading-glyphs-debug", (tui: unknown) => {
 		const box = new Box(1, 0);
+		const loaders: Loader[] = [];
 		const tuiInstance = tui as ConstructorParameters<typeof Loader>[0];
 		box.addChild(new Text(formatPromptLoadingGlyphDemoSummary(config), 0, 0));
 		for (const slot of SPINNER_GLYPH_SLOTS) {
 			const glyphConfig = config.spinnerGlyphs[slot];
-			box.addChild(new Loader(
+			const loader = new Loader(
 				tuiInstance,
 				value => value,
 				value => value,
 				`${slot} loading`,
 				buildTimedSpinnerFrames(glyphConfig.frames, glyphConfig.frameMs),
-			));
+			);
+			loaders.push(loader);
+			box.addChild(loader);
 		}
-		return box;
+		return {
+			render(width: number): readonly string[] {
+				return box.render(width);
+			},
+			invalidate(): void {
+				box.invalidate();
+			},
+			dispose(): void {
+				for (const loader of loaders) loader.dispose();
+			},
+		};
 	});
 	promptLoadingGlyphDebugMountedSessions.add(setWidget);
 }
@@ -755,25 +768,28 @@ function hideSideBorderGlyphs(line: string, glyphs: PromptBorderGlyphs): string 
 	const plain = line.replace(ANSI_SGR_PATTERN, "");
 	const chars = [...plain];
 	if (chars.length < 2 || chars[0] !== glyphs.vertical || chars.at(-1) !== glyphs.vertical) return line;
+	const leftPaddingIndex = 1;
+	const rightPaddingIndex = chars.length - 2;
 	let visibleIndex = 0;
 	return line.replace(/\x1b\[[0-9;:]*m|./gu, token => {
 		if (token.startsWith("\x1b[")) return token;
-		const shouldReplace = visibleIndex === 0 || visibleIndex === chars.length - 1;
+		const shouldReplace =
+			(token === glyphs.vertical && (visibleIndex === 0 || visibleIndex === chars.length - 1)) ||
+			(token === glyphs.horizontal && (visibleIndex === leftPaddingIndex || visibleIndex === rightPaddingIndex));
 		visibleIndex += 1;
 		return shouldReplace ? " " : token;
 	});
 }
-
 function hideTopBorderLine(line: string, glyphs: PromptBorderGlyphs, topBorder: EditorTopBorder | undefined): string | null {
 	const plain = line.replace(ANSI_SGR_PATTERN, "");
 	const chars = [...plain];
 	if (chars.length < 2 || chars[0] !== glyphs.topLeft || chars.at(-1) !== glyphs.topRight) return line;
 	if (!topBorder) return null;
-	let plainContent = topBorder.content.replace(ANSI_SGR_PATTERN, "");
+	let plainContent = restyleTopBorderHorizontalRuns(topBorder.content, glyphs).replace(ANSI_SGR_PATTERN, "");
 	let firstContentIndex = plain.indexOf(plainContent, 1);
 	if (firstContentIndex === -1) {
 		for (let width = topBorder.width - 1; width > 0; width -= 1) {
-			const truncated = truncateToWidth(topBorder.content, width);
+			const truncated = restyleTopBorderHorizontalRuns(truncateToWidth(topBorder.content, width), glyphs);
 			plainContent = truncated.replace(ANSI_SGR_PATTERN, "");
 			firstContentIndex = plain.indexOf(plainContent, 1);
 			if (plainContent.length > 0 && firstContentIndex !== -1) break;
@@ -1024,6 +1040,8 @@ export class PromptBorderEditor extends CustomEditor {
 	readonly #glyphs: PromptBorderGlyphs;
 	readonly #config: PromptBorderConfig;
 	#topBorder: EditorTopBorder | undefined;
+	#renderedTopBorder: EditorTopBorder | undefined;
+	#topBorderProvider: ((availableWidth: number) => EditorTopBorder | undefined) | undefined;
 	#leftGlyphFrameIndex = 0;
 	#rightGlyphFrameIndex = 0;
 	#leftGlyphTimer: Timer | undefined;
@@ -1044,7 +1062,23 @@ export class PromptBorderEditor extends CustomEditor {
 	}
 	override setTopBorder(content: EditorTopBorder | undefined): void {
 		this.#topBorder = content;
+		this.#renderedTopBorder = content;
 		super.setTopBorder(content);
+	}
+	override setTopBorderProvider(
+		provider: ((availableWidth: number) => EditorTopBorder | undefined) | undefined,
+	): void {
+		this.#topBorderProvider = provider;
+		this.#renderedTopBorder = undefined;
+		super.setTopBorderProvider(
+			provider === undefined
+				? undefined
+				: availableWidth => {
+						const content = provider(availableWidth);
+						this.#renderedTopBorder = content;
+						return content;
+					},
+		);
 	}
 	override setShimmerRepaintHandler(handler: (() => void) | undefined): void {
 		super.setShimmerRepaintHandler(handler);
@@ -1111,7 +1145,8 @@ export class PromptBorderEditor extends CustomEditor {
 			return [restyleTopBorderHorizontalRuns(lines[0], this.#glyphs), ...glyphRows, ...autocompleteRows];
 		}
 		const restyledTopRow = lines[0] === undefined ? undefined : restyleTopBorderHorizontalRuns(lines[0], this.#glyphs);
-		const hiddenTopRow = restyledTopRow === undefined ? null : hideTopBorderLine(restyledTopRow, this.#glyphs, this.#topBorder);
+		const topBorder = this.#topBorderProvider === undefined ? this.#topBorder : this.#renderedTopBorder;
+		const hiddenTopRow = restyledTopRow === undefined ? null : hideTopBorderLine(restyledTopRow, this.#glyphs, topBorder);
 		const topRows =
 			this.#state.layout === "full" || this.#state.layout === "top-bottom"
 				? restyledTopRow === undefined

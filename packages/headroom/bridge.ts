@@ -50,7 +50,12 @@ export function applyCompressionResult(
 		return { ok: false, reason: "message-count-changed" };
 	}
 
-	const nextMessages = structuredClone(originalMessages) as AgentMessage[];
+	let nextMessages: AgentMessage[];
+	try {
+		nextMessages = structuredClone(originalMessages) as AgentMessage[];
+	} catch {
+		nextMessages = originalMessages.map(cloneMessageForCompression);
+	}
 	let appliedMessages = 0;
 
 	for (let index = 0; index < mappings.length; index++) {
@@ -58,19 +63,15 @@ export function applyCompressionResult(
 		const compressed = compressedMessages[index];
 		const validation = validateAlignedMessage(mapping.message, compressed);
 		if (!validation.ok) return validation;
-
 		const nextText = extractOpenAIText(compressed);
 		if (nextText === mapping.originalText) continue;
-
 		if (mapping.applyTo !== "toolResult") {
 			return { ok: false, reason: `non-candidate-changed:${mapping.message.role}` };
 		}
-
 		const target = nextMessages[mapping.sourceIndex] as AnyMessage;
 		if (target.role !== "toolResult") {
 			return { ok: false, reason: "source-role-mismatch" };
 		}
-
 		if (!replaceTextContent(target, nextText)) {
 			return { ok: false, reason: "target-content-unreplaceable" };
 		}
@@ -82,6 +83,16 @@ export function applyCompressionResult(
 	}
 
 	return { ok: true, messages: nextMessages, appliedMessages };
+}
+
+function cloneMessageForCompression(message: AgentMessage): AgentMessage {
+	const clone = { ...(message as AnyMessage) };
+	if (Array.isArray(clone.content)) {
+		clone.content = clone.content.map(part => (isRecord(part) ? { ...part } : part));
+	} else if (isRecord(clone.content)) {
+		clone.content = { ...clone.content };
+	}
+	return clone as AgentMessage;
 }
 
 function convertMessage(message: AnyMessage): OpenAIMessage | undefined {

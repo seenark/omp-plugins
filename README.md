@@ -20,7 +20,7 @@ TypeScript extensions; a feature selector enables only the requested one.
 ## Requirements
 
 - Bun 1.4.0
-- OMP 16.1.7 or newer with plugin support
+- OMP 18.0.1 or newer with plugin support
 
 Any Bun installation method is supported. Confirm the active version:
 

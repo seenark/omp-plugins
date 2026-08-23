@@ -21,12 +21,12 @@
         "access": "public"
     },
     "peerDependencies": {
-        "@oh-my-pi/pi-coding-agent": ">=16.1.7",
-        "@oh-my-pi/pi-tui": ">=16.1.7"
+        "@oh-my-pi/pi-coding-agent": ">=18.0.1",
+        "@oh-my-pi/pi-tui": ">=18.0.1"
     },
     "devDependencies": {
-        "@oh-my-pi/pi-coding-agent": ">=16.1.7",
-        "@oh-my-pi/pi-tui": ">=16.1.7",
+        "@oh-my-pi/pi-coding-agent": ">=18.0.1",
+        "@oh-my-pi/pi-tui": ">=18.0.1",
         "bun-types": "latest",
         "typescript": "latest"
     },

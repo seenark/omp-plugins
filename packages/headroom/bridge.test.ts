@@ -60,6 +60,33 @@ describe("Headroom compression bridge", () => {
 		expect(toolResult.content).toEqual([{ type: "text", text: "compressed result" }]);
 	});
 
+	it("preserves non-cloneable metadata while changing tool result text", () => {
+		const toolResult = {
+			...createToolResult("large result"),
+			details: { rows: 1000, transform() {} },
+		} as AgentMessage;
+		const messages = [toolResult];
+		const payload = buildCompressionPayload(messages, 1);
+		const compressed = payload.messages.map((message): OpenAIMessage =>
+			message.role === "tool" ? { ...message, content: "compressed result" } : message,
+		);
+
+		const result = applyCompressionResult(messages, payload.mappings, compressed, { minMessageChars: 1 });
+
+		expect(result.ok).toBe(true);
+		if (!result.ok) return;
+		expect(result.messages).not.toBe(messages);
+		expect((result.messages[0] as AgentMessage & { details: { transform: () => void } }).details.transform).toBe(
+			(toolResult as AgentMessage & { details: { transform: () => void } }).details.transform,
+		);
+		expect((result.messages[0] as Extract<AgentMessage, { role: "toolResult" }>).content).toEqual([
+			{ type: "text", text: "compressed result" },
+		]);
+		expect((messages[0] as Extract<AgentMessage, { role: "toolResult" }>).content).toEqual([
+			{ type: "text", text: "large result" },
+		]);
+	});
+
 	it("rejects a changed message count", () => {
 		const messages = [createUserMessage("go"), createAssistantMessage(), createToolResult("large result")];
 		const payload = buildCompressionPayload(messages, 5);

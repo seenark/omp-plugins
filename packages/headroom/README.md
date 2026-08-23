@@ -15,16 +15,16 @@ Quota/subscription usage is intentionally not included.
 
 ## Requirements
 
-- OMP 16.1.7 or newer with extension/plugin support.
+- OMP 18.0.1 or newer with extension/plugin support.
 - Headroom proxy installed and available:
 
 ```bash
 python3 -m pip install "headroom-ai[proxy]"
 ```
 
-- `@oh-my-pi/pi-coding-agent` `>=16.1.7`.
-- `@oh-my-pi/pi-tui` `>=16.1.7`.
-- `@oh-my-pi/pi-ai` `>=16.1.7`.
+- `@oh-my-pi/pi-coding-agent` `>=18.0.1`.
+- `@oh-my-pi/pi-tui` `>=18.0.1`.
+- `@oh-my-pi/pi-ai` `>=18.0.1`.
 
 ## Install in OMP
 
