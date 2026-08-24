@@ -665,7 +665,10 @@ export function getPromptBorderArgumentCompletions(argumentPrefix: string): Auto
 		return LAYOUT_NAMES.filter(layout => layout.startsWith(tokenPrefix)).map(completeLayoutSubcommand);
 	}
 	if (isBorderStyleName(first) && (parts.length === 1 || (parts.length === 2 && !hasTrailingSpace))) {
-		return LAYOUT_NAMES.filter(layout => layout.startsWith(tokenPrefix)).map(complete);
+		return LAYOUT_NAMES.filter(layout => layout.startsWith(tokenPrefix)).map(layout => ({
+			value: `${first} ${layout}`,
+			label: layout,
+		}));
 	}
 	return null;
 }

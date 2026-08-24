@@ -1392,14 +1392,15 @@ describe("getPromptBorderArgumentCompletions", () => {
 		]);
 	});
 
-	test("shows layouts after a completed style token", () => {
-		expect(getPromptBorderArgumentCompletions("double ")?.map(item => item.value)).toEqual([
-			"full",
-			"bottom",
-			"sides",
-			"top-bottom",
-			"default",
+	test("preserves the completed style token when suggesting layouts", () => {
+		expect(getPromptBorderArgumentCompletions("round ")?.map(item => item.value)).toEqual([
+			"round full",
+			"round bottom",
+			"round sides",
+			"round top-bottom",
+			"round default",
 		]);
+		expect(getPromptBorderArgumentCompletions("round f")?.map(item => item.value)).toEqual(["round full"]);
 	});
 
 	test("shows layouts after the layout subcommand", () => {
