@@ -836,10 +836,6 @@ function stripSideRowHorizontalPadding(line: string, glyphs: PromptBorderGlyphs)
 	});
 }
 
-function restyleTopBorderHorizontalRuns(line: string, glyphs: PromptBorderGlyphs): string {
-	if (glyphs.horizontal === " ") return line;
-	return line.replace(/([─━╌╍═-])\1+/gu, match => glyphs.horizontal.repeat([...match].length));
-}
 
 function locateTopBorderContent(
 	line: string,
@@ -860,11 +856,11 @@ function locateTopBorderContent(
 		return -1;
 	};
 
-	let plainContent = restyleTopBorderHorizontalRuns(topBorder.content, glyphs).replace(ANSI_SGR_PATTERN, "");
+	let plainContent = topBorder.content.replace(ANSI_SGR_PATTERN, "");
 	let firstContentIndex = findContentIndex(plainContent);
 	if (firstContentIndex === -1) {
 		for (let width = topBorder.width - 1; width > 0; width -= 1) {
-			const truncated = restyleTopBorderHorizontalRuns(truncateToWidth(topBorder.content, width), glyphs);
+			const truncated = truncateToWidth(topBorder.content, width);
 			plainContent = truncated.replace(ANSI_SGR_PATTERN, "");
 			firstContentIndex = findContentIndex(plainContent);
 			if (plainContent.length > 0 && firstContentIndex !== -1) break;
@@ -875,72 +871,6 @@ function locateTopBorderContent(
 		firstContentIndex,
 		lastContentIndex: firstContentIndex + [...plainContent].length - 1,
 	};
-}
-
-function colorTopBorderStructuralGlyphs(
-	line: string,
-	firstContentIndex: number,
-	lastContentIndex: number,
-	glyphs: PromptBorderGlyphs,
-	color: (str: string) => string,
-): string {
-	const visibleChars = [...line.replace(ANSI_SGR_PATTERN, "")];
-	const tokens = [...line.matchAll(/\x1b\[[0-9;:]*m|./gu)].map(match => match[0]);
-	let visibleIndex = 0;
-	let structuralRun = "";
-	let result = "";
-
-	const flushStructuralRun = (): void => {
-		if (structuralRun.length === 0) return;
-		result += color(structuralRun);
-		structuralRun = "";
-	};
-
-	for (const token of tokens) {
-		if (token.startsWith("\x1b[")) {
-			flushStructuralRun();
-			result += token;
-			continue;
-		}
-
-		const inContentRange = visibleIndex >= firstContentIndex && visibleIndex <= lastContentIndex;
-		const isHorizontalGlyph =
-			token === "─" ||
-			token === "━" ||
-			token === "╌" ||
-			token === "╍" ||
-			token === "═" ||
-			(glyphs.horizontal === "-" &&
-				token === "-" &&
-				(visibleChars[visibleIndex - 1] === "-" || visibleChars[visibleIndex + 1] === "-"));
-		const isStructuralGlyph = inContentRange && (isHorizontalGlyph || token === "╎" || token === "┃");
-		if (isStructuralGlyph) structuralRun += token;
-		else {
-			flushStructuralRun();
-			result += token;
-		}
-		visibleIndex += 1;
-	}
-	flushStructuralRun();
-	return result;
-}
-
-function restyleTopBorderLine(
-	line: string,
-	glyphs: PromptBorderGlyphs,
-	topBorder: EditorTopBorder | undefined,
-	color: (str: string) => string,
-): string {
-	const restyledLine = restyleTopBorderHorizontalRuns(line, glyphs);
-	const contentRange = locateTopBorderContent(restyledLine, glyphs, topBorder);
-	if (!contentRange) return restyledLine;
-	return colorTopBorderStructuralGlyphs(
-		restyledLine,
-		contentRange.firstContentIndex,
-		contentRange.lastContentIndex,
-		glyphs,
-		color,
-	);
 }
 
 function hideTopBorderLine(line: string, glyphs: PromptBorderGlyphs, topBorder: EditorTopBorder | undefined): string | null {
@@ -1304,10 +1234,9 @@ export class PromptBorderEditor extends CustomEditor {
 				leftFrame,
 				rightFrame,
 			);
-			return [restyleTopBorderLine(lines[0], this.#glyphs, topBorder, this.borderColor), ...glyphRows, ...autocompleteRows];
+			return [lines[0], ...glyphRows, ...autocompleteRows];
 		}
-		const restyledTopRow =
-			lines[0] === undefined ? undefined : restyleTopBorderLine(lines[0], this.#glyphs, topBorder, this.borderColor);
+		const restyledTopRow = lines[0];
 		const hiddenTopRow = restyledTopRow === undefined ? null : hideTopBorderLine(restyledTopRow, this.#glyphs, topBorder);
 		const topRows =
 			this.#state.layout === "full" || this.#state.layout === "top-bottom"

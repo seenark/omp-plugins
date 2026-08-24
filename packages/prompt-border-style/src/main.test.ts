@@ -275,48 +275,35 @@ describe("PromptBorderEditor", () => {
 		}
 	});
 
-	test("restyles status gap horizontal runs to the selected border glyph", () => {
+	test("preserves raw status gap glyphs from upstream top-border content", () => {
 		const editor = new PromptBorderEditor(theme, { style: "double", layout: "full" });
 		editor.setTopBorder({ content: "left ───── right", width: 16 });
 		const lines = editor.render(20);
-		expect(lines[0]).toBe("╔══left ═════ r…═══╗");
+		expect(lines[0]).toBe("╔══left ───── r…═══╗");
 	});
-	test("colors structural top-border gauge glyphs with the live border color", () => {
+	test("preserves upstream status content and ANSI styling", () => {
 		const semanticStart = "\x1b[38;5;45m";
 		const semanticReset = "\x1b[39m";
 		const semanticStatus = `${semanticStart}⏱ status${semanticReset}`;
 		const semanticModel = `${semanticStart}⬢ GPT-5.6${semanticReset}`;
-		const borderReset = "\x1b[39m";
+		const content = `${semanticStatus} ──╎──┃ ${semanticModel}`;
+		const topBorder = { content, width: 30 };
 		let activeBorderAnsi = "\x1b[38;5;196m";
 		const coloredTheme: EditorTheme = {
 			...theme,
-			borderColor: value => `${activeBorderAnsi}${value}${borderReset}`,
+			borderColor: value => `${activeBorderAnsi}${value}\x1b[39m`,
 		};
-		const content = `${semanticStatus} ──╎──┃ ${semanticModel}`;
-		const topBorder = { content, width: 30 };
 		const editor = new PromptBorderEditor(coloredTheme, { style: "round", layout: "full" });
 		editor.setTopBorder(topBorder);
 
 		const firstTopRow = editor.render(64)[0]!;
-		const firstStructuralColor = `${activeBorderAnsi}──╎──┃${borderReset}`;
-		expect(firstTopRow).toContain(firstStructuralColor);
-		expect(firstTopRow).toContain(semanticStatus);
-		expect(firstTopRow).toContain(semanticModel);
+		expect(firstTopRow).toContain(content);
+		expect(firstTopRow).toContain("─╎──┃");
 
 		activeBorderAnsi = "\x1b[38;5;27m";
 		const secondTopRow = editor.render(64)[0]!;
-		const secondStructuralColor = `${activeBorderAnsi}──╎──┃${borderReset}`;
-		expect(secondTopRow).toContain(secondStructuralColor);
-		expect(secondTopRow).not.toContain(firstStructuralColor);
-		expect(secondTopRow).toContain(semanticStatus);
-		expect(secondTopRow).toContain(semanticModel);
-
-		const hiddenEditor = new PromptBorderEditor(coloredTheme, { style: "round", layout: "bottom" });
-		hiddenEditor.setTopBorder(topBorder);
-		const hiddenTopRow = hiddenEditor.render(64)[0]!;
-		expect(hiddenTopRow).toContain(secondStructuralColor);
-		expect(hiddenTopRow).toContain(semanticStatus);
-		expect(hiddenTopRow).toContain(semanticModel);
+		expect(secondTopRow).toContain(content);
+		expect(secondTopRow).toContain("─╎──┃");
 	});
 
 
@@ -342,7 +329,7 @@ describe("PromptBorderEditor", () => {
 		const editor = new PromptBorderEditor(theme, { style: "double", layout: "bottom" });
 		editor.setTopBorder({ content: "left ───── right", width: 16 });
 		const lines = editor.render(20);
-		expect(lines[0]).toBe("   left ═════ r…    ");
+		expect(lines[0]).toBe("   left ───── r…    ");
 		expect(lines[1]).toBe("║  ▌               ║");
 		expect(lines.at(-1)).toBe("╚══════════════════╝");
 	});
@@ -351,7 +338,7 @@ describe("PromptBorderEditor", () => {
 		const editor = new PromptBorderEditor(theme, { style: "double", layout: "sides" });
 		editor.setTopBorder({ content: "left ───── right", width: 16 });
 		const lines = editor.render(20);
-		expect(lines).toEqual(["   left ═════ r…    ", "║  ▌               ║"]);
+		expect(lines).toEqual(["   left ───── r…    ", "║  ▌               ║"]);
 	});
 
 	test("preserves edge-aligned status glyphs when bottom layout hides top border chrome", () => {

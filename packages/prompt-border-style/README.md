@@ -9,7 +9,7 @@ Prompt border styles for the oh-my-pi input editor.
 This plugin registers a `/prompt-border` command that lets you switch the prompt editor border style and layout at runtime.
 
 It customizes:
-- the top status-line border glyphs
+- the surrounding top status-line frame glyphs while preserving the upstream status content/context gauge, including its colors and boundary markers
 - the editor side borders
 - a synthetic bottom border for layouts that use one
 - config-driven animated left/right cursor-row glyphs when glyph text is configured
@@ -79,7 +79,7 @@ If the arguments are invalid, the plugin shows the matching command usage string
 - `bottom` — keeps the upstream top/status row and adds only the separate synthetic bottom border
 - `sides` — keeps only the left and right editor borders around the body rows
 - `top-bottom` — keeps the top border and separate synthetic bottom border, hides side borders in body rows
-- `default` — uses the upstream editor layout, restyled with the selected border glyph set
+- `default` — uses the upstream editor layout with the selected surrounding border frame while preserving the upstream status content/context gauge
 
 For non-`default` layouts, the plugin inserts the synthetic bottom border before autocomplete rows so slash-command suggestions stay below the editor body.
 
