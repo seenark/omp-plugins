@@ -958,37 +958,7 @@ function replaceSideBodyLeftGlyph(line: string, glyphs: PromptBorderGlyphs, fram
 	if (plainChars.length < 4 || plainChars[0] !== glyphs.vertical || plainChars.at(-1) !== glyphs.vertical) return line;
 	if (plainChars[1] !== " " || plainChars[2] !== " ") return line;
 
-	const tokens = [...line.matchAll(/\x1b\[[0-9;:]*m|./gu)].map(match => match[0]);
-	let visibleIndex = 0;
-	let leftPaddingTokenIndex = -1;
-	for (let index = 0; index < tokens.length; index += 1) {
-		if (tokens[index]!.startsWith("\x1b[")) continue;
-		if (visibleIndex === 1) {
-			leftPaddingTokenIndex = index;
-			break;
-		}
-		visibleIndex += 1;
-	}
-	if (leftPaddingTokenIndex === -1) return line;
-
-	const prefix = tokens.slice(0, leftPaddingTokenIndex).join("");
-	const suffixTokens = tokens.slice(leftPaddingTokenIndex + 1);
-	let result = `${prefix}${frame}${suffixTokens.join("")}`;
-	let overflow = visibleWidth(result.replace(ANSI_SGR_PATTERN, "")) - visibleWidth(plain);
-
-	for (let index = suffixTokens.length - 2; overflow > 0 && index >= 0; index -= 1) {
-		const token = suffixTokens[index]!;
-		if (token.startsWith("\x1b[")) continue;
-		if (token !== " ") continue;
-		suffixTokens.splice(index, 1);
-		overflow -= 1;
-	}
-
-	let fittedFrame = frame;
-	if (overflow > 0) {
-		fittedFrame = truncateToWidth(frame, Math.max(1, visibleWidth(frame) - overflow), "");
-	}
-	return `${prefix}${fittedFrame}${suffixTokens.join("")}`;
+	return replaceVisibleGlyphAt(line, 1, 1, frame);
 }
 
 function replaceBodyRightGlyph(line: string, glyphs: PromptBorderGlyphs, frame: string): string {

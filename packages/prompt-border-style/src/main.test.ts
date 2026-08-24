@@ -3,7 +3,8 @@ import { mkdtemp } from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
 import type { ExtensionAPI } from "@oh-my-pi/pi-coding-agent";
-import { CURSOR_MARKER, type AutocompleteProvider, type EditorTheme } from "@oh-my-pi/pi-tui";
+import { CURSOR_MARKER, visibleWidth, type AutocompleteProvider, type EditorTheme } from "@oh-my-pi/pi-tui";
+
 import promptBorderStyle, {
 	DEFAULT_PROMPT_BORDER_CONFIG,
 	PromptBorderEditor,
@@ -386,6 +387,8 @@ describe("PromptBorderEditor", () => {
 	});
 
 	test("renders configured left glyph frame in full layout body row with input spacing", () => {
+		const baselineEditor = new PromptBorderEditor(theme, { style: "double", layout: "full" });
+		const baselineRow = baselineEditor.render(8)[1] ?? "";
 		const editor = new PromptBorderEditor(theme, { style: "double", layout: "full" }, {
 			style: "double",
 			layout: "full",
@@ -393,7 +396,24 @@ describe("PromptBorderEditor", () => {
 			rightGlyph: { frameMs: 70, glyphs: "", frames: [] },
 			spinnerGlyphs: emptySpinnerGlyphs(),
 		});
-		expect(editor.render(8)).toEqual(["╔══════╗", "║AB ▌  ║", "╚══════╝"]);
+		const lines = editor.render(8);
+		const renderedRow = lines[1] ?? "";
+		expect(lines).toEqual(["╔══════╗", "║AB▌   ║", "╚══════╝"]);
+		expect(visibleWidth(renderedRow)).toBe(visibleWidth(baselineRow));
+		expect(visibleWidth(renderedRow.slice(0, renderedRow.indexOf("▌")))).toBe(
+			visibleWidth(baselineRow.slice(0, baselineRow.indexOf("▌"))),
+		);
+	});
+
+	test("clips a left glyph frame to the two-cell side gutter", () => {
+		const editor = new PromptBorderEditor(theme, { style: "double", layout: "full" }, {
+			style: "double",
+			layout: "full",
+			leftGlyph: { frameMs: 70, glyphs: "ABCD", frames: ["ABCD"] },
+			rightGlyph: { frameMs: 70, glyphs: "", frames: [] },
+			spinnerGlyphs: emptySpinnerGlyphs(),
+		});
+		expect(editor.render(8)).toEqual(["╔══════╗", "║AB▌   ║", "╚══════╝"]);
 	});
 
 	test("renders configured right glyph frame in full layout body row", () => {
@@ -409,6 +429,20 @@ describe("PromptBorderEditor", () => {
 		expect(lines.find(line => line.includes("CD"))).toContain("▌");
 		expect(lines[0]?.includes("CD")).toBe(false);
 		expect(lines.at(-1)?.includes("CD")).toBe(false);
+	});
+
+	test("keeps right glyph placement when the left frame consumes the side gutter", () => {
+		const editor = new PromptBorderEditor(theme, { style: "double", layout: "full" }, {
+			style: "double",
+			layout: "full",
+			leftGlyph: { frameMs: 70, glyphs: "AB", frames: ["AB"] },
+			rightGlyph: { frameMs: 70, glyphs: "CD", frames: ["CD"] },
+			spinnerGlyphs: emptySpinnerGlyphs(),
+		});
+		const row = editor.render(8)[1] ?? "";
+		expect(row).toBe("║AB▌ CD║");
+		expect(visibleWidth(row)).toBe(8);
+		expect(row.indexOf("CD")).toBeGreaterThan(row.indexOf("▌"));
 	});
 
 	test("renders left and right glyphs only on cursor row in multiline full layout", () => {
