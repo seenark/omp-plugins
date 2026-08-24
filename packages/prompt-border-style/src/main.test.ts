@@ -281,6 +281,44 @@ describe("PromptBorderEditor", () => {
 		const lines = editor.render(20);
 		expect(lines[0]).toBe("╔══left ═════ r…═══╗");
 	});
+	test("colors structural top-border gauge glyphs with the live border color", () => {
+		const semanticStart = "\x1b[38;5;45m";
+		const semanticReset = "\x1b[39m";
+		const semanticStatus = `${semanticStart}⏱ status${semanticReset}`;
+		const semanticModel = `${semanticStart}⬢ GPT-5.6${semanticReset}`;
+		const borderReset = "\x1b[39m";
+		let activeBorderAnsi = "\x1b[38;5;196m";
+		const coloredTheme: EditorTheme = {
+			...theme,
+			borderColor: value => `${activeBorderAnsi}${value}${borderReset}`,
+		};
+		const content = `${semanticStatus} ──╎──┃ ${semanticModel}`;
+		const topBorder = { content, width: 30 };
+		const editor = new PromptBorderEditor(coloredTheme, { style: "round", layout: "full" });
+		editor.setTopBorder(topBorder);
+
+		const firstTopRow = editor.render(64)[0]!;
+		const firstStructuralColor = `${activeBorderAnsi}──╎──┃${borderReset}`;
+		expect(firstTopRow).toContain(firstStructuralColor);
+		expect(firstTopRow).toContain(semanticStatus);
+		expect(firstTopRow).toContain(semanticModel);
+
+		activeBorderAnsi = "\x1b[38;5;27m";
+		const secondTopRow = editor.render(64)[0]!;
+		const secondStructuralColor = `${activeBorderAnsi}──╎──┃${borderReset}`;
+		expect(secondTopRow).toContain(secondStructuralColor);
+		expect(secondTopRow).not.toContain(firstStructuralColor);
+		expect(secondTopRow).toContain(semanticStatus);
+		expect(secondTopRow).toContain(semanticModel);
+
+		const hiddenEditor = new PromptBorderEditor(coloredTheme, { style: "round", layout: "bottom" });
+		hiddenEditor.setTopBorder(topBorder);
+		const hiddenTopRow = hiddenEditor.render(64)[0]!;
+		expect(hiddenTopRow).toContain(secondStructuralColor);
+		expect(hiddenTopRow).toContain(semanticStatus);
+		expect(hiddenTopRow).toContain(semanticModel);
+	});
+
 
 
 	test("uses lazy top-border providers in non-full layouts", () => {
