@@ -6,6 +6,7 @@ import type { ExtensionAPI } from "@oh-my-pi/pi-coding-agent";
 import { CURSOR_MARKER, visibleWidth, type AutocompleteProvider, type EditorTheme } from "@oh-my-pi/pi-tui";
 
 import promptBorderStyle, {
+	DEFAULT_CONTEXT_RAIL_CONFIG,
 	DEFAULT_PROMPT_BORDER_CONFIG,
 	PromptBorderEditor,
 	borderStyles,
@@ -14,16 +15,19 @@ import promptBorderStyle, {
 	ensurePromptBorderConfigFile,
 	formatPromptLoadingGlyphDemoSummary,
 	formatSpinnerFrameDebugReport,
+	getContextRailArgumentCompletions,
 	getPromptBorderArgumentCompletions,
 	getPromptLoadingGlyphArgumentCompletions,
 	installSpinnerGlyphFrames,
 	normalizePromptBorderConfig,
+	parseContextRailArgs,
 	parseGlyphFrames,
 	parsePromptBorderArgs,
 	parsePromptLoadingGlyphArgs,
 	readPromptBorderConfig,
 	renderBottomBorderLine,
 	replaceBodyLeftGlyph,
+	writeContextRailConfigSelection,
 	writePromptBorderConfigSelection,
 } from "./main";
 
@@ -597,6 +601,7 @@ describe("prompt border config", () => {
 			leftGlyph: { frameMs: 70, glyphs: "", frames: [] },
 			rightGlyph: { frameMs: 70, glyphs: "", frames: [] },
 			spinnerGlyphs: emptySpinnerGlyphs(),
+			contextRail: { ...DEFAULT_CONTEXT_RAIL_CONFIG },
 		});
 		expect(
 			normalizePromptBorderConfig({
@@ -620,6 +625,7 @@ describe("prompt border config", () => {
 				status: { frameMs: 120, glyphs: "LL  MM", frames: ["LL", "MM"] },
 				activity: { frameMs: 140, glyphs: "QQ  WW", frames: ["QQ", "WW"] },
 			},
+			contextRail: { ...DEFAULT_CONTEXT_RAIL_CONFIG },
 		});
 	});
 
@@ -687,6 +693,7 @@ describe("prompt border config", () => {
 				status: { frameMs: 85, glyphs: "S0  S1", frames: ["S0", "S1"] },
 				activity: { frameMs: 95, glyphs: "A0  A1", frames: ["A0", "A1"] },
 			},
+			contextRail: { ...DEFAULT_CONTEXT_RAIL_CONFIG },
 		});
 	});
 
@@ -786,6 +793,7 @@ describe("prompt border config", () => {
 				status: { frameMs: 85, glyphs: "S0  S1", frames: ["S0", "S1"] },
 				activity: { frameMs: 95, glyphs: "A0  A1", frames: ["A0", "A1"] },
 			},
+			contextRail: { ...DEFAULT_CONTEXT_RAIL_CONFIG },
 		});
 		expect(saved.theme).toBe("keep-me");
 		expect(saved.promptBorder.style).toBe("round");
@@ -823,6 +831,35 @@ describe("prompt border config", () => {
 		expect(saved.welcomeScreen.mainText).toBe("Keep Me");
 		expect(saved.promptBorder.style).toBe("round");
 		expect(saved.promptBorder.layout).toBe("sides");
+	});
+	test("writes context rail settings without changing prompt border settings", async () => {
+		const dir = await mkdtemp(path.join(os.tmpdir(), "prompt-border-"));
+		const configPath = path.join(dir, "config.json");
+		await Bun.write(
+			configPath,
+			JSON.stringify({
+				promptBorder: { style: "round", layout: "full", leftGlyph: { frameMs: 80 } },
+				contextRail: { placement: "inside", visibility: "always" },
+			}),
+		);
+
+		const config = await writeContextRailConfigSelection(
+			{ placement: "below", visibility: "toggle", pointer: "hidden", labelPosition: "right" },
+			configPath,
+		);
+		const saved = JSON.parse(await Bun.file(configPath).text());
+
+		expect(config.contextRail).toEqual({
+			enabled: true,
+			placement: "below",
+			visibility: "toggle",
+			pointer: "hidden",
+			labels: "auto",
+			labelPosition: "right",
+		});
+		expect(saved.promptBorder.style).toBe("round");
+		expect(saved.contextRail.placement).toBe("below");
+		expect(saved.contextRail.visibility).toBe("toggle");
 	});
 });
 
@@ -1431,6 +1468,67 @@ describe("promptBorderStyle", () => {
 		expect(await Bun.file(statusSpinnerGlyphPath).text()).toBe("S0  S1");
 		expect(await Bun.file(activitySpinnerGlyphPath).text()).toBe("A0  A1");
 		expect(notifications.at(-1)).toBe("Prompt border: round sides");
+	});
+});
+
+describe("Context Rail command", () => {
+	test("parses placement, visibility, and visual options", () => {
+		expect(parseContextRailArgs("placement below")).toEqual({ kind: "set", update: { placement: "below" } });
+		expect(parseContextRailArgs("visibility collapse-while-typing")).toEqual({
+			kind: "set",
+			update: { visibility: "collapse-while-typing" },
+		});
+		expect(parseContextRailArgs("pointer hidden")).toEqual({ kind: "set", update: { pointer: "hidden" } });
+		expect(parseContextRailArgs("labels bar-only")).toEqual({ kind: "set", update: { labels: "bar-only" } });
+		expect(parseContextRailArgs("position right")).toEqual({ kind: "set", update: { labelPosition: "right" } });
+		expect(parseContextRailArgs("position diagonal")).toEqual({ kind: "invalid" });
+		expect(parseContextRailArgs("nope")).toEqual({ kind: "invalid" });
+	});
+
+	test("completes Context Rail subcommands without dropping their parent token", () => {
+		expect(getContextRailArgumentCompletions("")?.map(item => item.value)).toEqual(
+			expect.arrayContaining(["on", "off", "toggle", "status", "placement", "visibility", "pointer", "labels", "position"]),
+		);
+		expect(getContextRailArgumentCompletions("placement ")?.map(item => item.value)).toEqual([
+			"placement inside",
+			"placement above",
+			"placement below",
+		]);
+		expect(getContextRailArgumentCompletions("pointer h")?.map(item => item.value)).toEqual(["pointer hidden"]);
+		expect(getContextRailArgumentCompletions("position ")?.map(item => item.value)).toEqual([
+			"position left",
+			"position center",
+			"position right",
+		]);
+		expect(getContextRailArgumentCompletions("position r")?.map(item => item.value)).toEqual(["position right"]);
+	});
+	test("includes the persisted label position in status", async () => {
+		const dir = await mkdtemp(path.join(os.tmpdir(), "prompt-border-"));
+		const configPath = path.join(dir, "config.json");
+		await Bun.write(configPath, JSON.stringify({ contextRail: { labelPosition: "right" } }));
+		let contextRailHandler: ((args: string, ctx: { hasUI: true; ui: { theme: unknown; notify: (message: string, level?: string) => void } }) => Promise<void>) | undefined;
+		const notifications: string[] = [];
+		const pi = {
+			setLabel: () => {},
+			on: () => {},
+			registerCommand: (name: string, command: { handler: typeof contextRailHandler }) => {
+				if (name === "context-rail") contextRailHandler = command.handler;
+			},
+		} as unknown as ExtensionAPI;
+
+		promptBorderStyle(pi, configPath);
+		await contextRailHandler?.("status", {
+			hasUI: true,
+			ui: {
+				theme: {
+					symbol: () => "",
+					fg: (_name: string, value: string) => value,
+				},
+				notify: (message: string) => notifications.push(message),
+			},
+		});
+
+		expect(notifications.at(-1)).toContain("label-position right");
 	});
 });
 

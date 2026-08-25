@@ -15,6 +15,8 @@ It customizes:
 - config-driven animated left/right cursor-row glyphs when glyph text is configured
 - config-driven status and activity spinner glyphs that preserve Oh My Pi defaults for any unconfigured spinner group
 - slash-command argument completions for the command itself
+- the plugin-owned Context Rail, which renders independently from OMP's native context gauge
+- configurable Context Rail placement (`inside`, `above`, or `below`), visibility mode, pointer, adaptive percentage label, and label position (`left`, `center`, or `right`)
 
 The default active state is:
 - style: `double`
@@ -50,6 +52,12 @@ This repo exposes the extension through `omp.extensions` in `package.json`, poin
 /prompt-border <style> [layout]
 /prompt-border layout <layout>
 /prompt-border reset
+/context-rail [status|on|off|toggle]
+/context-rail placement <inside|above|below>
+/context-rail visibility <always|toggle|collapse-while-typing>
+/context-rail pointer <auto|visible|hidden>
+/context-rail labels <auto|bar-only|always>
+/context-rail position <left|center|right>
 /prompt-loading-glyphs debug <frames|demo|on|off>
 ```
 
@@ -85,9 +93,11 @@ For non-`default` layouts, the plugin inserts the synthetic bottom border before
 
 ## Configuration
 
-The plugin reads optional settings from `~/.config/codesook-omp/config.json` and writes `style`/`layout` changes there when `/prompt-border` applies a new selection. That JSON is safe to share across computers.
+The plugin Context Rail is independent from OMP's `statusLine.contextLine` setting. OMP's native gauge may remain enabled, be reduced to its percentage mode, or be disabled separately. The plugin reads context usage through the extension API and degrades to a muted rail when usage is unavailable; predictive compaction markers are only rendered when boundary data is available.
 
-`style` and `layout` set the initial prompt border. The same shared file may also contain a `welcomeScreen` section managed by `codesook-omp`; this plugin preserves that section when it updates `promptBorder`. Local glyph frame text lives next to the JSON in `~/.config/codesook-omp/prompt-border-left-glyphs.txt`, `~/.config/codesook-omp/prompt-border-right-glyphs.txt`, `~/.config/codesook-omp/prompt-border-status-spinner-glyphs.txt`, and `~/.config/codesook-omp/prompt-border-activity-spinner-glyphs.txt`. Frames are whitespace-separated in those text files. Oh My Pi currently has two spinner groups: status and activity. Status frames are used by theme.spinnerFrames/status UI spinners; activity frames are used by getSymbolTheme().spinnerFrames/loading activity spinners.
+The plugin reads optional settings from `~/.config/codesook-omp/config.json` and writes `style`/`layout` changes there when `/prompt-border` applies a new selection. `/context-rail` updates, including `labelPosition`, are persisted in the same file. That JSON is safe to share across computers.
+
+`style` and `layout` set the initial prompt border, while the `contextRail` settings set the initial rail behavior. The same shared file may also contain a `welcomeScreen` section managed by `codesook-omp`; this plugin preserves that section when it updates `promptBorder`. Local glyph frame text lives next to the JSON in `~/.config/codesook-omp/prompt-border-left-glyphs.txt`, `~/.config/codesook-omp/prompt-border-right-glyphs.txt`, `~/.config/codesook-omp/prompt-border-status-spinner-glyphs.txt`, and `~/.config/codesook-omp/prompt-border-activity-spinner-glyphs.txt`. Frames are whitespace-separated in those text files. Oh My Pi currently has two spinner groups: status and activity. Status frames are used by theme.spinnerFrames/status UI spinners; activity frames are used by getSymbolTheme().spinnerFrames/loading activity…
 
 ```json
 {
@@ -108,9 +118,19 @@ The plugin reads optional settings from `~/.config/codesook-omp/config.json` and
         "frameMs": 80
       }
     }
+  },
+  "contextRail": {
+    "enabled": true,
+    "placement": "inside",
+    "visibility": "always",
+    "pointer": "auto",
+    "labels": "auto",
+    "labelPosition": "center"
   }
 }
 ```
+
+`contextRail.labelPosition` controls where the percentage label is placed on the rail. The accepted values are `left`, `center`, and `right`; `center` is the default and canonical value for the middle position. Marker cells remain protected, so a label may shift or be omitted when it cannot fit safely.
 
 `spinnerGlyphs.status.frameMs` and `spinnerGlyphs.activity.frameMs` set the desired source-frame duration in milliseconds for each spinner group.
 
@@ -172,8 +192,15 @@ For example, with `frameMs = 20` a source list such as `F0 F1 F2 F3 F4 F5 F6 F7`
 /prompt-border layout sides
 /prompt-border layout default
 /prompt-border reset
+/context-rail status
+/context-rail placement inside
+/context-rail placement below
+/context-rail visibility collapse-while-typing
+/context-rail pointer hidden
+/context-rail position left
+/context-rail position center
+/context-rail position right
 ```
-
 ## Autocomplete behavior
 
 Typing `/prompt-border ` and then pressing Space or Tab opens command completions.
@@ -196,10 +223,8 @@ Run the typecheck:
 bun run check
 ```
 
-Run the tests:
-
 ```bash
-bun test src/main.test.ts
+bun test src/context-rail.test.ts src/main.test.ts
 ```
 
 ## Release
@@ -212,7 +237,9 @@ bun run publish:prompt-border-style
 
 ## Repository contents
 
-- `src/main.ts` — plugin implementation, border rendering, status/activity spinner glyph patching, and command registration
-- `src/main.test.ts` — parser, renderer, command, and completion tests
+- `src/main.ts` — plugin implementation, border rendering, Context Rail, status/activity spinner glyph patching, and command registration
+- `src/context-rail.ts` — pure Context Rail config normalization and ANSI-safe renderer
+- `src/main.test.ts` — parser, renderer, config, command, and completion tests
+- `src/context-rail.test.ts` — Context Rail rendering and edge-state tests
 - `package.json` — package metadata, peer dependencies, scripts, and OMP extension entrypoint
 - `tsconfig.json` — TypeScript configuration

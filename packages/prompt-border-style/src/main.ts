@@ -14,7 +14,22 @@ import {
 	type EditorTheme,
 	type EditorTopBorder,
 } from "@oh-my-pi/pi-tui";
-
+import {
+	DEFAULT_CONTEXT_RAIL_CONFIG,
+	type ContextRailBoundaries,
+	type ContextRailConfig,
+	type ContextRailLabels,
+	type ContextRailLabelPosition,
+	type ContextRailPalette,
+	type ContextRailPlacement,
+	type ContextRailPointer,
+	type ContextRailRenderOptions,
+	type ContextRailUsage,
+	type ContextRailVisibility,
+	normalizeContextRailConfig,
+	renderContextRail,
+} from "./context-rail";
+export { DEFAULT_CONTEXT_RAIL_CONFIG } from "./context-rail";
 export type BorderStyleName =
 	| "round"
 	| "sharp"
@@ -56,7 +71,101 @@ export type PromptBorderConfig = {
 	leftGlyph: PromptBorderGlyphConfig;
 	rightGlyph: PromptBorderGlyphConfig;
 	spinnerGlyphs: PromptBorderSpinnerGlyphConfig;
+	contextRail: ContextRailConfig;
 };
+
+export type PromptBorderConfigInput = Omit<PromptBorderConfig, "contextRail"> & {
+	contextRail?: ContextRailConfig;
+};
+
+type ContextRailRuntime = {
+	config: ContextRailConfig;
+	usage: ContextRailUsage | undefined;
+	boundaries: ContextRailBoundaries | undefined;
+	toggledVisible: boolean;
+	compactUntil: number;
+	compactTimer: Timer | undefined;
+	requestRender: (() => void) | undefined;
+	palette: (horizontal: string) => ContextRailPalette;
+};
+
+const CONTEXT_RAIL_WIDGET_KEY = "prompt-context-rail";
+const CONTEXT_RAIL_COMPACT_IDLE_MS = 650;
+
+function createContextRailRuntime(
+	config: ContextRailConfig,
+	palette: (horizontal: string) => ContextRailPalette,
+): ContextRailRuntime {
+	return {
+		config,
+		usage: undefined,
+		boundaries: undefined,
+		toggledVisible: true,
+		compactUntil: 0,
+		compactTimer: undefined,
+		requestRender: undefined,
+		palette,
+	};
+}
+
+function contextRailVisible(runtime: ContextRailRuntime): boolean {
+	return runtime.config.enabled && (runtime.config.visibility !== "toggle" || runtime.toggledVisible);
+}
+
+function contextRailCompact(runtime: ContextRailRuntime, now = Date.now()): boolean {
+	return runtime.config.visibility === "collapse-while-typing" && runtime.compactUntil > now;
+}
+
+function updateContextRailUsage(runtime: ContextRailRuntime, usage: ContextRailUsage | undefined): boolean {
+	const previous = runtime.usage;
+	if (
+		previous?.tokens === usage?.tokens &&
+		previous?.contextWindow === usage?.contextWindow &&
+		previous?.percent === usage?.percent
+	) {
+		return false;
+	}
+	runtime.usage = usage;
+	runtime.requestRender?.();
+	return true;
+}
+
+function markContextRailDraftActivity(runtime: ContextRailRuntime, text: string): void {
+	if (runtime.config.visibility !== "collapse-while-typing") return;
+	clearTimeout(runtime.compactTimer);
+	runtime.compactTimer = undefined;
+	if (text.length === 0) {
+		runtime.compactUntil = 0;
+		runtime.requestRender?.();
+		return;
+	}
+	runtime.compactUntil = Date.now() + CONTEXT_RAIL_COMPACT_IDLE_MS;
+	runtime.compactTimer = setTimeout(() => {
+		runtime.compactTimer = undefined;
+		runtime.compactUntil = 0;
+		runtime.requestRender?.();
+	}, CONTEXT_RAIL_COMPACT_IDLE_MS);
+	runtime.compactTimer.unref?.();
+}
+
+function createContextRailPalette(theme: Theme, horizontal: string): ContextRailPalette {
+	const speculation = theme.symbol("context.speculation") || "╎";
+	const threshold = theme.symbol("context.compaction") || "┃";
+	return {
+		horizontal,
+		pointer: "●",
+		speculation,
+		threshold,
+		used: value => theme.fg("statusLineContext", value),
+		unused: value => theme.fg("border", value),
+		normal: value => theme.fg("statusLineContext", value),
+		warning: value => theme.fg("warning", value),
+		purple: value => theme.fg("thinkingHigh", value),
+		error: value => theme.fg("error", value),
+		muted: value => theme.fg("muted", value),
+		label: value => theme.fg("statusLineContext", value),
+	};
+}
 
 export type PromptBorderGlyphs = Pick<
 	EditorTheme["symbols"]["boxRound"],
@@ -84,6 +193,13 @@ export const borderStyles: Record<BorderStyleName, PromptBorderGlyphs> = {
 const STYLE_NAMES = Object.keys(borderStyles) as BorderStyleName[];
 const LAYOUT_NAMES = ["full", "bottom", "sides", "top-bottom", "default"] as const;
 const PRIMARY_COMMAND_OPTIONS = [...STYLE_NAMES, "layout", "reset"] as const;
+const CONTEXT_RAIL_PLACEMENTS = ["inside", "above", "below"] as const satisfies readonly ContextRailPlacement[];
+const CONTEXT_RAIL_VISIBILITIES = ["always", "toggle", "collapse-while-typing"] as const satisfies readonly ContextRailVisibility[];
+const CONTEXT_RAIL_POINTERS = ["auto", "visible", "hidden"] as const satisfies readonly ContextRailPointer[];
+const CONTEXT_RAIL_LABELS = ["auto", "bar-only", "always"] as const satisfies readonly ContextRailLabels[];
+const CONTEXT_RAIL_POSITIONS = ["left", "center", "right"] as const satisfies readonly ContextRailLabelPosition[];
+const CONTEXT_RAIL_USAGE =
+	"Usage: /context-rail [on|off|toggle|status] | placement <inside|above|below> | visibility <always|toggle|collapse-while-typing> | pointer <auto|visible|hidden> | labels <auto|bar-only|always> | position <left|center|right>";
 const USAGE = `Usage: /prompt-border <${STYLE_NAMES.join("|")}> [full|bottom|sides|top-bottom|default] | /prompt-border layout <full|bottom|sides|top-bottom|default> | /prompt-border reset`;
 const PROMPT_LOADING_GLYPHS_USAGE = "Usage: /prompt-loading-glyphs debug <frames|demo|on|off>";
 const DEFAULT_GLYPH_FRAME_MS = 70;
@@ -216,7 +332,7 @@ function formatAllSpinnerFrameDebugReports(config: PromptBorderConfig): string {
 	].join("\n\n");
 }
 
-export function formatPromptLoadingGlyphDemoSummary(config: PromptBorderConfig): string {
+export function formatPromptLoadingGlyphDemoSummary(config: PromptBorderConfigInput): string {
 	return [
 		"Prompt loading glyphs demo",
 		...SPINNER_GLYPH_SLOTS.map(slot => {
@@ -237,6 +353,7 @@ export const DEFAULT_PROMPT_BORDER_CONFIG: PromptBorderConfig = {
 	leftGlyph: { frameMs: DEFAULT_GLYPH_FRAME_MS, glyphs: "", frames: [] },
 	rightGlyph: { frameMs: DEFAULT_GLYPH_FRAME_MS, glyphs: "", frames: [] },
 	spinnerGlyphs: emptySpinnerGlyphConfig(),
+	contextRail: { ...DEFAULT_CONTEXT_RAIL_CONFIG },
 };
 
 export const EXAMPLE_PROMPT_BORDER_CONFIG: PromptBorderConfig = {
@@ -253,6 +370,7 @@ export const EXAMPLE_PROMPT_BORDER_CONFIG: PromptBorderConfig = {
 		frames: [],
 	},
 	spinnerGlyphs: emptySpinnerGlyphConfig(),
+	contextRail: { ...DEFAULT_CONTEXT_RAIL_CONFIG },
 };
 
 export type PromptBorderAction =
@@ -262,6 +380,7 @@ export type PromptBorderAction =
 
 let activeBorder: PromptBorderState = { style: "double", layout: "full" };
 let activeConfig: PromptBorderConfig = DEFAULT_PROMPT_BORDER_CONFIG;
+let activeContextRailRuntime: ContextRailRuntime | undefined;
 let didReadInvalidConfig = false;
 const promptLoadingGlyphDebugEnabledSessions = new WeakSet<ExtensionUIContext["setWorkingMessage"]>();
 const promptLoadingGlyphDebugMountedSessions = new WeakSet<ExtensionUIContext["setWidget"]>();
@@ -287,6 +406,45 @@ function clearPromptLoadingGlyphDebugUi(ctx: { ui: Pick<ExtensionUIContext, "set
 		setWorkingMessage();
 		promptLoadingGlyphDebugEnabledSessions.delete(setWorkingMessage);
 	}
+}
+
+function contextRailRenderOptions(runtime: ContextRailRuntime): ContextRailRenderOptions {
+	return {
+		compact: contextRailCompact(runtime),
+		pointer: runtime.config.pointer,
+		labels: runtime.config.labels,
+		labelPosition: runtime.config.labelPosition,
+	};
+}
+
+function mountContextRailWidget(ctx: { hasUI: boolean; ui: { setWidget?: ExtensionUIContext["setWidget"] } }): void {
+	const runtime = activeContextRailRuntime;
+	if (!ctx.hasUI || ctx.ui.setWidget === undefined || runtime === undefined || !contextRailVisible(runtime) || runtime.config.placement === "inside") {
+		ctx.ui.setWidget?.(CONTEXT_RAIL_WIDGET_KEY, undefined);
+		return;
+	}
+	const placement = runtime.config.placement === "above" ? "aboveEditor" : "belowEditor";
+	ctx.ui.setWidget(
+		CONTEXT_RAIL_WIDGET_KEY,
+		(_tui, theme) => ({
+			render(width: number): readonly string[] {
+				if (!contextRailVisible(runtime)) return [];
+				const horizontal = theme.boxRound.horizontal;
+				return [
+					renderContextRail(
+						width,
+						createContextRailPalette(theme, horizontal),
+						runtime.usage,
+						runtime.boundaries,
+						contextRailRenderOptions(runtime),
+					),
+				];
+			},
+			invalidate(): void {},
+			dispose(): void {},
+		}),
+		{ placement },
+	);
 }
 
 function mountPromptLoadingGlyphDebugWidget(
@@ -355,13 +513,26 @@ function toPromptBorderJson(config: PromptBorderConfig): Record<string, unknown>
 	};
 }
 
+function toContextRailJson(config: ContextRailConfig): Record<string, unknown> {
+	return {
+		enabled: config.enabled,
+		placement: config.placement,
+		visibility: config.visibility,
+		pointer: config.pointer,
+		labels: config.labels,
+		labelPosition: config.labelPosition,
+	};
+}
+
 function mergePromptBorderJson(raw: Record<string, unknown>): Record<string, unknown> {
 	const merged = { ...raw };
 	const promptBorder = isRecord(raw.promptBorder) ? { ...raw.promptBorder } : {};
+	const contextRail = isRecord(raw.contextRail) ? { ...raw.contextRail } : {};
 	const leftGlyph = isRecord(promptBorder.leftGlyph) ? { ...promptBorder.leftGlyph } : {};
 	const rightGlyph = isRecord(promptBorder.rightGlyph) ? { ...promptBorder.rightGlyph } : {};
 	const spinnerGlyphs = isRecord(promptBorder.spinnerGlyphs) ? { ...promptBorder.spinnerGlyphs } : {};
 	const examplePromptBorder = toPromptBorderJson(EXAMPLE_PROMPT_BORDER_CONFIG);
+	const exampleContextRail = toContextRailJson(EXAMPLE_PROMPT_BORDER_CONFIG.contextRail);
 	const exampleLeftGlyph = isRecord(examplePromptBorder.leftGlyph) ? examplePromptBorder.leftGlyph : {};
 	const exampleRightGlyph = isRecord(examplePromptBorder.rightGlyph) ? examplePromptBorder.rightGlyph : {};
 	const exampleSpinnerGlyphs = isRecord(examplePromptBorder.spinnerGlyphs) ? examplePromptBorder.spinnerGlyphs : {};
@@ -390,6 +561,7 @@ function mergePromptBorderJson(raw: Record<string, unknown>): Record<string, unk
 	promptBorder.rightGlyph = rightGlyph;
 	promptBorder.spinnerGlyphs = spinnerGlyphs;
 	merged.promptBorder = promptBorder;
+	merged.contextRail = { ...exampleContextRail, ...contextRail };
 	return merged;
 }
 
@@ -421,6 +593,7 @@ export function normalizePromptBorderConfig(
 	glyphTexts: Partial<Record<PromptBorderGlyphSlot, string>> = {},
 ): PromptBorderConfig {
 	const promptBorder = isRecord(raw) && isRecord(raw.promptBorder) ? raw.promptBorder : {};
+	const contextRail = isRecord(raw) && isRecord(raw.contextRail) ? raw.contextRail : {};
 	const leftGlyph = isRecord(promptBorder.leftGlyph) ? promptBorder.leftGlyph : {};
 	const rightGlyph = isRecord(promptBorder.rightGlyph) ? promptBorder.rightGlyph : {};
 	const spinnerGlyphs = isRecord(promptBorder.spinnerGlyphs) ? promptBorder.spinnerGlyphs : {};
@@ -474,6 +647,7 @@ export function normalizePromptBorderConfig(
 				DEFAULT_SPINNER_GLYPH_FRAME_MS,
 			),
 		},
+		contextRail: normalizeContextRailConfig(contextRail),
 	};
 }
 
@@ -483,7 +657,10 @@ async function ensurePersistedPromptBorderConfig(
 	await mkdir(path.dirname(configPath), { recursive: true });
 	const file = Bun.file(configPath);
 	if (!(await file.exists())) {
-		const created = { promptBorder: toPromptBorderJson(EXAMPLE_PROMPT_BORDER_CONFIG) };
+		const created = {
+			promptBorder: toPromptBorderJson(EXAMPLE_PROMPT_BORDER_CONFIG),
+			contextRail: toContextRailJson(EXAMPLE_PROMPT_BORDER_CONFIG.contextRail),
+		};
 		const leftText = await ensureGlyphTextFile(configPath, "left", DEFAULT_LEFT_GLYPH_TEXT);
 		const rightText = await ensureGlyphTextFile(configPath, "right", "");
 		const statusText = await ensureGlyphTextFile(configPath, "status", "");
@@ -561,6 +738,22 @@ export async function writePromptBorderConfigSelection(
 	promptBorder.style = state.style;
 	promptBorder.layout = state.layout;
 	persisted.merged.promptBorder = promptBorder;
+	didReadInvalidConfig = false;
+	await Bun.write(configPath, `${JSON.stringify(persisted.merged, null, 2)}\n`);
+	return normalizePromptBorderConfig(persisted.merged, persisted.glyphTexts);
+}
+
+export async function writeContextRailConfigSelection(
+	update: Partial<ContextRailConfig>,
+	configPath = CONFIG_PATH,
+): Promise<PromptBorderConfig> {
+	const persisted = await ensurePersistedPromptBorderConfig(configPath);
+	if (persisted === undefined) {
+		didReadInvalidConfig = true;
+		return DEFAULT_PROMPT_BORDER_CONFIG;
+	}
+	const current = normalizeContextRailConfig(persisted.merged.contextRail);
+	persisted.merged.contextRail = { ...toContextRailJson(current), ...update };
 	didReadInvalidConfig = false;
 	await Bun.write(configPath, `${JSON.stringify(persisted.merged, null, 2)}\n`);
 	return normalizePromptBorderConfig(persisted.merged, persisted.glyphTexts);
@@ -671,6 +864,80 @@ export function getPromptBorderArgumentCompletions(argumentPrefix: string): Auto
 		}));
 	}
 	return null;
+}
+
+export type ContextRailAction =
+	| { kind: "status" }
+	| { kind: "toggle" }
+	| { kind: "set"; update: Partial<ContextRailConfig> }
+	| { kind: "invalid" };
+
+const CONTEXT_RAIL_ROOT_OPTIONS = ["on", "off", "toggle", "status", "placement", "visibility", "pointer", "labels", "position"] as const;
+
+function isContextRailPlacement(value: string): value is ContextRailPlacement {
+	return (CONTEXT_RAIL_PLACEMENTS as readonly string[]).includes(value);
+}
+
+function isContextRailVisibility(value: string): value is ContextRailVisibility {
+	return (CONTEXT_RAIL_VISIBILITIES as readonly string[]).includes(value);
+}
+
+function isContextRailPointer(value: string): value is ContextRailPointer {
+	return (CONTEXT_RAIL_POINTERS as readonly string[]).includes(value);
+}
+
+function isContextRailLabels(value: string): value is ContextRailLabels {
+	return (CONTEXT_RAIL_LABELS as readonly string[]).includes(value);
+}
+
+function isContextRailLabelPosition(value: string): value is ContextRailLabelPosition {
+	return (CONTEXT_RAIL_POSITIONS as readonly string[]).includes(value);
+}
+
+export function getContextRailArgumentCompletions(argumentPrefix: string): AutocompleteItem[] | null {
+	const normalized = argumentPrefix.toLowerCase();
+	const hasTrailingSpace = /\s$/u.test(normalized);
+	const parts = normalized.trim().split(/\s+/u).filter(Boolean);
+	const tokenPrefix = hasTrailingSpace ? "" : (parts.at(-1) ?? "");
+	const complete = (value: string): AutocompleteItem => ({ value, label: value });
+	if (parts.length === 0) return CONTEXT_RAIL_ROOT_OPTIONS.map(complete);
+	if (parts.length === 1 && !hasTrailingSpace) {
+		return CONTEXT_RAIL_ROOT_OPTIONS.filter(option => option.startsWith(tokenPrefix)).map(complete);
+	}
+	if (parts.length === 1 || (parts.length === 2 && !hasTrailingSpace)) {
+		const options =
+			parts[0] === "placement"
+				? CONTEXT_RAIL_PLACEMENTS
+				: parts[0] === "visibility"
+					? CONTEXT_RAIL_VISIBILITIES
+					: parts[0] === "pointer"
+						? CONTEXT_RAIL_POINTERS
+						: parts[0] === "labels"
+							? CONTEXT_RAIL_LABELS
+							: parts[0] === "position"
+								? CONTEXT_RAIL_POSITIONS
+								: [];
+		return options
+			.filter(option => option.startsWith(tokenPrefix))
+			.map(option => ({ value: `${parts[0]} ${option}`, label: option }));
+	}
+	return null;
+}
+
+export function parseContextRailArgs(args: string): ContextRailAction {
+	const parts = args.trim().toLowerCase().split(/\s+/u).filter(Boolean);
+	if (parts.length === 0 || (parts.length === 1 && parts[0] === "status")) return { kind: "status" };
+	if (parts.length === 1 && parts[0] === "toggle") return { kind: "toggle" };
+	if (parts.length === 1 && parts[0] === "on") return { kind: "set", update: { enabled: true } };
+	if (parts.length === 1 && parts[0] === "off") return { kind: "set", update: { enabled: false } };
+	if (parts.length !== 2) return { kind: "invalid" };
+	const value = parts[1]!;
+	if (parts[0] === "placement" && isContextRailPlacement(value)) return { kind: "set", update: { placement: value } };
+	if (parts[0] === "visibility" && isContextRailVisibility(value)) return { kind: "set", update: { visibility: value } };
+	if (parts[0] === "pointer" && isContextRailPointer(value)) return { kind: "set", update: { pointer: value } };
+	if (parts[0] === "labels" && isContextRailLabels(value)) return { kind: "set", update: { labels: value } };
+	if (parts[0] === "position" && isContextRailLabelPosition(value)) return { kind: "set", update: { labelPosition: value } };
+	return { kind: "invalid" };
 }
 
 export function getPromptLoadingGlyphArgumentCompletions(argumentPrefix: string): AutocompleteItem[] | null {
@@ -996,7 +1263,6 @@ function replaceBodyRightGlyph(line: string, glyphs: PromptBorderGlyphs, frame: 
 	const leftPad = removableWidth > fittedWidth ? " ".repeat(removableWidth - fittedWidth) : "";
 	return `${prefixTokens.slice(0, removeFromIndex).join("")}${leftPad}${fittedFrame}${suffix}`;
 }
-
 function replaceSideBodyRightGlyph(line: string, glyphs: PromptBorderGlyphs, frame: string): string {
 	const plain = line.replace(ANSI_SGR_PATTERN, "");
 	const plainChars = [...plain];
@@ -1092,7 +1358,8 @@ export class PromptBorderEditor extends CustomEditor {
 	readonly #cursorSymbols: CursorSymbols;
 	readonly #state: PromptBorderState;
 	readonly #glyphs: PromptBorderGlyphs;
-	readonly #config: PromptBorderConfig;
+	readonly #config: PromptBorderConfigInput;
+	readonly #contextRail: ContextRailRuntime | undefined;
 	#topBorder: EditorTopBorder | undefined;
 	#renderedTopBorder: EditorTopBorder | undefined;
 	#topBorderProvider: ((availableWidth: number) => EditorTopBorder | undefined) | undefined;
@@ -1102,7 +1369,12 @@ export class PromptBorderEditor extends CustomEditor {
 	#rightGlyphTimer: Timer | undefined;
 	#requestGlyphRepaint: (() => void) | undefined;
 
-	constructor(theme: EditorTheme, state: PromptBorderState, config: PromptBorderConfig = DEFAULT_PROMPT_BORDER_CONFIG) {
+	constructor(
+		theme: EditorTheme,
+		state: PromptBorderState,
+		config: PromptBorderConfigInput = DEFAULT_PROMPT_BORDER_CONFIG,
+		contextRail?: ContextRailRuntime,
+	) {
 		const glyphs = borderStyles[state.style];
 		const editorTheme =
 			state.layout === "default"
@@ -1113,6 +1385,7 @@ export class PromptBorderEditor extends CustomEditor {
 		this.#state = state;
 		this.#glyphs = glyphs;
 		this.#config = config;
+		this.#contextRail = contextRail;
 	}
 	override setTheme(theme: EditorTheme): void {
 		const editorTheme =
@@ -1174,6 +1447,40 @@ export class PromptBorderEditor extends CustomEditor {
 		if (side === "left") this.#leftGlyphTimer = scheduledTimer;
 		else this.#rightGlyphTimer = scheduledTimer;
 	}
+
+	#renderContextRailRow(width: number): string | undefined {
+		const runtime = this.#contextRail;
+		if (runtime === undefined || runtime.config.placement !== "inside" || !contextRailVisible(runtime)) return undefined;
+		const innerWidth = Math.max(0, width - 2);
+		const content = renderContextRail(
+			innerWidth,
+			runtime.palette(this.#glyphs.horizontal),
+			runtime.usage,
+			runtime.boundaries,
+			contextRailRenderOptions(runtime),
+		);
+		if (this.#state.layout === "top-bottom") return ` ${content} `;
+		const side = this.borderColor(this.#glyphs.vertical);
+		return `${side}${content}${side}`;
+	}
+
+	#insertContextRail(lines: readonly string[], width: number): readonly string[] {
+		const row = this.#renderContextRailRow(width);
+		if (row === undefined) return lines;
+		const hasTopRow =
+			this.#state.layout === "full" ||
+			this.#state.layout === "top-bottom" ||
+			this.#state.layout === "default" ||
+			this.#renderedTopBorder !== undefined ||
+			this.#topBorder !== undefined;
+		const insertionIndex = hasTopRow ? Math.min(1, lines.length) : 0;
+		return [...lines.slice(0, insertionIndex), row, ...lines.slice(insertionIndex)];
+	}
+
+	override handleInput(data: string): void {
+		super.handleInput(data);
+		if (this.#contextRail !== undefined) markContextRailDraftActivity(this.#contextRail, this.getText());
+	}
 	override render(width: number): readonly string[] {
 		const lines = [...super.render(width)];
 		const leftFrame = this.#currentGlyphFrame("left");
@@ -1184,7 +1491,7 @@ export class PromptBorderEditor extends CustomEditor {
 		const cursorLineText = this.getText().split("\n")[cursor.line] ?? "";
 		const topBorder = this.#topBorderProvider === undefined ? this.#topBorder : this.#renderedTopBorder;
 		if (this.#state.layout === "default") {
-			if (lines[0] === undefined) return lines;
+			if (lines[0] === undefined) return this.#insertContextRail(lines, width);
 			const bodyAndAutocompleteRows = lines.slice(1);
 			const splitIndex = bodyAndAutocompleteRows.findIndex(line => {
 				const plain = line.replace(ANSI_SGR_PATTERN, "");
@@ -1204,7 +1511,7 @@ export class PromptBorderEditor extends CustomEditor {
 				leftFrame,
 				rightFrame,
 			);
-			return [lines[0], ...glyphRows, ...autocompleteRows];
+			return this.#insertContextRail([lines[0], ...glyphRows, ...autocompleteRows], width);
 		}
 		const restyledTopRow = lines[0];
 		const hiddenTopRow = restyledTopRow === undefined ? null : hideTopBorderLine(restyledTopRow, this.#glyphs, topBorder);
@@ -1246,8 +1553,8 @@ export class PromptBorderEditor extends CustomEditor {
 			rightFrame,
 			borderLine,
 		);
-		if (this.#state.layout === "sides") return [...topRows, ...glyphRows, ...autocompleteRows];
-		return [...topRows, ...glyphRows, borderLine, ...autocompleteRows];
+		if (this.#state.layout === "sides") return this.#insertContextRail([...topRows, ...glyphRows, ...autocompleteRows], width);
+		return this.#insertContextRail([...topRows, ...glyphRows, borderLine, ...autocompleteRows], width);
 	}
 	dispose(): void {
 		if (this.#leftGlyphTimer !== undefined) clearTimeout(this.#leftGlyphTimer);
@@ -1257,6 +1564,57 @@ export class PromptBorderEditor extends CustomEditor {
 		super.setShimmerRepaintHandler(undefined);
 	}
 }
+function installPromptBorderEditor(ctx: { ui: ExtensionUIContext }): void {
+	const runtime = activeContextRailRuntime;
+	ctx.ui.setEditorComponent((tui, theme) => {
+		if (runtime !== undefined) runtime.requestRender = () => tui.requestRender();
+		return new PromptBorderEditor(theme, activeBorder, activeConfig, runtime);
+	});
+}
+
+function refreshContextRail(ctx: {
+	hasUI: boolean;
+	getContextUsage?(): { tokens: number; contextWindow: number; percent: number } | undefined;
+}): void {
+	if (!ctx.hasUI || activeContextRailRuntime === undefined) return;
+	const raw = ctx.getContextUsage?.();
+	updateContextRailUsage(
+		activeContextRailRuntime,
+		raw === undefined ? undefined : { tokens: raw.tokens, contextWindow: raw.contextWindow, percent: raw.percent },
+	);
+}
+
+function disposeContextRailRuntime(): void {
+	if (activeContextRailRuntime === undefined) return;
+	clearTimeout(activeContextRailRuntime.compactTimer);
+	activeContextRailRuntime.compactTimer = undefined;
+	activeContextRailRuntime.requestRender = undefined;
+	activeContextRailRuntime = undefined;
+}
+
+function formatContextRailStatus(runtime: ContextRailRuntime): string {
+	const usage = runtime.usage;
+	const usageText =
+		usage !== undefined && Number.isFinite(usage.percent)
+			? `${usage.percent.toFixed(1)}%/${usage.contextWindow.toLocaleString()}`
+			: "unknown";
+	return `Context Rail: ${runtime.config.enabled ? "on" : "off"} · ${runtime.config.placement} · ${runtime.config.visibility} · label-position ${runtime.config.labelPosition} · ${usageText}`;
+}
+
+async function persistContextRailUpdate(
+	ctx: { hasUI: boolean; ui: ExtensionUIContext },
+	update: Partial<ContextRailConfig>,
+	configPath: string,
+): Promise<void> {
+	activeConfig = await writeContextRailConfigSelection(update, configPath);
+	if (activeContextRailRuntime !== undefined) {
+		activeContextRailRuntime.config = activeConfig.contextRail;
+		if (update.enabled === true || update.visibility !== undefined) activeContextRailRuntime.toggledVisible = true;
+		mountContextRailWidget(ctx);
+		activeContextRailRuntime.requestRender?.();
+	}
+}
+
 export default function promptBorderStyle(pi: ExtensionAPI, configPath = CONFIG_PATH): void {
 	pi.setLabel("Prompt Border Style");
 
@@ -1266,16 +1624,68 @@ export default function promptBorderStyle(pi: ExtensionAPI, configPath = CONFIG_
 		applySpinnerGlyphFrames(ctx.ui.theme, activeConfig);
 		notifyInvalidConfig(ctx);
 		activeBorder = { style: activeConfig.style, layout: activeConfig.layout };
-		ctx.ui.setEditorComponent((_tui, theme) => new PromptBorderEditor(theme, activeBorder, activeConfig));
+		activeContextRailRuntime = createContextRailRuntime(activeConfig.contextRail, horizontal =>
+			createContextRailPalette(ctx.ui.theme, horizontal),
+		);
+		refreshContextRail(ctx);
+		mountContextRailWidget(ctx);
+		installPromptBorderEditor(ctx);
 	});
 
+	pi.on("context", (_event, ctx) => refreshContextRail(ctx));
+	pi.on("message_update", (_event, ctx) => refreshContextRail(ctx));
+	pi.on("message_end", (_event, ctx) => refreshContextRail(ctx));
+	pi.on("turn_end", (_event, ctx) => refreshContextRail(ctx));
+	pi.on("auto_compaction_start", (_event, ctx) => refreshContextRail(ctx));
+	pi.on("auto_compaction_end", (_event, ctx) => refreshContextRail(ctx));
+
 	pi.on("session_shutdown", (_event, ctx) => {
-		if (!ctx.hasUI) return;
+		if (!ctx.hasUI) {
+			disposeContextRailRuntime();
+			return;
+		}
+		ctx.ui.setWidget?.(CONTEXT_RAIL_WIDGET_KEY, undefined);
 		ctx.ui.setEditorComponent(undefined);
 		clearPromptLoadingGlyphDebugUi(ctx);
 		restoreSpinnerGlyphFrames(ctx.ui.theme);
+		disposeContextRailRuntime();
 	});
 
+
+	pi.registerCommand("context-rail", {
+		description: "Configure the plugin-owned context rail",
+		getArgumentCompletions: getContextRailArgumentCompletions,
+		handler: async (args, ctx) => {
+			if (!ctx.hasUI) return;
+			activeConfig = await ensurePromptBorderConfigFile(configPath);
+			if (activeContextRailRuntime !== undefined) activeContextRailRuntime.config = activeConfig.contextRail;
+			refreshContextRail(ctx);
+			const action = parseContextRailArgs(args);
+			if (action.kind === "invalid") {
+				ctx.ui.notify(CONTEXT_RAIL_USAGE, "warning");
+				return;
+			}
+			if (action.kind === "status") {
+				ctx.ui.notify(formatContextRailStatus(activeContextRailRuntime ?? createContextRailRuntime(activeConfig.contextRail, () => createContextRailPalette(ctx.ui.theme, "─"))), "info");
+				return;
+			}
+			if (action.kind === "toggle") {
+				const runtime = activeContextRailRuntime;
+				if (runtime !== undefined && runtime.config.enabled && runtime.config.visibility === "toggle") {
+					runtime.toggledVisible = !runtime.toggledVisible;
+					mountContextRailWidget(ctx);
+					runtime.requestRender?.();
+					ctx.ui.notify(`Context Rail: ${runtime.toggledVisible ? "shown" : "hidden"}`, "info");
+					return;
+				}
+				await persistContextRailUpdate(ctx, { enabled: !activeConfig.contextRail.enabled }, configPath);
+				ctx.ui.notify(formatContextRailStatus(activeContextRailRuntime!), "info");
+				return;
+			}
+			await persistContextRailUpdate(ctx, action.update, configPath);
+			ctx.ui.notify(formatContextRailStatus(activeContextRailRuntime!), "info");
+		},
+	});
 
 	pi.registerCommand("prompt-loading-glyphs", {
 		description: "Debug prompt loading glyph adaptation",
@@ -1315,6 +1725,7 @@ export default function promptBorderStyle(pi: ExtensionAPI, configPath = CONFIG_
 		handler: async (args, ctx) => {
 			if (!ctx.hasUI) return;
 			activeConfig = await ensurePromptBorderConfigFile(configPath);
+			if (activeContextRailRuntime !== undefined) activeContextRailRuntime.config = activeConfig.contextRail;
 			applySpinnerGlyphFrames(ctx.ui.theme, activeConfig);
 			notifyInvalidConfig(ctx);
 			const action = parsePromptBorderArgs(args, activeBorder);
@@ -1330,9 +1741,11 @@ export default function promptBorderStyle(pi: ExtensionAPI, configPath = CONFIG_
 			}
 			activeBorder = action.state;
 			activeConfig = await writePromptBorderConfigSelection(activeBorder, configPath);
+			if (activeContextRailRuntime !== undefined) activeContextRailRuntime.config = activeConfig.contextRail;
 			applySpinnerGlyphFrames(ctx.ui.theme, activeConfig);
 			notifyInvalidConfig(ctx);
-			ctx.ui.setEditorComponent((_tui, theme) => new PromptBorderEditor(theme, activeBorder, activeConfig));
+			mountContextRailWidget(ctx);
+			installPromptBorderEditor(ctx);
 			ctx.ui.notify(`Prompt border: ${activeBorder.style} ${activeBorder.layout}`, "info");
 		},
 	});
