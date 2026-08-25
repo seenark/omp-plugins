@@ -16,8 +16,10 @@ import {
 } from "@oh-my-pi/pi-tui";
 import {
 	DEFAULT_CONTEXT_RAIL_CONFIG,
+	parseContextRailGlyphAsset,
 	type ContextRailBoundaries,
 	type ContextRailConfig,
+	type ContextRailGlyphAsset,
 	type ContextRailLabels,
 	type ContextRailLabelPosition,
 	type ContextRailPalette,
@@ -27,7 +29,7 @@ import {
 	type ContextRailUsage,
 	type ContextRailVisibility,
 	normalizeContextRailConfig,
-	renderContextRail,
+	renderContextRailRows,
 } from "./context-rail";
 export { DEFAULT_CONTEXT_RAIL_CONFIG } from "./context-rail";
 export type BorderStyleName =
@@ -85,6 +87,12 @@ type ContextRailRuntime = {
 	toggledVisible: boolean;
 	compactUntil: number;
 	compactTimer: Timer | undefined;
+	labelGlyphFrame: number;
+	labelGlyphTimer: Timer | undefined;
+	labelGlyphFallback: string;
+	pointerGlyphFrame: number;
+	pointerGlyphTimer: Timer | undefined;
+	pointerGlyphFallback: string;
 	requestRender: (() => void) | undefined;
 	palette: (horizontal: string) => ContextRailPalette;
 };
@@ -95,6 +103,8 @@ const CONTEXT_RAIL_COMPACT_IDLE_MS = 650;
 function createContextRailRuntime(
 	config: ContextRailConfig,
 	palette: (horizontal: string) => ContextRailPalette,
+	labelGlyphFallback: string,
+	pointerGlyphFallback: string,
 ): ContextRailRuntime {
 	return {
 		config,
@@ -103,6 +113,12 @@ function createContextRailRuntime(
 		toggledVisible: true,
 		compactUntil: 0,
 		compactTimer: undefined,
+		labelGlyphFrame: 0,
+		labelGlyphTimer: undefined,
+		labelGlyphFallback,
+		pointerGlyphFrame: 0,
+		pointerGlyphTimer: undefined,
+		pointerGlyphFallback,
 		requestRender: undefined,
 		palette,
 	};
@@ -148,12 +164,104 @@ function markContextRailDraftActivity(runtime: ContextRailRuntime, text: string)
 	runtime.compactTimer.unref?.();
 }
 
+function resolveThemeSymbol(theme: unknown, name: string, fallback: string): string {
+	try {
+		const symbol = isRecord(theme) ? theme.symbol : undefined;
+		if (typeof symbol !== "function") return fallback;
+		const value = symbol.call(theme, name);
+		return typeof value === "string" && value.trim().length > 0 ? value : fallback;
+	} catch {
+		return fallback;
+	}
+}
+
+function resolveContextRailFallback(theme: unknown): string {
+	return resolveThemeSymbol(theme, "status.success", "✓");
+}
+function resolveContextRailPointerFallback(theme: unknown): string {
+	return resolveThemeSymbol(theme, "context.pointer", "●");
+}
+
+function contextRailLabelFrameCount(runtime: ContextRailRuntime): number {
+	let count = 0;
+	for (const frame of runtime.config.labelGlyph.frames) {
+		if (frame.trim().length > 0) count += 1;
+	}
+	return count;
+}
+
+function scheduleContextRailLabelFrame(runtime: ContextRailRuntime): void {
+	if (runtime.config.showLabelGlyph === false) return;
+	const frameCount = contextRailLabelFrameCount(runtime);
+	const fps = runtime.config.labelGlyph.fps;
+	if (
+		typeof fps !== "number" ||
+		!Number.isFinite(fps) ||
+		fps <= 0 ||
+		frameCount < 2 ||
+		runtime.labelGlyphTimer !== undefined ||
+		runtime.requestRender === undefined
+	) {
+		return;
+	}
+	const frameDelay = Math.max(1, Math.round(1000 / fps));
+	const timer = setTimeout(() => {
+		runtime.labelGlyphTimer = undefined;
+		runtime.labelGlyphFrame = (runtime.labelGlyphFrame + 1) % frameCount;
+		runtime.requestRender?.();
+	}, frameDelay);
+	timer.unref?.();
+	runtime.labelGlyphTimer = timer;
+}
+function contextRailPointerFrameCount(runtime: ContextRailRuntime): number {
+	let count = 0;
+	for (const frame of runtime.config.pointerGlyph.frames) {
+		if (frame.trim().length > 0) count += 1;
+	}
+	return count;
+}
+
+function scheduleContextRailPointerFrame(runtime: ContextRailRuntime): void {
+	const frameCount = contextRailPointerFrameCount(runtime);
+	const fps = runtime.config.pointerGlyph.fps;
+	if (
+		typeof fps !== "number" ||
+		!Number.isFinite(fps) ||
+		fps <= 0 ||
+		frameCount < 2 ||
+		runtime.pointerGlyphTimer !== undefined ||
+		runtime.requestRender === undefined
+	) {
+		return;
+	}
+	const frameDelay = Math.max(1, Math.round(1000 / fps));
+	const timer = setTimeout(() => {
+		runtime.pointerGlyphTimer = undefined;
+		runtime.pointerGlyphFrame = (runtime.pointerGlyphFrame + 1) % frameCount;
+		runtime.requestRender?.();
+	}, frameDelay);
+	timer.unref?.();
+	runtime.pointerGlyphTimer = timer;
+}
+
+
+function replaceContextRailConfig(runtime: ContextRailRuntime, config: ContextRailConfig): void {
+	clearTimeout(runtime.labelGlyphTimer);
+	clearTimeout(runtime.pointerGlyphTimer);
+	runtime.labelGlyphTimer = undefined;
+	runtime.pointerGlyphTimer = undefined;
+	runtime.labelGlyphFrame = 0;
+	runtime.pointerGlyphFrame = 0;
+	runtime.config = config;
+	runtime.requestRender?.();
+}
+
 function createContextRailPalette(theme: Theme, horizontal: string): ContextRailPalette {
-	const speculation = theme.symbol("context.speculation") || "╎";
-	const threshold = theme.symbol("context.compaction") || "┃";
+	const speculation = resolveThemeSymbol(theme, "context.speculation", "╎");
+	const threshold = resolveThemeSymbol(theme, "context.compaction", "┃");
 	return {
 		horizontal,
-		pointer: "●",
+		pointer: resolveContextRailPointerFallback(theme),
 		speculation,
 		threshold,
 		used: value => theme.fg("statusLineContext", value),
@@ -198,8 +306,9 @@ const CONTEXT_RAIL_VISIBILITIES = ["always", "toggle", "collapse-while-typing"] 
 const CONTEXT_RAIL_POINTERS = ["auto", "visible", "hidden"] as const satisfies readonly ContextRailPointer[];
 const CONTEXT_RAIL_LABELS = ["auto", "bar-only", "always"] as const satisfies readonly ContextRailLabels[];
 const CONTEXT_RAIL_POSITIONS = ["left", "center", "right"] as const satisfies readonly ContextRailLabelPosition[];
+const CONTEXT_RAIL_LABEL_GLYPH_VISIBILITIES = ["on", "off"] as const;
 const CONTEXT_RAIL_USAGE =
-	"Usage: /context-rail [on|off|toggle|status] | placement <inside|above|below> | visibility <always|toggle|collapse-while-typing> | pointer <auto|visible|hidden> | labels <auto|bar-only|always> | position <left|center|right>";
+	"Usage: /context-rail [on|off|toggle|status|init [glyphs]] | placement <inside|above|below> | visibility <always|toggle|collapse-while-typing> | pointer <auto|visible|hidden> | labels <auto|bar-only|always> | label-glyph <on|off> | position <left|center|right>";
 const USAGE = `Usage: /prompt-border <${STYLE_NAMES.join("|")}> [full|bottom|sides|top-bottom|default] | /prompt-border layout <full|bottom|sides|top-bottom|default> | /prompt-border reset`;
 const PROMPT_LOADING_GLYPHS_USAGE = "Usage: /prompt-loading-glyphs debug <frames|demo|on|off>";
 const DEFAULT_GLYPH_FRAME_MS = 70;
@@ -214,6 +323,8 @@ const GLYPH_TEXT_FILE_NAMES: Record<PromptBorderGlyphSlot, string> = {
 	status: "prompt-border-status-spinner-glyphs.txt",
 	activity: "prompt-border-activity-spinner-glyphs.txt",
 };
+const CONTEXT_RAIL_LABEL_FILE_NAME = "label.txt";
+const CONTEXT_RAIL_POINTER_FILE_NAME = "pointer.txt";
 export const DEFAULT_LEFT_GLYPH_TEXT_PATH = path.join(
 	os.homedir(),
 	".config",
@@ -414,6 +525,14 @@ function contextRailRenderOptions(runtime: ContextRailRuntime): ContextRailRende
 		pointer: runtime.config.pointer,
 		labels: runtime.config.labels,
 		labelPosition: runtime.config.labelPosition,
+		showLabelGlyph: runtime.config.showLabelGlyph,
+		labelGlyphs: runtime.config.labelGlyph.frames,
+		labelFrame: runtime.labelGlyphFrame,
+		labelGlyphFallback: runtime.labelGlyphFallback,
+		labelGlyphSize: runtime.config.labelGlyph.size,
+		pointerGlyphs: runtime.config.pointerGlyph.frames,
+		pointerFrame: runtime.pointerGlyphFrame,
+		pointerGlyphFallback: runtime.pointerGlyphFallback,
 	};
 }
 
@@ -429,16 +548,16 @@ function mountContextRailWidget(ctx: { hasUI: boolean; ui: { setWidget?: Extensi
 		(_tui, theme) => ({
 			render(width: number): readonly string[] {
 				if (!contextRailVisible(runtime)) return [];
+				scheduleContextRailLabelFrame(runtime);
+				scheduleContextRailPointerFrame(runtime);
 				const horizontal = theme.boxRound.horizontal;
-				return [
-					renderContextRail(
-						width,
-						createContextRailPalette(theme, horizontal),
-						runtime.usage,
-						runtime.boundaries,
-						contextRailRenderOptions(runtime),
-					),
-				];
+				return renderContextRailRows(
+					width,
+					createContextRailPalette(theme, horizontal),
+					runtime.usage,
+					runtime.boundaries,
+					contextRailRenderOptions(runtime),
+				);
 			},
 			invalidate(): void {},
 			dispose(): void {},
@@ -491,6 +610,38 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 function getGlyphTextPath(configPath: string, slot: PromptBorderGlyphSlot): string {
 	return path.join(path.dirname(configPath), GLYPH_TEXT_FILE_NAMES[slot]);
 }
+function expandHome(rawPath: string): string {
+	if (rawPath === "~") return os.homedir();
+	if (rawPath.startsWith("~/")) return path.join(os.homedir(), rawPath.slice(2));
+	return rawPath;
+}
+
+function getContextRailLabelPath(config: ContextRailConfig): string {
+	return path.join(expandHome(config.glyphDirectory), CONTEXT_RAIL_LABEL_FILE_NAME);
+}
+
+async function readContextRailLabelText(config: ContextRailConfig): Promise<string | undefined> {
+	try {
+		const file = Bun.file(getContextRailLabelPath(config));
+		if (!(await file.exists())) return undefined;
+		return await file.text();
+	} catch {
+		return undefined;
+	}
+}
+function getContextRailPointerPath(config: ContextRailConfig): string {
+	return path.join(expandHome(config.glyphDirectory), CONTEXT_RAIL_POINTER_FILE_NAME);
+}
+
+async function readContextRailPointerText(config: ContextRailConfig): Promise<string | undefined> {
+	try {
+		const file = Bun.file(getContextRailPointerPath(config));
+		if (!(await file.exists())) return undefined;
+		return await file.text();
+	} catch {
+		return undefined;
+	}
+}
 
 function toPromptBorderJson(config: PromptBorderConfig): Record<string, unknown> {
 	return {
@@ -521,6 +672,8 @@ function toContextRailJson(config: ContextRailConfig): Record<string, unknown> {
 		pointer: config.pointer,
 		labels: config.labels,
 		labelPosition: config.labelPosition,
+		showLabelGlyph: config.showLabelGlyph !== false,
+		glyphDirectory: config.glyphDirectory,
 	};
 }
 
@@ -556,12 +709,22 @@ function mergePromptBorderJson(raw: Record<string, unknown>): Record<string, unk
 		spinnerGlyphs[slot] = spinnerGlyph;
 	}
 
+	delete contextRail.labelGlyph;
+	delete contextRail.pointerGlyph;
+	delete contextRail.glyphs;
+	delete contextRail.frames;
+	delete contextRail.fps;
+	delete contextRail.size;
 	delete promptBorder.loadingGlyph;
 	promptBorder.leftGlyph = leftGlyph;
 	promptBorder.rightGlyph = rightGlyph;
 	promptBorder.spinnerGlyphs = spinnerGlyphs;
 	merged.promptBorder = promptBorder;
-	merged.contextRail = { ...exampleContextRail, ...contextRail };
+	const mergedContextRail = { ...exampleContextRail, ...contextRail };
+	if (typeof mergedContextRail.showLabelGlyph !== "boolean") {
+		mergedContextRail.showLabelGlyph = exampleContextRail.showLabelGlyph;
+	}
+	merged.contextRail = mergedContextRail;
 	return merged;
 }
 
@@ -591,6 +754,8 @@ async function ensureGlyphTextFile(configPath: string, slot: PromptBorderGlyphSl
 export function normalizePromptBorderConfig(
 	raw: unknown,
 	glyphTexts: Partial<Record<PromptBorderGlyphSlot, string>> = {},
+	contextRailGlyphAsset: ContextRailGlyphAsset = { frames: [], fps: undefined },
+	contextRailPointerGlyphAsset: ContextRailGlyphAsset = { frames: [], fps: undefined },
 ): PromptBorderConfig {
 	const promptBorder = isRecord(raw) && isRecord(raw.promptBorder) ? raw.promptBorder : {};
 	const contextRail = isRecord(raw) && isRecord(raw.contextRail) ? raw.contextRail : {};
@@ -647,13 +812,17 @@ export function normalizePromptBorderConfig(
 				DEFAULT_SPINNER_GLYPH_FRAME_MS,
 			),
 		},
-		contextRail: normalizeContextRailConfig(contextRail),
+		contextRail: normalizeContextRailConfig(contextRail, contextRailGlyphAsset, contextRailPointerGlyphAsset),
 	};
 }
+type PersistedPromptBorderConfig = {
+	merged: Record<string, unknown>;
+	glyphTexts: Record<PromptBorderGlyphSlot, string>;
+	contextRailLabelText?: string;
+	contextRailPointerText?: string;
+};
 
-async function ensurePersistedPromptBorderConfig(
-	configPath: string,
-): Promise<{ merged: Record<string, unknown>; glyphTexts: Record<PromptBorderGlyphSlot, string> } | undefined> {
+async function ensurePersistedPromptBorderConfig(configPath: string): Promise<PersistedPromptBorderConfig | undefined> {
 	await mkdir(path.dirname(configPath), { recursive: true });
 	const file = Bun.file(configPath);
 	if (!(await file.exists())) {
@@ -666,7 +835,15 @@ async function ensurePersistedPromptBorderConfig(
 		const statusText = await ensureGlyphTextFile(configPath, "status", "");
 		const activityText = await ensureGlyphTextFile(configPath, "activity", "");
 		await Bun.write(configPath, `${JSON.stringify(created, null, 2)}\n`);
-		return { merged: created, glyphTexts: { left: leftText, right: rightText, status: statusText, activity: activityText } };
+		const defaultContextRail = normalizeContextRailConfig(created.contextRail);
+		const contextRailLabelText = await readContextRailLabelText(defaultContextRail);
+		const contextRailPointerText = await readContextRailPointerText(defaultContextRail);
+		return {
+			merged: created,
+			glyphTexts: { left: leftText, right: rightText, status: statusText, activity: activityText },
+			contextRailLabelText,
+			contextRailPointerText,
+		};
 	}
 	const parsed = parsePromptBorderConfigJson(await file.text());
 	if (parsed.invalid || !isRecord(parsed.json)) return undefined;
@@ -685,8 +862,16 @@ async function ensurePersistedPromptBorderConfig(
 	const statusText = await ensureGlyphTextFile(configPath, "status", statusSeed);
 	const activityText = await ensureGlyphTextFile(configPath, "activity", activitySeed);
 	const merged = mergePromptBorderJson(parsed.json);
+	const normalizedContextRail = normalizeContextRailConfig(merged.contextRail);
+	const contextRailLabelText = await readContextRailLabelText(normalizedContextRail);
+	const contextRailPointerText = await readContextRailPointerText(normalizedContextRail);
 	await Bun.write(configPath, `${JSON.stringify(merged, null, 2)}\n`);
-	return { merged, glyphTexts: { left: leftText, right: rightText, status: statusText, activity: activityText } };
+	return {
+		merged,
+		glyphTexts: { left: leftText, right: rightText, status: statusText, activity: activityText },
+		contextRailLabelText,
+		contextRailPointerText,
+	};
 }
 
 export async function readPromptBorderConfig(configPath = CONFIG_PATH): Promise<PromptBorderConfig> {
@@ -711,8 +896,16 @@ export async function readPromptBorderConfig(configPath = CONFIG_PATH): Promise<
 	if (rightText !== undefined) glyphTexts.right = rightText;
 	if (statusText !== undefined) glyphTexts.status = statusText;
 	if (activityText !== undefined) glyphTexts.activity = activityText;
+	const contextRail = normalizeContextRailConfig(isRecord(parsed.json) ? parsed.json.contextRail : undefined);
+	const contextRailLabelText = await readContextRailLabelText(contextRail);
+	const contextRailPointerText = await readContextRailPointerText(contextRail);
 	didReadInvalidConfig = false;
-	return normalizePromptBorderConfig(parsed.json, glyphTexts);
+	return normalizePromptBorderConfig(
+		parsed.json,
+		glyphTexts,
+		parseContextRailGlyphAsset(contextRailLabelText ?? ""),
+		parseContextRailGlyphAsset(contextRailPointerText ?? ""),
+	);
 }
 
 export async function ensurePromptBorderConfigFile(configPath = CONFIG_PATH): Promise<PromptBorderConfig> {
@@ -722,7 +915,12 @@ export async function ensurePromptBorderConfigFile(configPath = CONFIG_PATH): Pr
 		return DEFAULT_PROMPT_BORDER_CONFIG;
 	}
 	didReadInvalidConfig = false;
-	return normalizePromptBorderConfig(persisted.merged, persisted.glyphTexts);
+	return normalizePromptBorderConfig(
+		persisted.merged,
+		persisted.glyphTexts,
+		parseContextRailGlyphAsset(persisted.contextRailLabelText ?? ""),
+		parseContextRailGlyphAsset(persisted.contextRailPointerText ?? ""),
+	);
 }
 
 export async function writePromptBorderConfigSelection(
@@ -740,7 +938,12 @@ export async function writePromptBorderConfigSelection(
 	persisted.merged.promptBorder = promptBorder;
 	didReadInvalidConfig = false;
 	await Bun.write(configPath, `${JSON.stringify(persisted.merged, null, 2)}\n`);
-	return normalizePromptBorderConfig(persisted.merged, persisted.glyphTexts);
+	return normalizePromptBorderConfig(
+		persisted.merged,
+		persisted.glyphTexts,
+		parseContextRailGlyphAsset(persisted.contextRailLabelText ?? ""),
+		parseContextRailGlyphAsset(persisted.contextRailPointerText ?? ""),
+	);
 }
 
 export async function writeContextRailConfigSelection(
@@ -753,10 +956,19 @@ export async function writeContextRailConfigSelection(
 		return DEFAULT_PROMPT_BORDER_CONFIG;
 	}
 	const current = normalizeContextRailConfig(persisted.merged.contextRail);
-	persisted.merged.contextRail = { ...toContextRailJson(current), ...update };
+	const next = normalizeContextRailConfig({ ...current, ...update });
+	persisted.merged.contextRail = toContextRailJson(next);
 	didReadInvalidConfig = false;
 	await Bun.write(configPath, `${JSON.stringify(persisted.merged, null, 2)}\n`);
-	return normalizePromptBorderConfig(persisted.merged, persisted.glyphTexts);
+	const normalizedContextRail = normalizeContextRailConfig(persisted.merged.contextRail);
+	persisted.contextRailLabelText = await readContextRailLabelText(normalizedContextRail);
+	persisted.contextRailPointerText = await readContextRailPointerText(normalizedContextRail);
+	return normalizePromptBorderConfig(
+		persisted.merged,
+		persisted.glyphTexts,
+		parseContextRailGlyphAsset(persisted.contextRailLabelText ?? ""),
+		parseContextRailGlyphAsset(persisted.contextRailPointerText ?? ""),
+	);
 }
 
 export type SpinnerGlyphFrameOverride = {
@@ -870,9 +1082,10 @@ export type ContextRailAction =
 	| { kind: "status" }
 	| { kind: "toggle" }
 	| { kind: "set"; update: Partial<ContextRailConfig> }
+	| { kind: "init"; target: "glyphs" }
 	| { kind: "invalid" };
 
-const CONTEXT_RAIL_ROOT_OPTIONS = ["on", "off", "toggle", "status", "placement", "visibility", "pointer", "labels", "position"] as const;
+const CONTEXT_RAIL_ROOT_OPTIONS = ["on", "off", "toggle", "status", "init", "placement", "visibility", "pointer", "labels", "label-glyph", "position"] as const;
 
 function isContextRailPlacement(value: string): value is ContextRailPlacement {
 	return (CONTEXT_RAIL_PLACEMENTS as readonly string[]).includes(value);
@@ -892,6 +1105,9 @@ function isContextRailLabels(value: string): value is ContextRailLabels {
 
 function isContextRailLabelPosition(value: string): value is ContextRailLabelPosition {
 	return (CONTEXT_RAIL_POSITIONS as readonly string[]).includes(value);
+}
+function isContextRailLabelGlyphVisibility(value: string): value is (typeof CONTEXT_RAIL_LABEL_GLYPH_VISIBILITIES)[number] {
+	return (CONTEXT_RAIL_LABEL_GLYPH_VISIBILITIES as readonly string[]).includes(value);
 }
 
 export function getContextRailArgumentCompletions(argumentPrefix: string): AutocompleteItem[] | null {
@@ -914,9 +1130,13 @@ export function getContextRailArgumentCompletions(argumentPrefix: string): Autoc
 						? CONTEXT_RAIL_POINTERS
 						: parts[0] === "labels"
 							? CONTEXT_RAIL_LABELS
-							: parts[0] === "position"
-								? CONTEXT_RAIL_POSITIONS
-								: [];
+							: parts[0] === "label-glyph"
+								? CONTEXT_RAIL_LABEL_GLYPH_VISIBILITIES
+								: parts[0] === "position"
+									? CONTEXT_RAIL_POSITIONS
+									: parts[0] === "init"
+										? ["glyphs"]
+										: [];
 		return options
 			.filter(option => option.startsWith(tokenPrefix))
 			.map(option => ({ value: `${parts[0]} ${option}`, label: option }));
@@ -930,6 +1150,8 @@ export function parseContextRailArgs(args: string): ContextRailAction {
 	if (parts.length === 1 && parts[0] === "toggle") return { kind: "toggle" };
 	if (parts.length === 1 && parts[0] === "on") return { kind: "set", update: { enabled: true } };
 	if (parts.length === 1 && parts[0] === "off") return { kind: "set", update: { enabled: false } };
+	if (parts.length === 1 && parts[0] === "init") return { kind: "init", target: "glyphs" };
+	if (parts.length === 2 && parts[0] === "init" && parts[1] === "glyphs") return { kind: "init", target: "glyphs" };
 	if (parts.length !== 2) return { kind: "invalid" };
 	const value = parts[1]!;
 	if (parts[0] === "placement" && isContextRailPlacement(value)) return { kind: "set", update: { placement: value } };
@@ -937,6 +1159,9 @@ export function parseContextRailArgs(args: string): ContextRailAction {
 	if (parts[0] === "pointer" && isContextRailPointer(value)) return { kind: "set", update: { pointer: value } };
 	if (parts[0] === "labels" && isContextRailLabels(value)) return { kind: "set", update: { labels: value } };
 	if (parts[0] === "position" && isContextRailLabelPosition(value)) return { kind: "set", update: { labelPosition: value } };
+	if (parts[0] === "label-glyph" && isContextRailLabelGlyphVisibility(value)) {
+		return { kind: "set", update: { showLabelGlyph: value === "on" } };
+	}
 	return { kind: "invalid" };
 }
 
@@ -1448,25 +1673,27 @@ export class PromptBorderEditor extends CustomEditor {
 		else this.#rightGlyphTimer = scheduledTimer;
 	}
 
-	#renderContextRailRow(width: number): string | undefined {
+	#renderContextRailRows(width: number): readonly string[] | undefined {
 		const runtime = this.#contextRail;
 		if (runtime === undefined || runtime.config.placement !== "inside" || !contextRailVisible(runtime)) return undefined;
+		scheduleContextRailLabelFrame(runtime);
+		scheduleContextRailPointerFrame(runtime);
 		const innerWidth = Math.max(0, width - 2);
-		const content = renderContextRail(
+		const contents = renderContextRailRows(
 			innerWidth,
 			runtime.palette(this.#glyphs.horizontal),
 			runtime.usage,
 			runtime.boundaries,
 			contextRailRenderOptions(runtime),
 		);
-		if (this.#state.layout === "top-bottom") return ` ${content} `;
+		if (this.#state.layout === "top-bottom") return contents.map(content => ` ${content} `);
 		const side = this.borderColor(this.#glyphs.vertical);
-		return `${side}${content}${side}`;
+		return contents.map(content => `${side}${content}${side}`);
 	}
 
 	#insertContextRail(lines: readonly string[], width: number): readonly string[] {
-		const row = this.#renderContextRailRow(width);
-		if (row === undefined) return lines;
+		const rows = this.#renderContextRailRows(width);
+		if (rows === undefined) return lines;
 		const hasTopRow =
 			this.#state.layout === "full" ||
 			this.#state.layout === "top-bottom" ||
@@ -1474,7 +1701,7 @@ export class PromptBorderEditor extends CustomEditor {
 			this.#renderedTopBorder !== undefined ||
 			this.#topBorder !== undefined;
 		const insertionIndex = hasTopRow ? Math.min(1, lines.length) : 0;
-		return [...lines.slice(0, insertionIndex), row, ...lines.slice(insertionIndex)];
+		return [...lines.slice(0, insertionIndex), ...rows, ...lines.slice(insertionIndex)];
 	}
 
 	override handleInput(data: string): void {
@@ -1587,7 +1814,13 @@ function refreshContextRail(ctx: {
 function disposeContextRailRuntime(): void {
 	if (activeContextRailRuntime === undefined) return;
 	clearTimeout(activeContextRailRuntime.compactTimer);
+	clearTimeout(activeContextRailRuntime.labelGlyphTimer);
+	clearTimeout(activeContextRailRuntime.pointerGlyphTimer);
 	activeContextRailRuntime.compactTimer = undefined;
+	activeContextRailRuntime.labelGlyphTimer = undefined;
+	activeContextRailRuntime.pointerGlyphTimer = undefined;
+	activeContextRailRuntime.labelGlyphFrame = 0;
+	activeContextRailRuntime.pointerGlyphFrame = 0;
 	activeContextRailRuntime.requestRender = undefined;
 	activeContextRailRuntime = undefined;
 }
@@ -1598,7 +1831,68 @@ function formatContextRailStatus(runtime: ContextRailRuntime): string {
 		usage !== undefined && Number.isFinite(usage.percent)
 			? `${usage.percent.toFixed(1)}%/${usage.contextWindow.toLocaleString()}`
 			: "unknown";
-	return `Context Rail: ${runtime.config.enabled ? "on" : "off"} · ${runtime.config.placement} · ${runtime.config.visibility} · label-position ${runtime.config.labelPosition} · ${usageText}`;
+	return `Context Rail: ${runtime.config.enabled ? "on" : "off"} · ${runtime.config.placement} · ${runtime.config.visibility} · label-position ${runtime.config.labelPosition} · label-glyph ${runtime.config.showLabelGlyph === false ? "off" : "on"} · ${usageText}`;
+}
+
+async function initializeContextRailGlyphs(
+	ctx: { hasUI: boolean; ui: ExtensionUIContext },
+	configPath: string,
+): Promise<void> {
+	const contextRail = activeConfig.contextRail;
+	const files = [
+		{
+			path: getContextRailLabelPath(contextRail),
+			content: `${resolveContextRailFallback(ctx.ui.theme)}\n`,
+		},
+		{
+			path: getContextRailPointerPath(contextRail),
+			content: `${resolveContextRailPointerFallback(ctx.ui.theme)}\n`,
+		},
+	];
+	const created: string[] = [];
+	const overwritten: string[] = [];
+	const skipped: string[] = [];
+	const failed: string[] = [];
+	for (const file of files) {
+		try {
+			await mkdir(path.dirname(file.path), { recursive: true });
+			const exists = await Bun.file(file.path).exists();
+			if (exists) {
+				const overwrite = await ctx.ui.confirm(
+					"Overwrite Context Rail glyph file?",
+					`${file.path} already exists. Overwrite it?`,
+				);
+				if (!overwrite) {
+					skipped.push(file.path);
+					continue;
+				}
+			}
+			await Bun.write(file.path, file.content);
+			(exists ? overwritten : created).push(file.path);
+		} catch (error) {
+			const message = error instanceof Error ? error.message : String(error);
+			failed.push(`${file.path}: ${message}`);
+		}
+	}
+
+	const summary = [
+		"Context Rail glyph initialization:",
+		created.length > 0 ? `Created: ${created.join(", ")}` : "",
+		overwritten.length > 0 ? `Overwritten: ${overwritten.join(", ")}` : "",
+		skipped.length > 0 ? `Skipped: ${skipped.join(", ")}` : "",
+		failed.length > 0 ? `Failed: ${failed.join(", ")}` : "",
+	]
+		.filter(Boolean)
+		.join("\n");
+	ctx.ui.notify(summary, failed.length > 0 ? "error" : skipped.length > 0 ? "warning" : "info");
+	if (created.length === 0 && overwritten.length === 0) return;
+
+	activeConfig = await ensurePromptBorderConfigFile(configPath);
+	if (activeContextRailRuntime !== undefined) {
+		replaceContextRailConfig(activeContextRailRuntime, activeConfig.contextRail);
+		mountContextRailWidget(ctx);
+		activeContextRailRuntime.requestRender?.();
+	}
 }
 
 async function persistContextRailUpdate(
@@ -1608,7 +1902,7 @@ async function persistContextRailUpdate(
 ): Promise<void> {
 	activeConfig = await writeContextRailConfigSelection(update, configPath);
 	if (activeContextRailRuntime !== undefined) {
-		activeContextRailRuntime.config = activeConfig.contextRail;
+		replaceContextRailConfig(activeContextRailRuntime, activeConfig.contextRail);
 		if (update.enabled === true || update.visibility !== undefined) activeContextRailRuntime.toggledVisible = true;
 		mountContextRailWidget(ctx);
 		activeContextRailRuntime.requestRender?.();
@@ -1624,8 +1918,11 @@ export default function promptBorderStyle(pi: ExtensionAPI, configPath = CONFIG_
 		applySpinnerGlyphFrames(ctx.ui.theme, activeConfig);
 		notifyInvalidConfig(ctx);
 		activeBorder = { style: activeConfig.style, layout: activeConfig.layout };
-		activeContextRailRuntime = createContextRailRuntime(activeConfig.contextRail, horizontal =>
-			createContextRailPalette(ctx.ui.theme, horizontal),
+		activeContextRailRuntime = createContextRailRuntime(
+			activeConfig.contextRail,
+			horizontal => createContextRailPalette(ctx.ui.theme, horizontal),
+			resolveContextRailFallback(ctx.ui.theme),
+			resolveContextRailPointerFallback(ctx.ui.theme),
 		);
 		refreshContextRail(ctx);
 		mountContextRailWidget(ctx);
@@ -1651,22 +1948,35 @@ export default function promptBorderStyle(pi: ExtensionAPI, configPath = CONFIG_
 		disposeContextRailRuntime();
 	});
 
-
 	pi.registerCommand("context-rail", {
 		description: "Configure the plugin-owned context rail",
 		getArgumentCompletions: getContextRailArgumentCompletions,
 		handler: async (args, ctx) => {
-			if (!ctx.hasUI) return;
 			activeConfig = await ensurePromptBorderConfigFile(configPath);
-			if (activeContextRailRuntime !== undefined) activeContextRailRuntime.config = activeConfig.contextRail;
+			if (activeContextRailRuntime !== undefined) replaceContextRailConfig(activeContextRailRuntime, activeConfig.contextRail);
 			refreshContextRail(ctx);
 			const action = parseContextRailArgs(args);
 			if (action.kind === "invalid") {
 				ctx.ui.notify(CONTEXT_RAIL_USAGE, "warning");
 				return;
 			}
+			if (action.kind === "init") {
+				await initializeContextRailGlyphs(ctx, configPath);
+				return;
+			}
 			if (action.kind === "status") {
-				ctx.ui.notify(formatContextRailStatus(activeContextRailRuntime ?? createContextRailRuntime(activeConfig.contextRail, () => createContextRailPalette(ctx.ui.theme, "─"))), "info");
+				ctx.ui.notify(
+					formatContextRailStatus(
+						activeContextRailRuntime ??
+							createContextRailRuntime(
+								activeConfig.contextRail,
+								() => createContextRailPalette(ctx.ui.theme, "─"),
+								resolveContextRailFallback(ctx.ui.theme),
+								resolveContextRailPointerFallback(ctx.ui.theme),
+							),
+					),
+					"info",
+				);
 				return;
 			}
 			if (action.kind === "toggle") {
@@ -1693,6 +2003,7 @@ export default function promptBorderStyle(pi: ExtensionAPI, configPath = CONFIG_
 		handler: async (args, ctx) => {
 			if (!ctx.hasUI) return;
 			activeConfig = await ensurePromptBorderConfigFile(configPath);
+			if (activeContextRailRuntime !== undefined) replaceContextRailConfig(activeContextRailRuntime, activeConfig.contextRail);
 			applySpinnerGlyphFrames(ctx.ui.theme, activeConfig);
 			notifyInvalidConfig(ctx);
 			const action = parsePromptLoadingGlyphArgs(args);
@@ -1725,7 +2036,7 @@ export default function promptBorderStyle(pi: ExtensionAPI, configPath = CONFIG_
 		handler: async (args, ctx) => {
 			if (!ctx.hasUI) return;
 			activeConfig = await ensurePromptBorderConfigFile(configPath);
-			if (activeContextRailRuntime !== undefined) activeContextRailRuntime.config = activeConfig.contextRail;
+			if (activeContextRailRuntime !== undefined) replaceContextRailConfig(activeContextRailRuntime, activeConfig.contextRail);
 			applySpinnerGlyphFrames(ctx.ui.theme, activeConfig);
 			notifyInvalidConfig(ctx);
 			const action = parsePromptBorderArgs(args, activeBorder);
@@ -1741,7 +2052,7 @@ export default function promptBorderStyle(pi: ExtensionAPI, configPath = CONFIG_
 			}
 			activeBorder = action.state;
 			activeConfig = await writePromptBorderConfigSelection(activeBorder, configPath);
-			if (activeContextRailRuntime !== undefined) activeContextRailRuntime.config = activeConfig.contextRail;
+			if (activeContextRailRuntime !== undefined) replaceContextRailConfig(activeContextRailRuntime, activeConfig.contextRail);
 			applySpinnerGlyphFrames(ctx.ui.theme, activeConfig);
 			notifyInvalidConfig(ctx);
 			mountContextRailWidget(ctx);

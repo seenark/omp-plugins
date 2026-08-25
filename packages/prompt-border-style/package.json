@@ -6,13 +6,13 @@
     "license": "MIT",
     "files": [
         "src/main.ts",
+        "src/context-rail.ts",
         "README.md",
         "assets"
     ],
     "scripts": {
         "check": "bun --bun tsc --noEmit",
-        "check:types": "bun --bun tsc --noEmit",
-        "test": "bun test src/main.test.ts",
+        "test": "bun test src/context-rail.test.ts src/main.test.ts",
         "lint": "bun --bun tsc --noEmit",
         "build": "bun --bun tsc --noEmit",
         "pack:check": "bun pm pack --dry-run --quiet"

@@ -4,6 +4,17 @@ export type ContextRailPointer = "auto" | "visible" | "hidden";
 export type ContextRailLabels = "auto" | "bar-only" | "always";
 export type ContextRailLabelPosition = "left" | "center" | "right";
 
+export type ContextRailGlyphSize = {
+	width: number;
+	height: number;
+};
+
+export type ContextRailGlyphAsset = {
+	frames: string[];
+	fps?: number;
+	size?: ContextRailGlyphSize;
+};
+
 export type ContextRailConfig = {
 	enabled: boolean;
 	placement: ContextRailPlacement;
@@ -11,6 +22,10 @@ export type ContextRailConfig = {
 	pointer: ContextRailPointer;
 	labels: ContextRailLabels;
 	labelPosition: ContextRailLabelPosition;
+	showLabelGlyph?: boolean;
+	glyphDirectory: string;
+	labelGlyph: ContextRailGlyphAsset;
+	pointerGlyph: ContextRailGlyphAsset;
 };
 
 export const DEFAULT_CONTEXT_RAIL_CONFIG: ContextRailConfig = {
@@ -20,6 +35,10 @@ export const DEFAULT_CONTEXT_RAIL_CONFIG: ContextRailConfig = {
 	pointer: "auto",
 	labels: "auto",
 	labelPosition: "center",
+	showLabelGlyph: true,
+	glyphDirectory: "~/.config/codesook-omp/context-rail",
+	labelGlyph: { frames: [], fps: undefined },
+	pointerGlyph: { frames: [], fps: undefined },
 };
 
 export type ContextRailUsage = {
@@ -53,8 +72,23 @@ export type ContextRailPalette = {
 export type ContextRailRenderOptions = {
 	compact?: boolean;
 	pointer?: ContextRailPointer;
+	/** Preloaded pointer glyph frames rendered at the usage marker. */
+	pointerGlyphs?: readonly string[];
+	/** Current pointer glyph frame; selection wraps like the label frame. */
+	pointerFrame?: number;
+	/** Fallback pointer glyph when no non-blank frame is available. */
+	pointerGlyphFallback?: string;
 	labels?: ContextRailLabels;
 	labelPosition?: ContextRailLabelPosition;
+	showLabelGlyph?: boolean;
+	/** Preloaded glyph frames rendered immediately before the percentage label. */
+	labelGlyphs?: readonly string[];
+	/** Current glyph frame; selection wraps like Headroom's display renderer. */
+	labelFrame?: number;
+	/** Fallback glyph when no non-blank label frame is available. */
+	labelGlyphFallback?: string;
+	/** Declared tile dimensions that opt a multiline frame into grid rendering. */
+	labelGlyphSize?: ContextRailGlyphSize;
 };
 
 const ANSI_ESCAPE = "\x1b";
@@ -72,8 +106,58 @@ function isOneOf<T extends string>(value: unknown, values: readonly T[]): value 
 	return typeof value === "string" && values.includes(value as T);
 }
 
-export function normalizeContextRailConfig(raw: unknown): ContextRailConfig {
-	if (typeof raw !== "object" || raw === null) return { ...DEFAULT_CONTEXT_RAIL_CONFIG };
+export function parseContextRailGlyphAsset(source: string): ContextRailGlyphAsset {
+	const lines = source.split(/\r?\n/u);
+	const firstNonEmptyIndex = lines.findIndex(line => line.trim().length > 0);
+	let fps: number | undefined;
+	if (firstNonEmptyIndex >= 0) {
+		const directive = /^fps=(.*)$/u.exec(lines[firstNonEmptyIndex]!.trim());
+		if (directive) {
+			const candidate = Number(directive[1]!.trim());
+			if (Number.isFinite(candidate) && candidate > 0) fps = candidate;
+			lines.splice(firstNonEmptyIndex, 1);
+		}
+	}
+
+	let size: ContextRailGlyphSize | undefined;
+	const sizeIndex = lines.findIndex(line => line.trim().length > 0);
+	if (sizeIndex >= 0) {
+		const directive = /^size=(.*)$/u.exec(lines[sizeIndex]!.trim());
+		if (directive) {
+			const dimensions = /^(\d+)x(\d+)$/u.exec(directive[1]!.trim());
+			const width = dimensions === null ? Number.NaN : Number(dimensions[1]);
+			const height = dimensions === null ? Number.NaN : Number(dimensions[2]);
+			if (Number.isSafeInteger(width) && width > 0 && Number.isSafeInteger(height) && height > 0) {
+				size = { width, height };
+			}
+			lines.splice(sizeIndex, 1);
+		}
+	}
+
+	const buildAsset = (frames: string[]): ContextRailGlyphAsset => {
+		const asset: ContextRailGlyphAsset = { frames, fps };
+		if (size !== undefined) asset.size = size;
+		return asset;
+	};
+	const body = lines.join("\n");
+	if (!body.trim()) return buildAsset([]);
+	const frames = /\r?\n[ \t]*\r?\n/u.test(body)
+		? body
+				.split(/\r?\n[ \t]*\r?\n/u)
+				.map(frame => frame.trim())
+				.filter(Boolean)
+		: body.trim().split(/\s+/u).filter(Boolean);
+	return buildAsset(frames);
+}
+
+export function normalizeContextRailConfig(
+	raw: unknown,
+	labelGlyphAsset: ContextRailGlyphAsset = { frames: [], fps: undefined },
+	pointerGlyphAsset: ContextRailGlyphAsset = { frames: [], fps: undefined },
+): ContextRailConfig {
+	if (typeof raw !== "object" || raw === null) {
+		return { ...DEFAULT_CONTEXT_RAIL_CONFIG, labelGlyph: labelGlyphAsset, pointerGlyph: pointerGlyphAsset };
+	}
 	const config = raw as Record<string, unknown>;
 	return {
 		enabled: typeof config.enabled === "boolean" ? config.enabled : DEFAULT_CONTEXT_RAIL_CONFIG.enabled,
@@ -82,6 +166,13 @@ export function normalizeContextRailConfig(raw: unknown): ContextRailConfig {
 		pointer: isOneOf(config.pointer, POINTERS) ? config.pointer : DEFAULT_CONTEXT_RAIL_CONFIG.pointer,
 		labels: isOneOf(config.labels, LABELS) ? config.labels : DEFAULT_CONTEXT_RAIL_CONFIG.labels,
 		labelPosition: isOneOf(config.labelPosition, LABEL_POSITIONS) ? config.labelPosition : DEFAULT_CONTEXT_RAIL_CONFIG.labelPosition,
+		showLabelGlyph: typeof config.showLabelGlyph === "boolean" ? config.showLabelGlyph : DEFAULT_CONTEXT_RAIL_CONFIG.showLabelGlyph,
+		glyphDirectory:
+			typeof config.glyphDirectory === "string" && config.glyphDirectory.trim().length > 0
+				? config.glyphDirectory
+				: DEFAULT_CONTEXT_RAIL_CONFIG.glyphDirectory,
+		labelGlyph: labelGlyphAsset,
+		pointerGlyph: pointerGlyphAsset,
 	};
 }
 
@@ -198,10 +289,43 @@ const COMBINING_RANGES: readonly (readonly [number, number])[] = [
 	[0x1f3fb, 0x1f3ff],
 	[0xe0100, 0xe01ef],
 ];
-
-function isCombining(codePoint: number): boolean {
-	return COMBINING_RANGES.some(([start, end]) => codePoint >= start && codePoint <= end);
-}
+const EMOJI_WIDE_RANGES: readonly (readonly [number, number])[] = [
+	[0x231a, 0x231b],
+	[0x23e9, 0x23ec],
+	[0x23f0, 0x23f0],
+	[0x23f3, 0x23f3],
+	[0x25fd, 0x25fe],
+	[0x2614, 0x2615],
+	[0x2630, 0x2637],
+	[0x2648, 0x2653],
+	[0x267f, 0x267f],
+	[0x268a, 0x268f],
+	[0x2693, 0x2693],
+	[0x26a1, 0x26a1],
+	[0x26aa, 0x26ab],
+	[0x26bd, 0x26be],
+	[0x26c4, 0x26c5],
+	[0x26ce, 0x26ce],
+	[0x26d4, 0x26d4],
+	[0x26ea, 0x26ea],
+	[0x26f2, 0x26f3],
+	[0x26f5, 0x26f5],
+	[0x26fa, 0x26fa],
+	[0x26fd, 0x26fd],
+	[0x2705, 0x2705],
+	[0x270a, 0x270b],
+	[0x2728, 0x2728],
+	[0x274c, 0x274c],
+	[0x274e, 0x274e],
+	[0x2753, 0x2755],
+	[0x2757, 0x2757],
+	[0x2795, 0x2797],
+	[0x27b0, 0x27b0],
+	[0x27bf, 0x27bf],
+	[0x2b1b, 0x2b1c],
+	[0x2b50, 0x2b50],
+	[0x2b55, 0x2b55],
+];
 
 function isWide(codePoint: number): boolean {
 	return (
@@ -217,9 +341,15 @@ function isWide(codePoint: number): boolean {
 		(codePoint >= 0xff00 && codePoint <= 0xff60) ||
 		(codePoint >= 0xffe0 && codePoint <= 0xffe6) ||
 		(codePoint >= 0x1f300 && codePoint <= 0x1faff) ||
-		(codePoint >= 0x20000 && codePoint <= 0x3fffd)
+		(codePoint >= 0x20000 && codePoint <= 0x3fffd) ||
+		(codePoint >= 0x2300 && codePoint <= 0x2bff && EMOJI_WIDE_RANGES.some(([start, end]) => codePoint >= start && codePoint <= end))
 	);
 }
+
+function isCombining(codePoint: number): boolean {
+	return COMBINING_RANGES.some(([start, end]) => codePoint >= start && codePoint <= end);
+}
+
 
 function codePointWidth(codePoint: number): number {
 	if (codePoint === 0 || codePoint < 0x20 || (codePoint >= 0x7f && codePoint < 0xa0)) return 0;
@@ -331,6 +461,34 @@ function formatPercent(percent: number): string {
 	return Number.isInteger(displayPercent) ? `${displayPercent}%` : `${Math.round(displayPercent)}%`;
 }
 
+function flattenGlyphFrame(frame: string): string {
+	return frame.replace(/\r?\n/gu, "");
+}
+
+function selectGlyphFrame(
+	frames: readonly string[] | undefined,
+	frame: number | undefined,
+	fallback = "",
+	flatten = true,
+): string {
+	const format = (value: string): string => (flatten ? flattenGlyphFrame(value) : value);
+	if (frames === undefined || frames.length === 0) return format(fallback);
+	let validFrameCount = 0;
+	for (const glyph of frames) {
+		if (glyph.trim().length > 0) validFrameCount += 1;
+	}
+	if (validFrameCount === 0) return format(fallback);
+	const frameIndex =
+		typeof frame === "number" && Number.isFinite(frame) ? Math.abs(Math.trunc(frame)) % validFrameCount : 0;
+	let validFrameIndex = 0;
+	for (const glyph of frames) {
+		if (glyph.trim().length === 0) continue;
+		if (validFrameIndex === frameIndex) return format(glyph);
+		validFrameIndex += 1;
+	}
+	return format(fallback);
+}
+
 function shouldRenderLabel(mode: ContextRailLabels, compact: boolean): boolean {
 	if (mode === "bar-only") return false;
 	return mode === "always" || !compact;
@@ -390,6 +548,52 @@ function renderCell(palette: ContextRailPalette, kind: RailCellKind, value: stri
 			return safeColor(palette.label, value);
 	}
 }
+function writeLabelCells(
+	cells: string[],
+	kinds: RailCellKind[],
+	start: number,
+	label: string,
+	kind: RailCellKind,
+): void {
+	let offset = 0;
+	let index = 0;
+	let lastVisibleCell = start;
+	let pendingEscape = "";
+	while (index < label.length && start + offset < cells.length) {
+		const escapeLength = ansiEscapeLength(label, index);
+		if (escapeLength > 0) {
+			pendingEscape += label.slice(index, index + escapeLength);
+			index += escapeLength;
+			continue;
+		}
+		const codePoint = label.codePointAt(index) ?? 0;
+		const characterLength = codePoint > 0xffff ? 2 : 1;
+		const character = `${pendingEscape}${label.slice(index, index + characterLength)}`;
+		pendingEscape = "";
+		const characterWidth = codePointWidth(codePoint);
+		if (characterWidth === 0) {
+			cells[lastVisibleCell] = `${cells[lastVisibleCell]}${character}`;
+			index += characterLength;
+			continue;
+		}
+		const availableWidth = cells.length - start - offset;
+		const fittedWidth = Math.min(characterWidth, availableWidth);
+		cells[start + offset] = fitToWidth(character, fittedWidth, EMPTY_CELL);
+		kinds[start + offset] = kind;
+		lastVisibleCell = start + offset;
+		for (let continuation = 1; continuation < fittedWidth; continuation += 1) {
+			cells[start + offset + continuation] = "";
+			kinds[start + offset + continuation] = kind;
+		}
+		offset += fittedWidth;
+		index += characterLength;
+		if (fittedWidth < characterWidth) break;
+	}
+	if (pendingEscape.length > 0 && lastVisibleCell < cells.length) {
+		cells[lastVisibleCell] = `${cells[lastVisibleCell]}${pendingEscape}`;
+	}
+}
+
 
 function renderUnknownRail(width: number, palette: ContextRailPalette): string {
 	const glyph = typeof palette.horizontal === "string" && palette.horizontal.length > 0 ? palette.horizontal : DEFAULT_HORIZONTAL;
@@ -430,32 +634,40 @@ export function renderContextRail(
 	const pointerMode = isOneOf(options.pointer, POINTERS) ? options.pointer : "auto";
 	const pointerHidden = pointerMode === "hidden" || (pointerMode === "auto" && (options.compact === true || railWidth < 8));
 	const pointer = pointerHidden ? undefined : markerPosition(usage.percent, railWidth);
-	if (pointer !== undefined && palette.pointer.length > 0) {
-		cells[pointer] = fitToWidth(palette.pointer, 1);
-		kinds[pointer] = usedKind === "used" ? "normal" : usedKind;
+	const pointerGlyph = selectGlyphFrame(
+		options.pointerGlyphs,
+		options.pointerFrame,
+		options.pointerGlyphFallback ?? palette.pointer,
+	);
+	const pointerGlyphWidth = visibleWidth(pointerGlyph);
+	const hasPointerGlyph = pointerGlyphWidth > 0 && pointerGlyphWidth <= railWidth;
+	const pointerGlyphStart =
+		pointer === undefined || !hasPointerGlyph ? undefined : Math.min(pointer, railWidth - pointerGlyphWidth);
+	if (pointerGlyphStart !== undefined) {
+		writeLabelCells(cells, kinds, pointerGlyphStart, pointerGlyph, usedKind === "used" ? "normal" : usedKind);
 	}
 
 	const blockedLabelPositions: number[] = [];
-	if (pointer !== undefined && palette.pointer.length > 0) blockedLabelPositions.push(pointer);
+	if (pointerGlyphStart !== undefined) {
+		for (let offset = 0; offset < pointerGlyphWidth; offset += 1) {
+			blockedLabelPositions.push(pointerGlyphStart + offset);
+		}
+	}
+
 	if (speculation !== undefined && palette.speculation.length > 0) blockedLabelPositions.push(speculation);
 	if (threshold !== undefined && palette.threshold.length > 0) blockedLabelPositions.push(threshold);
 
 	const labelsMode = isOneOf(options.labels, LABELS) ? options.labels : "auto";
 	const labelPosition = isOneOf(options.labelPosition, LABEL_POSITIONS) ? options.labelPosition : "center";
 	if (shouldRenderLabel(labelsMode, options.compact === true)) {
-		const label = formatPercent(usage.percent);
+		const glyph = options.showLabelGlyph === false ? "" : selectGlyphFrame(options.labelGlyphs, options.labelFrame, options.labelGlyphFallback);
+		const label = `${glyph}${formatPercent(usage.percent)}`;
 		const labelWidth = visibleWidth(label);
 		const canFit = railWidth >= labelWidth + 2 || (labelsMode === "always" && railWidth >= labelWidth);
 		if (canFit && labelWidth > 0) {
 			const start = chooseLabelStart(railWidth, labelWidth, blockedLabelPositions, labelPosition);
 			if (start !== undefined) {
-				let offset = 0;
-				for (const character of label) {
-					const characterWidth = visibleWidth(character);
-					cells[start + offset] = fitToWidth(character, Math.min(characterWidth, railWidth - start - offset));
-					kinds[start + offset] = overLimit ? "error" : "label";
-					offset += characterWidth;
-				}
+				writeLabelCells(cells, kinds, start, label, overLimit ? "error" : "label");
 			}
 		}
 	}
@@ -466,4 +678,69 @@ export function renderContextRail(
 		}
 	}
 	return cells.map((cell, index) => renderCell(palette, kinds[index]!, cell)).join("");
+}
+const GRID_GAUGE_MIN_WIDTH = 8;
+
+function clearLabelGlyphOptions(options: ContextRailRenderOptions): ContextRailRenderOptions {
+	return {
+		...options,
+		labelGlyphs: [],
+		labelFrame: 0,
+		labelGlyphFallback: "",
+	};
+}
+
+function alignGridRow(row: string, width: number, position: ContextRailLabelPosition): string {
+	const fitted = fitToWidth(row, width, EMPTY_CELL);
+	const rowWidth = visibleWidth(fitted);
+	const remaining = Math.max(0, width - rowWidth);
+	const leftPadding = position === "right" ? remaining : position === "center" ? Math.floor(remaining / 2) : 0;
+	return `${EMPTY_CELL.repeat(leftPadding)}${fitted}${EMPTY_CELL.repeat(remaining - leftPadding)}`;
+}
+
+export function renderContextRailRows(
+	width: number,
+	palette: ContextRailPalette,
+	usage?: ContextRailUsage,
+	boundaries?: ContextRailBoundaries,
+	options: ContextRailRenderOptions = {},
+): readonly string[] {
+	const railWidth = normalizeWidth(width);
+	if (railWidth === 0) return [""];
+	if (options.showLabelGlyph === false) {
+		return [renderContextRail(railWidth, palette, usage, boundaries, options)];
+	}
+	const selectedFrame = selectGlyphFrame(
+		options.labelGlyphs,
+		options.labelFrame,
+		options.labelGlyphFallback,
+		false,
+	);
+	if (options.labelGlyphSize === undefined || !selectedFrame.includes("\n")) {
+		return [renderContextRail(railWidth, palette, usage, boundaries, options)];
+	}
+
+	const frameRows = selectedFrame.split(/\r?\n/u);
+	const artWidth = Math.max(...frameRows.map(row => visibleWidth(row)), 0);
+	const separatorWidth = 1;
+	const availableArtWidth = railWidth - separatorWidth - GRID_GAUGE_MIN_WIDTH;
+	if (artWidth === 0 || availableArtWidth <= 0) {
+		return [renderContextRail(railWidth, palette, usage, boundaries, clearLabelGlyphOptions(options))];
+	}
+
+	const panelWidth = Math.min(artWidth, availableArtWidth);
+	const gaugeWidth = railWidth - panelWidth - separatorWidth;
+	const gauge = renderContextRail(
+		gaugeWidth,
+		palette,
+		usage,
+		boundaries,
+		clearLabelGlyphOptions(options),
+	);
+	const labelPosition = isOneOf(options.labelPosition, LABEL_POSITIONS) ? options.labelPosition : "center";
+	return frameRows.map((row, index) => {
+		const art = safeColor(palette.label, alignGridRow(row, panelWidth, labelPosition));
+		const right = index === 0 ? gauge : EMPTY_CELL.repeat(gaugeWidth);
+		return `${art}${EMPTY_CELL}${right}`;
+	});
 }

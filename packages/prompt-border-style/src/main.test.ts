@@ -1,5 +1,5 @@
 import { describe, expect, test, vi } from "bun:test";
-import { mkdtemp } from "node:fs/promises";
+import { mkdir, mkdtemp } from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
 import type { ExtensionAPI } from "@oh-my-pi/pi-coding-agent";
@@ -667,6 +667,7 @@ describe("prompt border config", () => {
 	test("reads cursor and spinner glyph frames from sibling text files", async () => {
 		const dir = await mkdtemp(path.join(os.tmpdir(), "prompt-border-"));
 		const configPath = path.join(dir, "config.json");
+		const contextRailGlyphDirectory = path.join(dir, "context-rail-glyphs");
 		await Bun.write(
 			configPath,
 			JSON.stringify({
@@ -678,6 +679,7 @@ describe("prompt border config", () => {
 						activity: { frameMs: 95 },
 					},
 				},
+				contextRail: { glyphDirectory: contextRailGlyphDirectory },
 			}, null, 2),
 		);
 		await Bun.write(path.join(dir, "prompt-border-left-glyphs.txt"), "AA  BB");
@@ -693,7 +695,61 @@ describe("prompt border config", () => {
 				status: { frameMs: 85, glyphs: "S0  S1", frames: ["S0", "S1"] },
 				activity: { frameMs: 95, glyphs: "A0  A1", frames: ["A0", "A1"] },
 			},
-			contextRail: { ...DEFAULT_CONTEXT_RAIL_CONFIG },
+			contextRail: { ...DEFAULT_CONTEXT_RAIL_CONFIG, glyphDirectory: contextRailGlyphDirectory },
+		});
+	});
+	test("loads Context Rail label frames and fps from its configured directory", async () => {
+		const dir = await mkdtemp(path.join(os.tmpdir(), "prompt-border-"));
+		const configPath = path.join(dir, "config.json");
+		const glyphDirectory = path.join(dir, "context-rail-glyphs");
+		await Bun.write(
+			configPath,
+			JSON.stringify({
+				welcomeScreen: { mainText: "Keep Me" },
+				contextRail: { glyphDirectory, placement: "above", size: { width: 9, height: 9 }, showLabelGlyph: "invalid" },
+			}, null, 2),
+		);
+		await mkdir(glyphDirectory, { recursive: true });
+		await Bun.write(path.join(glyphDirectory, "label.txt"), "fps=16\nsize=2x2\nA\n\nB\n");
+
+		const config = await readPromptBorderConfig(configPath);
+		expect(config.contextRail.glyphDirectory).toBe(glyphDirectory);
+		expect(config.contextRail.labelGlyph).toEqual({ frames: ["A", "B"], fps: 16, size: { width: 2, height: 2 } });
+		await ensurePromptBorderConfigFile(configPath);
+		const saved = JSON.parse(await Bun.file(configPath).text());
+		expect(saved.welcomeScreen.mainText).toBe("Keep Me");
+		expect(saved.contextRail.size).toBeUndefined();
+		expect(saved.contextRail.showLabelGlyph).toBe(true);
+		expect(saved.contextRail.labelGlyph).toBeUndefined();
+	});
+	test("loads pointer glyph frames from pointer.txt without serializing them", async () => {
+		const dir = await mkdtemp(path.join(os.tmpdir(), "prompt-border-"));
+		const configPath = path.join(dir, "config.json");
+		const glyphDirectory = path.join(dir, "context-rail-glyphs");
+		await mkdir(glyphDirectory, { recursive: true });
+		await Bun.write(configPath, JSON.stringify({ contextRail: { glyphDirectory } }));
+		await Bun.write(path.join(glyphDirectory, "pointer.txt"), "fps=8\no\n\nO\n");
+
+		const config = await readPromptBorderConfig(configPath);
+		expect(config.contextRail.pointerGlyph).toEqual({ frames: ["o", "O"], fps: 8 });
+		await ensurePromptBorderConfigFile(configPath);
+		const saved = JSON.parse(await Bun.file(configPath).text());
+		expect(saved.contextRail.pointerGlyph).toBeUndefined();
+	});
+
+	test("uses an empty Context Rail asset when label.txt is missing or empty", async () => {
+		const dir = await mkdtemp(path.join(os.tmpdir(), "prompt-border-"));
+		const configPath = path.join(dir, "config.json");
+		const glyphDirectory = path.join(dir, "context-rail-glyphs");
+		await Bun.write(configPath, JSON.stringify({ contextRail: { glyphDirectory } }));
+
+		await expect(readPromptBorderConfig(configPath)).resolves.toMatchObject({
+			contextRail: { glyphDirectory, labelGlyph: { frames: [], fps: undefined } },
+		});
+		await mkdir(glyphDirectory, { recursive: true });
+		await Bun.write(path.join(glyphDirectory, "label.txt"), " \n\t\n");
+		await expect(readPromptBorderConfig(configPath)).resolves.toMatchObject({
+			contextRail: { glyphDirectory, labelGlyph: { frames: [], fps: undefined } },
 		});
 	});
 
@@ -755,6 +811,7 @@ describe("prompt border config", () => {
 	test("writes prompt border style and layout while preserving glyph config", async () => {
 		const dir = await mkdtemp(path.join(os.tmpdir(), "prompt-border-"));
 		const configPath = path.join(dir, "config.json");
+		const contextRailGlyphDirectory = path.join(dir, "context-rail-glyphs");
 		const leftGlyphPath = path.join(dir, "prompt-border-left-glyphs.txt");
 		const rightGlyphPath = path.join(dir, "prompt-border-right-glyphs.txt");
 		const statusSpinnerGlyphPath = path.join(dir, "prompt-border-status-spinner-glyphs.txt");
@@ -774,6 +831,7 @@ describe("prompt border config", () => {
 						activity: { frameMs: 95, glyphs: "" },
 					},
 				},
+				contextRail: { glyphDirectory: contextRailGlyphDirectory },
 			}, null, 2),
 		);
 		await Bun.write(leftGlyphPath, "AA  BB");
@@ -793,7 +851,7 @@ describe("prompt border config", () => {
 				status: { frameMs: 85, glyphs: "S0  S1", frames: ["S0", "S1"] },
 				activity: { frameMs: 95, glyphs: "A0  A1", frames: ["A0", "A1"] },
 			},
-			contextRail: { ...DEFAULT_CONTEXT_RAIL_CONFIG },
+			contextRail: { ...DEFAULT_CONTEXT_RAIL_CONFIG, glyphDirectory: contextRailGlyphDirectory },
 		});
 		expect(saved.theme).toBe("keep-me");
 		expect(saved.promptBorder.style).toBe("round");
@@ -832,19 +890,24 @@ describe("prompt border config", () => {
 		expect(saved.promptBorder.style).toBe("round");
 		expect(saved.promptBorder.layout).toBe("sides");
 	});
-	test("writes context rail settings without changing prompt border settings", async () => {
+	test("writes Context Rail settings while preserving its asset directory and unrelated JSON", async () => {
 		const dir = await mkdtemp(path.join(os.tmpdir(), "prompt-border-"));
 		const configPath = path.join(dir, "config.json");
+		const glyphDirectory = path.join(dir, "context-rail-glyphs");
+		await mkdir(glyphDirectory, { recursive: true });
+		await Bun.write(path.join(glyphDirectory, "label.txt"), "A\n");
 		await Bun.write(
 			configPath,
 			JSON.stringify({
+				welcomeScreen: { mainText: "Keep Me" },
+				customPlugin: { enabled: true },
 				promptBorder: { style: "round", layout: "full", leftGlyph: { frameMs: 80 } },
-				contextRail: { placement: "inside", visibility: "always" },
+				contextRail: { placement: "inside", visibility: "always", glyphDirectory },
 			}),
 		);
 
 		const config = await writeContextRailConfigSelection(
-			{ placement: "below", visibility: "toggle", pointer: "hidden", labelPosition: "right" },
+			{ placement: "below", visibility: "toggle", pointer: "hidden", labelPosition: "right", showLabelGlyph: false },
 			configPath,
 		);
 		const saved = JSON.parse(await Bun.file(configPath).text());
@@ -856,10 +919,17 @@ describe("prompt border config", () => {
 			pointer: "hidden",
 			labels: "auto",
 			labelPosition: "right",
+			showLabelGlyph: false,
+			glyphDirectory,
+			labelGlyph: { frames: ["A"], fps: undefined },
+			pointerGlyph: { frames: [], fps: undefined },
 		});
+		expect(saved.welcomeScreen.mainText).toBe("Keep Me");
+		expect(saved.customPlugin.enabled).toBe(true);
 		expect(saved.promptBorder.style).toBe("round");
-		expect(saved.contextRail.placement).toBe("below");
-		expect(saved.contextRail.visibility).toBe("toggle");
+		expect(saved.contextRail.glyphDirectory).toBe(glyphDirectory);
+		expect(saved.contextRail.showLabelGlyph).toBe(false);
+		expect(saved.contextRail.labelGlyph).toBeUndefined();
 	});
 });
 
@@ -1481,14 +1551,33 @@ describe("Context Rail command", () => {
 		expect(parseContextRailArgs("pointer hidden")).toEqual({ kind: "set", update: { pointer: "hidden" } });
 		expect(parseContextRailArgs("labels bar-only")).toEqual({ kind: "set", update: { labels: "bar-only" } });
 		expect(parseContextRailArgs("position right")).toEqual({ kind: "set", update: { labelPosition: "right" } });
+		expect(parseContextRailArgs("label-glyph on")).toEqual({ kind: "set", update: { showLabelGlyph: true } });
+		expect(parseContextRailArgs("label-glyph off")).toEqual({ kind: "set", update: { showLabelGlyph: false } });
 		expect(parseContextRailArgs("position diagonal")).toEqual({ kind: "invalid" });
+		expect(parseContextRailArgs("label-glyph")).toEqual({ kind: "invalid" });
+		expect(parseContextRailArgs("label-glyph toggle")).toEqual({ kind: "invalid" });
+		expect(parseContextRailArgs("label-glyph maybe")).toEqual({ kind: "invalid" });
+		expect(parseContextRailArgs("label-glyph off extra")).toEqual({ kind: "invalid" });
 		expect(parseContextRailArgs("nope")).toEqual({ kind: "invalid" });
+		expect(parseContextRailArgs("init")).toEqual({ kind: "init", target: "glyphs" });
+		expect(parseContextRailArgs("init glyphs")).toEqual({ kind: "init", target: "glyphs" });
+		expect(parseContextRailArgs("init config")).toEqual({ kind: "invalid" });
 	});
 
 	test("completes Context Rail subcommands without dropping their parent token", () => {
 		expect(getContextRailArgumentCompletions("")?.map(item => item.value)).toEqual(
-			expect.arrayContaining(["on", "off", "toggle", "status", "placement", "visibility", "pointer", "labels", "position"]),
+			expect.arrayContaining(["on", "off", "toggle", "status", "init", "placement", "visibility", "pointer", "labels", "label-glyph", "position"]),
 		);
+		expect(getContextRailArgumentCompletions("init ")?.map(item => item.value)).toEqual(["init glyphs"]);
+		expect(getContextRailArgumentCompletions("init g")?.map(item => item.value)).toEqual(["init glyphs"]);
+		expect(getContextRailArgumentCompletions("label-glyph ")?.map(item => item.value)).toEqual([
+			"label-glyph on",
+			"label-glyph off",
+		]);
+		expect(getContextRailArgumentCompletions("label-glyph o")?.map(item => item.value)).toEqual([
+			"label-glyph on",
+			"label-glyph off",
+		]);
 		expect(getContextRailArgumentCompletions("placement ")?.map(item => item.value)).toEqual([
 			"placement inside",
 			"placement above",
@@ -1529,7 +1618,418 @@ describe("Context Rail command", () => {
 		});
 
 		expect(notifications.at(-1)).toContain("label-position right");
+		expect(notifications.at(-1)).toContain("label-glyph on");
 	});
+	test("persists label-glyph off through the registered command", async () => {
+		const dir = await mkdtemp(path.join(os.tmpdir(), "prompt-border-"));
+		const configPath = path.join(dir, "config.json");
+		const glyphDirectory = path.join(dir, "context-rail-glyphs");
+		await mkdir(glyphDirectory, { recursive: true });
+		await Bun.write(path.join(glyphDirectory, "label.txt"), "A0\n\nA1\n");
+		await Bun.write(path.join(glyphDirectory, "pointer.txt"), "o\n");
+		await Bun.write(
+			configPath,
+			JSON.stringify({ welcomeScreen: { mainText: "Keep Me" }, contextRail: { glyphDirectory, showLabelGlyph: true } }),
+		);
+
+		type LifecycleHandler = (event: unknown, ctx: unknown) => Promise<void> | void;
+		type ContextRailHandler = (args: string, ctx: unknown) => Promise<void>;
+		let sessionStart: LifecycleHandler | undefined;
+		let sessionShutdown: LifecycleHandler | undefined;
+		let contextRailHandler: ContextRailHandler | undefined;
+		const notifications: string[] = [];
+		const pi = {
+			setLabel: () => {},
+			on: (event: string, handler: LifecycleHandler) => {
+				if (event === "session_start") sessionStart = handler;
+				if (event === "session_shutdown") sessionShutdown = handler;
+			},
+			registerCommand: (name: string, command: { handler: ContextRailHandler }) => {
+				if (name === "context-rail") contextRailHandler = command.handler;
+			},
+		} as unknown as ExtensionAPI;
+		const theme = {
+			symbol: () => "",
+			fg: (_name: string, value: string) => value,
+			getSpinnerFrames: () => [] as string[],
+			boxRound: borderStyles.round,
+		};
+		const ctx = {
+			hasUI: true as const,
+			getContextUsage: () => ({ tokens: 50_000, contextWindow: 100_000, percent: 50 }),
+			ui: {
+				theme,
+				setEditorComponent: () => {},
+				setWidget: () => {},
+				setWorkingMessage: () => {},
+				notify: (message: string) => notifications.push(message),
+			},
+		};
+
+		promptBorderStyle(pi, configPath);
+		await sessionStart?.({}, ctx);
+		await contextRailHandler?.("label-glyph off", ctx);
+		const saved = JSON.parse(await Bun.file(configPath).text());
+
+		expect(saved.welcomeScreen.mainText).toBe("Keep Me");
+		expect(saved.contextRail.showLabelGlyph).toBe(false);
+		expect(notifications.at(-1)).toContain("label-glyph off");
+		expect(await Bun.file(path.join(glyphDirectory, "label.txt")).text()).toBe("A0\n\nA1\n");
+		sessionShutdown?.({}, ctx);
+	});
+	test("creates a default label asset without confirmation and reloads it", async () => {
+		const dir = await mkdtemp(path.join(os.tmpdir(), "prompt-border-"));
+		const configPath = path.join(dir, "config.json");
+		const glyphDirectory = path.join(dir, "context-rail-glyphs");
+		await Bun.write(configPath, JSON.stringify({ contextRail: { glyphDirectory } }));
+		type ContextRailHandler = (
+			args: string,
+			ctx: {
+				hasUI: true;
+				ui: {
+					theme: unknown;
+					confirm: (title: string, message: string) => Promise<boolean>;
+					notify: (message: string, level?: string) => void;
+				};
+			},
+		) => Promise<void>;
+		let contextRailHandler: ContextRailHandler | undefined;
+		const notifications: string[] = [];
+		let confirmationCalls = 0;
+		const pi = {
+			setLabel: () => {},
+			on: () => {},
+			registerCommand: (name: string, command: { handler: ContextRailHandler }) => {
+				if (name === "context-rail") contextRailHandler = command.handler;
+			},
+		} as unknown as ExtensionAPI;
+
+		promptBorderStyle(pi, configPath);
+		await contextRailHandler?.("init", {
+			hasUI: true,
+			ui: {
+				theme: {
+					symbol: (name: string) => (name === "status.success" ? "◆" : ""),
+					fg: (_name: string, value: string) => value,
+				},
+				confirm: async () => {
+					confirmationCalls += 1;
+					return false;
+				},
+				notify: (message: string) => notifications.push(message),
+			},
+		});
+
+		expect(confirmationCalls).toBe(0);
+		expect(await Bun.file(path.join(glyphDirectory, "label.txt")).text()).toBe("◆\n");
+		expect(await Bun.file(path.join(glyphDirectory, "pointer.txt")).text()).toBe("●\n");
+		expect(notifications.at(-1)).toContain("Created");
+		await expect(readPromptBorderConfig(configPath)).resolves.toMatchObject({
+			contextRail: { glyphDirectory, labelGlyph: { frames: ["◆"], fps: undefined } },
+		});
+	});
+
+	test("preserves declined overwrites and replaces confirmed label assets", async () => {
+		const dir = await mkdtemp(path.join(os.tmpdir(), "prompt-border-"));
+		const configPath = path.join(dir, "config.json");
+		const glyphDirectory = path.join(dir, "context-rail-glyphs");
+		await mkdir(glyphDirectory, { recursive: true });
+		const labelPath = path.join(glyphDirectory, "label.txt");
+		await Bun.write(labelPath, "OLD\n");
+		await Bun.write(configPath, JSON.stringify({ contextRail: { glyphDirectory } }));
+		type ContextRailHandler = (
+			args: string,
+			ctx: {
+				hasUI: true;
+				ui: {
+					theme: unknown;
+					confirm: (title: string, message: string) => Promise<boolean>;
+					notify: (message: string, level?: string) => void;
+				};
+			},
+		) => Promise<void>;
+		let contextRailHandler: ContextRailHandler | undefined;
+		const notifications: string[] = [];
+		let overwrite = false;
+		const pi = {
+			setLabel: () => {},
+			on: () => {},
+			registerCommand: (name: string, command: { handler: ContextRailHandler }) => {
+				if (name === "context-rail") contextRailHandler = command.handler;
+			},
+		} as unknown as ExtensionAPI;
+
+		promptBorderStyle(pi, configPath);
+		const ctx = {
+			hasUI: true as const,
+			ui: {
+				theme: {
+					symbol: (name: string) => (name === "status.success" ? "◆" : ""),
+					fg: (_name: string, value: string) => value,
+				},
+				confirm: async () => overwrite,
+				notify: (message: string) => notifications.push(message),
+			},
+		};
+		await contextRailHandler?.("init glyphs", ctx);
+		expect(await Bun.file(labelPath).text()).toBe("OLD\n");
+		expect(notifications.at(-1)).toContain("Skipped");
+		overwrite = true;
+		await contextRailHandler?.("init glyphs", ctx);
+		expect(await Bun.file(labelPath).text()).toBe("◆\n");
+		expect(notifications.at(-1)).toContain("Overwritten");
+	});
+	test("reports Context Rail label write failures", async () => {
+		const dir = await mkdtemp(path.join(os.tmpdir(), "prompt-border-"));
+		const configPath = path.join(dir, "config.json");
+		await Bun.write(configPath, JSON.stringify({ contextRail: { glyphDirectory: "/dev/null/context-rail" } }));
+		let contextRailHandler:
+			| ((args: string, ctx: unknown) => Promise<void>)
+			| undefined;
+		const notifications: string[] = [];
+		const pi = {
+			setLabel: () => {},
+			on: () => {},
+			registerCommand: (name: string, command: { handler: typeof contextRailHandler }) => {
+				if (name === "context-rail") contextRailHandler = command.handler;
+			},
+		} as unknown as ExtensionAPI;
+
+		promptBorderStyle(pi, configPath);
+		await contextRailHandler?.("init glyphs", {
+			hasUI: true,
+			ui: {
+				theme: {
+					symbol: () => "◆",
+					fg: (_name: string, value: string) => value,
+				},
+				confirm: async () => true,
+				notify: (message: string) => notifications.push(message),
+			},
+		});
+
+		expect(notifications.at(-1)).toContain("Failed");
+	});
+});
+
+test("uses the theme success glyph or the hard fallback for missing label assets", async () => {
+	for (const variant of [
+		{ expected: "★", symbol: (name: string) => (name === "status.success" ? "★" : "") },
+		{ expected: "✓", symbol: () => "" },
+		{ expected: "✓", symbol: () => { throw new Error("theme symbol failure"); } },
+		{ expected: "✓", symbol: "not callable" },
+	] as const) {
+		const dir = await mkdtemp(path.join(os.tmpdir(), "prompt-border-"));
+		const configPath = path.join(dir, "config.json");
+		const glyphDirectory = path.join(dir, "missing-context-rail-glyphs");
+		await Bun.write(
+			configPath,
+			JSON.stringify({
+				promptBorder: { style: "double", layout: "full" },
+				contextRail: {
+					pointer: "hidden",
+					labels: "always",
+					labelPosition: "left",
+					glyphDirectory,
+				},
+			}),
+		);
+		for (const fileName of [
+			"prompt-border-left-glyphs.txt",
+			"prompt-border-right-glyphs.txt",
+			"prompt-border-status-spinner-glyphs.txt",
+			"prompt-border-activity-spinner-glyphs.txt",
+		]) {
+			await Bun.write(path.join(dir, fileName), "");
+		}
+
+		let sessionStart: ((event: unknown, ctx: unknown) => Promise<void>) | undefined;
+		let sessionShutdown: ((event: unknown, ctx: unknown) => void) | undefined;
+		let editorFactory: ((tui: { requestRender: () => void }, editorTheme: EditorTheme) => PromptBorderEditor) | undefined;
+		const agentTheme = {
+			symbol: variant.symbol,
+			fg: (_name: string, value: string) => value,
+			getSpinnerFrames: () => [] as string[],
+		};
+		const pi = {
+			setLabel: () => {},
+			on: (event: string, handler: (event: unknown, ctx: unknown) => Promise<void> | void) => {
+				if (event === "session_start") sessionStart = handler as typeof sessionStart;
+				if (event === "session_shutdown") sessionShutdown = handler as typeof sessionShutdown;
+			},
+			registerCommand: () => {},
+		} as unknown as ExtensionAPI;
+		const ctx = {
+			hasUI: true as const,
+			getContextUsage: () => ({ tokens: 50_000, contextWindow: 100_000, percent: 50 }),
+			ui: {
+				theme: agentTheme,
+				setEditorComponent: (value: unknown) => {
+					if (typeof value === "function") {
+						editorFactory = value as (tui: { requestRender: () => void }, editorTheme: EditorTheme) => PromptBorderEditor;
+					}
+				},
+				setWidget: () => {},
+				setWorkingMessage: () => {},
+				notify: () => {},
+			},
+		};
+
+		promptBorderStyle(pi, configPath);
+		await sessionStart?.({}, ctx);
+		const editor = editorFactory?.({ requestRender: () => {} }, theme);
+		const line = editor?.render(20).find(value => value.includes("50%")) ?? "";
+		expect(line).toContain(`${variant.expected}50%`);
+		expect(visibleWidth(line)).toBe(20);
+		sessionShutdown?.({}, ctx);
+	}
+});
+
+test("animates Context Rail labels across inside, above, and below placements", async () => {
+	vi.useFakeTimers();
+	try {
+		for (const placement of ["inside", "above", "below"] as const) {
+			const dir = await mkdtemp(path.join(os.tmpdir(), "prompt-border-"));
+			const configPath = path.join(dir, "config.json");
+			const glyphDirectory = path.join(dir, "context-rail-glyphs");
+			await mkdir(glyphDirectory, { recursive: true });
+			await Bun.write(path.join(glyphDirectory, "label.txt"), "fps=16\nsize=2x2\nA0A1\nB0B1\n\nC0C1\nD0D1\n");
+			await Bun.write(path.join(glyphDirectory, "pointer.txt"), "fps=16\no\n\nO\n");
+			await Bun.write(
+				configPath,
+				JSON.stringify({
+					promptBorder: { style: "double", layout: "full" },
+					contextRail: {
+						placement,
+						pointer: "visible",
+						labels: "always",
+						labelPosition: "left",
+						glyphDirectory,
+					},
+				}),
+			);
+			for (const fileName of [
+				"prompt-border-left-glyphs.txt",
+				"prompt-border-right-glyphs.txt",
+				"prompt-border-status-spinner-glyphs.txt",
+				"prompt-border-activity-spinner-glyphs.txt",
+			]) {
+				await Bun.write(path.join(dir, fileName), "");
+			}
+
+			type EditorFactory = (tui: { requestRender: () => void }, editorTheme: EditorTheme) => PromptBorderEditor;
+			type Widget = { render: (width: number) => readonly string[] };
+			type WidgetFactory = (tui: unknown, widgetTheme: EditorTheme) => Widget;
+			type LifecycleHandler = (event: unknown, ctx: unknown) => Promise<void> | void;
+			type CommandHandler = (args: string, ctx: unknown) => Promise<void>;
+			let sessionStart: LifecycleHandler | undefined;
+			let sessionShutdown: LifecycleHandler | undefined;
+			let editorFactory: EditorFactory | undefined;
+			let widgetFactory: WidgetFactory | undefined;
+			let contextRailHandler: CommandHandler | undefined;
+			const pi = {
+				setLabel: () => {},
+				on: (event: string, handler: LifecycleHandler) => {
+					if (event === "session_start") sessionStart = handler;
+					if (event === "session_shutdown") sessionShutdown = handler;
+				},
+				registerCommand: (name: string, command: { handler: CommandHandler }) => {
+					if (name === "context-rail") contextRailHandler = command.handler;
+				},
+			} as unknown as ExtensionAPI;
+			const agentTheme = {
+				symbol: (name: string) => (name === "status.success" ? "✓" : ""),
+				fg: (_name: string, value: string) => value,
+				getSpinnerFrames: () => [] as string[],
+				boxRound: borderStyles.round,
+			};
+			let repaints = 0;
+			const setWorkingMessage = () => {};
+			const ctx = {
+				hasUI: true as const,
+				getContextUsage: () => ({ tokens: 50_000, contextWindow: 100_000, percent: 50 }),
+				ui: {
+					theme: agentTheme,
+					setEditorComponent: (value: unknown) => {
+						if (typeof value === "function") editorFactory = value as EditorFactory;
+					},
+					setWidget: (_key: string, value: unknown) => {
+						if (typeof value === "function") widgetFactory = value as WidgetFactory;
+					},
+					setWorkingMessage,
+					notify: () => {},
+				},
+			};
+
+			promptBorderStyle(pi, configPath);
+			await sessionStart?.({}, ctx);
+			const editor = editorFactory?.({ requestRender: () => (repaints += 1) }, theme);
+			const widget = placement === "inside" ? undefined : widgetFactory?.({}, agentTheme as unknown as EditorTheme);
+			const renderRail = (): readonly string[] => {
+				const lines = placement === "inside" ? editor?.render(20) ?? [] : widget?.render(20) ?? [];
+				const gaugeLine = lines.find(value => value.includes("50%")) ?? "";
+				expect(visibleWidth(gaugeLine)).toBe(20);
+				expect(lines.some(value => value.includes("A0A1") || value.includes("C0C1"))).toBe(true);
+				expect(lines.some(value => value.includes("B0B1") || value.includes("D0D1"))).toBe(true);
+				return lines;
+			};
+
+			let lines = renderRail();
+			expect(lines.some(value => value.includes("A0A1"))).toBe(true);
+			expect(lines.some(value => value.includes("B0B1"))).toBe(true);
+			expect(lines.some(value => value.includes("o"))).toBe(true);
+			vi.advanceTimersByTime(62);
+			expect(repaints).toBe(0);
+			vi.advanceTimersByTime(1);
+			expect(repaints).toBe(2);
+			lines = renderRail();
+			expect(lines.some(value => value.includes("C0C1"))).toBe(true);
+			expect(lines.some(value => value.includes("D0D1"))).toBe(true);
+			expect(lines.some(value => value.includes("O"))).toBe(true);
+
+			const beforeWrap = repaints;
+			vi.advanceTimersByTime(63);
+			expect(repaints).toBe(beforeWrap + 2);
+			lines = renderRail();
+			expect(lines.some(value => value.includes("A0A1"))).toBe(true);
+			expect(lines.some(value => value.includes("o"))).toBe(true);
+
+			const beforeReload = repaints;
+			await contextRailHandler?.("labels always", ctx);
+			const afterReload = repaints;
+			expect(afterReload).toBeGreaterThanOrEqual(beforeReload);
+			vi.advanceTimersByTime(63);
+			expect(repaints).toBe(afterReload);
+			const beforeHide = repaints;
+			await contextRailHandler?.("label-glyph off", ctx);
+			const afterHide = repaints;
+			expect(afterHide).toBeGreaterThanOrEqual(beforeHide);
+			let hiddenLines = placement === "inside" ? editor?.render(20) ?? [] : widget?.render(20) ?? [];
+			const hiddenGaugeLine = hiddenLines.find(value => value.includes("50%")) ?? "";
+			expect(visibleWidth(hiddenGaugeLine)).toBe(20);
+			expect(hiddenLines.some(value => value.includes("A0A1") || value.includes("C0C1"))).toBe(false);
+			expect(hiddenLines.some(value => value.includes("B0B1") || value.includes("D0D1"))).toBe(false);
+			expect(hiddenLines.some(value => value.includes("o"))).toBe(true);
+			const beforeHiddenTimer = repaints;
+			vi.advanceTimersByTime(62);
+			expect(repaints).toBe(beforeHiddenTimer);
+			vi.advanceTimersByTime(1);
+			expect(repaints).toBe(beforeHiddenTimer + 1);
+			hiddenLines = placement === "inside" ? editor?.render(20) ?? [] : widget?.render(20) ?? [];
+			expect(hiddenLines.some(value => value.includes("50%"))).toBe(true);
+			expect(hiddenLines.some(value => value.includes("A0A1") || value.includes("C0C1"))).toBe(false);
+			expect(hiddenLines.some(value => value.includes("B0B1") || value.includes("D0D1"))).toBe(false);
+			expect(hiddenLines.some(value => value.includes("O"))).toBe(true);
+
+			const beforeShutdown = repaints;
+			sessionShutdown?.({}, ctx);
+			vi.advanceTimersByTime(63);
+			expect(repaints).toBe(beforeShutdown);
+			vi.clearAllTimers();
+		}
+	} finally {
+		vi.useRealTimers();
+	}
 });
 
 describe("getPromptBorderArgumentCompletions", () => {

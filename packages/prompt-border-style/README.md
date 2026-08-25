@@ -57,6 +57,7 @@ This repo exposes the extension through `omp.extensions` in `package.json`, poin
 /context-rail visibility <always|toggle|collapse-while-typing>
 /context-rail pointer <auto|visible|hidden>
 /context-rail labels <auto|bar-only|always>
+/context-rail label-glyph <on|off>
 /context-rail position <left|center|right>
 /prompt-loading-glyphs debug <frames|demo|on|off>
 ```
@@ -125,12 +126,17 @@ The plugin reads optional settings from `~/.config/codesook-omp/config.json` and
     "visibility": "always",
     "pointer": "auto",
     "labels": "auto",
-    "labelPosition": "center"
+    "labelPosition": "center",
+    "showLabelGlyph": true
   }
 }
 ```
 
 `contextRail.labelPosition` controls where the percentage label is placed on the rail. The accepted values are `left`, `center`, and `right`; `center` is the default and canonical value for the middle position. Marker cells remain protected, so a label may shift or be omitted when it cannot fit safely.
+
+`/context-rail label-glyph off` hides only the label glyph immediately before the percentage. It does not hide the percentage, usage pointer, compaction-boundary markers, or the entire rail. Missing or invalid `contextRail.showLabelGlyph` values default to `true` for backward compatibility.
+
+Context Rail glyph frames are read from `contextRail.glyphDirectory` as `label.txt` and `pointer.txt`. Whitespace separates frames; contiguous glyph characters such as `􂹽􂹾` are one frame and render together. Pointer frames may occupy multiple terminal columns and are kept intact.
 
 `spinnerGlyphs.status.frameMs` and `spinnerGlyphs.activity.frameMs` set the desired source-frame duration in milliseconds for each spinner group.
 
@@ -193,6 +199,7 @@ For example, with `frameMs = 20` a source list such as `F0 F1 F2 F3 F4 F5 F6 F7`
 /prompt-border layout default
 /prompt-border reset
 /context-rail status
+/context-rail label-glyph off
 /context-rail placement inside
 /context-rail placement below
 /context-rail visibility collapse-while-typing
