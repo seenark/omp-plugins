@@ -26,6 +26,7 @@ import promptBorderStyle, {
 	parsePromptLoadingGlyphArgs,
 	readPromptBorderConfig,
 	renderBottomBorderLine,
+	renderPromptAttachmentRows,
 	replaceBodyLeftGlyph,
 	writeContextRailConfigSelection,
 	writePromptBorderConfigSelection,
@@ -83,6 +84,19 @@ const emptySpinnerGlyphs = () => ({
 	status: { frameMs: 80, glyphs: "", frames: [] as string[] },
 	activity: { frameMs: 80, glyphs: "", frames: [] as string[] },
 });
+const attachmentTheme = {
+	symbol: (name: string): string =>
+		({
+			"boxRound.topLeft": "╭",
+			"boxRound.topRight": "╮",
+			"boxRound.bottomLeft": "╰",
+			"boxRound.bottomRight": "╯",
+			"boxRound.horizontal": "─",
+			"boxRound.vertical": "│",
+		})[name] ?? "",
+	fg: (_name: string, value: string): string => value,
+	bold: (value: string): string => value,
+};
 
 const slashAutocomplete: AutocompleteProvider = {
 	getSuggestions: async () => ({
@@ -250,7 +264,80 @@ describe("PromptBorderEditor", () => {
 		expect(lines[1]).toBe("║  ▌   ║");
 		expect(lines.at(-1)).toBe("╚══════╝");
 	});
+	test("restores the multiline paste attachment box above the editor", () => {
+		const editor = new PromptBorderEditor(theme, { style: "double", layout: "full" });
+		const pastedLines = ["Verification criteria", ...Array.from({ length: 41 }, (_, index) => `line ${index + 1}`)];
+		editor.insertTextAttachment(pastedLines.join("\n"));
 
+		const rows = renderPromptAttachmentRows(editor, 40, attachmentTheme);
+
+		expect(rows).toHaveLength(6);
+		expect(rows[0]).toContain("📄 #1");
+		expect(rows[1]).toContain("Verificatio");
+		expect(rows.at(-1)).toContain("+42 lines");
+		expect(rows.some(row => row.includes("line 40"))).toBe(false);
+	});
+	test("matches OMP paste colors by attachment ordinal", () => {
+		const editor = new PromptBorderEditor(theme, { style: "double", layout: "full" });
+		editor.insertTextAttachment("Marking file one\nline two");
+		editor.insertTextAttachment("Marking file two\nline two");
+
+		const rows = renderPromptAttachmentRows(editor, 40, attachmentTheme);
+
+		expect(rows[0]).toContain("\x1b[38;2;105;220;158m╭");
+		expect(rows[0]).toContain("\x1b[38;2;255;141;188m╭");
+		expect(rows.at(-1)).toContain("\x1b[38;2;105;220;158m╰");
+		expect(rows.at(-1)).toContain("\x1b[38;2;255;141;188m╰");
+	});
+
+	test("mounts the paste attachment widget with the custom editor", async () => {
+		const dir = await mkdtemp(path.join(os.tmpdir(), "prompt-border-"));
+		const configPath = path.join(dir, "config.json");
+		let sessionStart: ((event: unknown, ctx: unknown) => Promise<void>) | undefined;
+		let editorFactory: ((tui: unknown, editorTheme: EditorTheme) => PromptBorderEditor) | undefined;
+		const widgets = new Map<string, unknown>();
+		const pi = {
+			setLabel: () => {},
+			on: (event: string, handler: (event: unknown, ctx: unknown) => Promise<void> | void) => {
+				if (event === "session_start") sessionStart = handler as typeof sessionStart;
+			},
+			registerCommand: () => {},
+		} as unknown as ExtensionAPI;
+		const agentTheme = {
+			symbol: (name: string) => attachmentTheme.symbol(name),
+			fg: attachmentTheme.fg,
+			bold: attachmentTheme.bold,
+			getSpinnerFrames: () => [] as string[],
+			boxRound: borderStyles.round,
+		};
+
+		promptBorderStyle(pi, configPath);
+		const ctx = {
+			hasUI: true as const,
+			ui: {
+				theme: agentTheme,
+				setEditorComponent: (value: unknown) => {
+					if (typeof value === "function") editorFactory = value as typeof editorFactory;
+				},
+				setWidget: (key: string, value: unknown) => {
+					if (value === undefined) widgets.delete(key);
+					else widgets.set(key, value);
+				},
+				notify: () => {},
+			},
+		};
+		await sessionStart?.({}, ctx);
+
+		const editor = editorFactory?.({}, theme);
+		editor?.insertTextAttachment("Verification criteria\nline two\nline three");
+		const widgetFactory = widgets.get("prompt-border-attachments") as
+			| ((tui: unknown, widgetTheme: unknown) => { render(width: number): readonly string[] })
+			| undefined;
+		const widget = widgetFactory?.({}, agentTheme);
+
+		expect(widget?.render(40).some(row => row.includes("╭── 📄 #1 ───╮"))).toBe(true);
+		expect(widget?.render(40).at(-1)).toContain("+3 lines");
+	});
 	test("keeps the upstream IME-safe tail inside the custom bottom layout", () => {
 		const editor = new PromptBorderEditor(theme, { style: "round", layout: "full" });
 		editor.setUseTerminalCursor(true);

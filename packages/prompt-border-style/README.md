@@ -17,6 +17,7 @@ It customizes:
 - slash-command argument completions for the command itself
 - the plugin-owned Context Rail, which renders independently from OMP's native context gauge
 - configurable Context Rail placement (`inside`, `above`, or `below`), visibility mode, pointer, adaptive percentage label, and label position (`left`, `center`, or `right`)
+- multiline paste attachment cards above the prompt, alongside the host editor replacement
 
 The default active state is:
 - style: `double`

@@ -98,6 +98,24 @@ type ContextRailRuntime = {
 };
 
 const CONTEXT_RAIL_WIDGET_KEY = "prompt-context-rail";
+const PROMPT_ATTACHMENT_WIDGET_KEY = "prompt-border-attachments";
+const PROMPT_ATTACHMENT_INNER_COLS = 12;
+const PROMPT_ATTACHMENT_INNER_ROWS = 4;
+const PROMPT_ATTACHMENT_CARD_COLS = PROMPT_ATTACHMENT_INNER_COLS + 2;
+const PROMPT_ATTACHMENT_CARD_GAP = 2;
+const PROMPT_ATTACHMENT_RESET_FG = "\x1b[39m";
+// Keep the text-chip colors aligned with OMP's attachmentSgr("paste", n) palette and offset.
+const PROMPT_ATTACHMENT_PALETTE: readonly [number, number, number][] = [
+	[255, 179, 102],
+	[125, 207, 255],
+	[189, 147, 249],
+	[105, 220, 158],
+	[255, 141, 188],
+	[240, 223, 120],
+];
+
+export type PromptAttachmentTheme = Pick<Theme, "symbol" | "fg" | "bold">;
+
 const CONTEXT_RAIL_COMPACT_IDLE_MS = 650;
 
 function createContextRailRuntime(
@@ -492,6 +510,7 @@ export type PromptBorderAction =
 let activeBorder: PromptBorderState = { style: "double", layout: "full" };
 let activeConfig: PromptBorderConfig = DEFAULT_PROMPT_BORDER_CONFIG;
 let activeContextRailRuntime: ContextRailRuntime | undefined;
+let activePromptBorderEditor: PromptAttachmentEditor | undefined;
 let didReadInvalidConfig = false;
 const promptLoadingGlyphDebugEnabledSessions = new WeakSet<ExtensionUIContext["setWorkingMessage"]>();
 const promptLoadingGlyphDebugMountedSessions = new WeakSet<ExtensionUIContext["setWidget"]>();
@@ -534,6 +553,117 @@ function contextRailRenderOptions(runtime: ContextRailRuntime): ContextRailRende
 		pointerFrame: runtime.pointerGlyphFrame,
 		pointerGlyphFallback: runtime.pointerGlyphFallback,
 	};
+}
+
+export type PromptTextAttachment = {
+	n: number;
+	label: string;
+	content: string;
+	lineCount: number;
+	charCount: number;
+};
+
+export type PromptAttachmentChip = {
+	kind: "image" | "paste";
+	text?: PromptTextAttachment;
+};
+
+export type PromptAttachmentEditor = {
+	composerChips(): readonly PromptAttachmentChip[];
+};
+
+function isPromptTextAttachmentChip(chip: PromptAttachmentChip): chip is PromptAttachmentChip & { kind: "paste"; text: PromptTextAttachment } {
+	return chip.kind === "paste" && chip.text !== undefined;
+}
+
+function promptAttachmentSgr(n: number): string {
+	const [red, green, blue] = PROMPT_ATTACHMENT_PALETTE[(n + 2) % PROMPT_ATTACHMENT_PALETTE.length]!;
+	return `\x1b[38;2;${red};${green};${blue}m`;
+}
+
+function renderPromptAttachmentBorder(
+	theme: PromptAttachmentTheme,
+	caption: string,
+	edge: "top" | "bottom",
+	sgr: string,
+): string {
+	const left = theme.symbol(edge === "top" ? "boxRound.topLeft" : "boxRound.bottomLeft");
+	const right = theme.symbol(edge === "top" ? "boxRound.topRight" : "boxRound.bottomRight");
+	const horizontal = theme.symbol("boxRound.horizontal");
+	if (!caption) return `${sgr}${left}${horizontal.repeat(PROMPT_ATTACHMENT_INNER_COLS)}${right}${PROMPT_ATTACHMENT_RESET_FG}`;
+	const cut = truncateToWidth(caption, PROMPT_ATTACHMENT_INNER_COLS - 2);
+	const fill = PROMPT_ATTACHMENT_INNER_COLS - visibleWidth(cut) - 2;
+	const leftFill = Math.max(0, Math.floor(fill / 2));
+	const rightFill = Math.max(0, fill - leftFill);
+	return `${sgr}${left}${horizontal.repeat(leftFill)} ${theme.bold(cut)} ${horizontal.repeat(rightFill)}${right}${PROMPT_ATTACHMENT_RESET_FG}`;
+}
+
+function renderPromptTextAttachmentCard(
+	theme: PromptAttachmentTheme,
+	chip: PromptAttachmentChip & { kind: "paste"; text: PromptTextAttachment },
+): readonly string[] {
+	const lines = chip.text.content.split("\n");
+	const interior: string[] = [];
+	const sgr = promptAttachmentSgr(chip.text.n);
+	const vertical = `${sgr}${theme.symbol("boxRound.vertical")}${PROMPT_ATTACHMENT_RESET_FG}`;
+	for (let row = 0; row < PROMPT_ATTACHMENT_INNER_ROWS; row += 1) {
+		const cut = truncateToWidth((lines[row] ?? "").replace(/\t/gu, "   "), PROMPT_ATTACHMENT_INNER_COLS);
+		interior.push(
+			`${vertical}${theme.fg("muted", cut)}${" ".repeat(Math.max(0, PROMPT_ATTACHMENT_INNER_COLS - visibleWidth(cut)))}${vertical}`,
+		);
+	}
+	const bottomCaption =
+		chip.text.lineCount > 1 ? `+${chip.text.lineCount} lines` : `${chip.text.charCount} chars`;
+	return [
+		renderPromptAttachmentBorder(theme, chip.text.label, "top", sgr),
+		...interior,
+		renderPromptAttachmentBorder(theme, bottomCaption, "bottom", sgr),
+	];
+}
+
+export function renderPromptAttachmentRows(
+	editor: PromptAttachmentEditor | undefined,
+	width: number,
+	theme: PromptAttachmentTheme,
+): readonly string[] {
+	const chips = (editor?.composerChips() ?? []).filter(isPromptTextAttachmentChip);
+	if (chips.length === 0) return [];
+
+	const rows = Array.from({ length: PROMPT_ATTACHMENT_INNER_ROWS + 2 }, () => "");
+	let renderedCards = 0;
+	let usedWidth = 0;
+	for (const chip of chips) {
+		if (usedWidth + PROMPT_ATTACHMENT_CARD_COLS > width) break;
+		const card = renderPromptTextAttachmentCard(theme, chip);
+		const prefix = renderedCards === 0 ? "" : " ".repeat(PROMPT_ATTACHMENT_CARD_GAP);
+		for (let row = 0; row < rows.length; row += 1) rows[row] += prefix + card[row];
+		usedWidth += (renderedCards === 0 ? 0 : PROMPT_ATTACHMENT_CARD_GAP) + PROMPT_ATTACHMENT_CARD_COLS;
+		renderedCards += 1;
+	}
+	return renderedCards === 0 ? [] : rows;
+}
+
+/**
+ * The host's attachment band keeps the editor instance it was created with, while
+ * setEditorComponent replaces that instance. Render the text cards from the active
+ * border editor so large pastes stay visible after the border editor is installed.
+ */
+function mountPromptAttachmentWidget(ctx: {
+	hasUI: boolean;
+	ui: { setWidget?: ExtensionUIContext["setWidget"] };
+}): void {
+	if (!ctx.hasUI || ctx.ui.setWidget === undefined) return;
+	ctx.ui.setWidget(
+		PROMPT_ATTACHMENT_WIDGET_KEY,
+		(_tui, theme) => ({
+			render(width: number): readonly string[] {
+				return renderPromptAttachmentRows(activePromptBorderEditor, width, theme);
+			},
+			invalidate(): void {},
+			dispose(): void {},
+		}),
+		{ placement: "aboveEditor" },
+	);
 }
 
 function mountContextRailWidget(ctx: { hasUI: boolean; ui: { setWidget?: ExtensionUIContext["setWidget"] } }): void {
@@ -1795,7 +1925,9 @@ function installPromptBorderEditor(ctx: { ui: ExtensionUIContext }): void {
 	const runtime = activeContextRailRuntime;
 	ctx.ui.setEditorComponent((tui, theme) => {
 		if (runtime !== undefined) runtime.requestRender = () => tui.requestRender();
-		return new PromptBorderEditor(theme, activeBorder, activeConfig, runtime);
+		const editor = new PromptBorderEditor(theme, activeBorder, activeConfig, runtime);
+		activePromptBorderEditor = editor;
+		return editor;
 	});
 }
 
@@ -1925,6 +2057,7 @@ export default function promptBorderStyle(pi: ExtensionAPI, configPath = CONFIG_
 			resolveContextRailPointerFallback(ctx.ui.theme),
 		);
 		refreshContextRail(ctx);
+		mountPromptAttachmentWidget(ctx);
 		mountContextRailWidget(ctx);
 		installPromptBorderEditor(ctx);
 	});
@@ -1937,11 +2070,13 @@ export default function promptBorderStyle(pi: ExtensionAPI, configPath = CONFIG_
 	pi.on("auto_compaction_end", (_event, ctx) => refreshContextRail(ctx));
 
 	pi.on("session_shutdown", (_event, ctx) => {
+		activePromptBorderEditor = undefined;
 		if (!ctx.hasUI) {
 			disposeContextRailRuntime();
 			return;
 		}
 		ctx.ui.setWidget?.(CONTEXT_RAIL_WIDGET_KEY, undefined);
+		ctx.ui.setWidget?.(PROMPT_ATTACHMENT_WIDGET_KEY, undefined);
 		ctx.ui.setEditorComponent(undefined);
 		clearPromptLoadingGlyphDebugUi(ctx);
 		restoreSpinnerGlyphFrames(ctx.ui.theme);
@@ -2042,6 +2177,7 @@ export default function promptBorderStyle(pi: ExtensionAPI, configPath = CONFIG_
 			const action = parsePromptBorderArgs(args, activeBorder);
 			if (action.kind === "reset") {
 				activeBorder = { style: "double", layout: "full" };
+				activePromptBorderEditor = undefined;
 				ctx.ui.setEditorComponent(undefined);
 				ctx.ui.notify("Prompt border reset", "info");
 				return;
