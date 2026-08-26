@@ -1,3 +1,8 @@
+export const CONTEXT_RAIL_ROLES = ["speculation", "pointer", "compaction", "maximum"] as const;
+export type ContextRailRole = (typeof CONTEXT_RAIL_ROLES)[number];
+export type ContextRailMode = "compact" | "full" | "custom";
+export type ContextRailMeaningPlacement = "top" | "below" | "beside";
+
 export type ContextRailPlacement = "inside" | "above" | "below";
 export type ContextRailVisibility = "always" | "toggle" | "collapse-while-typing";
 export type ContextRailPointer = "auto" | "visible" | "hidden";
@@ -15,30 +20,128 @@ export type ContextRailGlyphAsset = {
 	size?: ContextRailGlyphSize;
 };
 
+export type ContextRailRoleConfig = {
+	framesFile: string;
+	fps?: number;
+	meaning: string;
+};
+
+export type ContextRailPointerRoleConfig = ContextRailRoleConfig & {
+	visibility: ContextRailPointer;
+};
+
+export type ContextRailCustomItem = {
+	role: ContextRailRole;
+	template: string;
+};
+
+export type ContextRailCustomConfig = {
+	meaningPlacement: ContextRailMeaningPlacement;
+	items: ContextRailCustomItem[];
+};
+
+export type ContextRailPresentation = {
+	mode: ContextRailMode;
+	meaningPlacement: ContextRailMeaningPlacement;
+	roles: Readonly<
+		Record<
+			ContextRailRole,
+			{
+				frame: string;
+				meaning: string;
+				visible: boolean;
+			}
+		>
+	>;
+	customItems: readonly ContextRailCustomItem[];
+};
+
+type ContextRailRoleConfigDefaults = {
+	speculation: ContextRailRoleConfig;
+	pointer: ContextRailPointerRoleConfig;
+	compaction: ContextRailRoleConfig;
+	maximum: ContextRailRoleConfig;
+};
+
+export const DEFAULT_CONTEXT_RAIL_ROLE_CONFIG: ContextRailRoleConfigDefaults = {
+	speculation: { framesFile: "speculation.txt", meaning: "spec" },
+	pointer: { framesFile: "pointer.txt", visibility: "auto", meaning: "now" },
+	compaction: { framesFile: "compaction.txt", meaning: "compact" },
+	maximum: { framesFile: "maximum.txt", meaning: "max" },
+};
+
+export const DEFAULT_CONTEXT_RAIL_CUSTOM_ITEMS: ContextRailCustomItem[] = [
+	{ role: "speculation", template: "{frame} {text-meaning}" },
+	{ role: "pointer", template: "{frame} {percent}" },
+	{ role: "compaction", template: "{frame} {text-meaning}" },
+	{ role: "maximum", template: "{frame} {window} {text-meaning}" },
+];
+
 export type ContextRailConfig = {
 	enabled: boolean;
 	placement: ContextRailPlacement;
 	visibility: ContextRailVisibility;
-	pointer: ContextRailPointer;
+	pointer: ContextRailPointerRoleConfig;
 	labels: ContextRailLabels;
 	labelPosition: ContextRailLabelPosition;
 	showLabelGlyph?: boolean;
 	glyphDirectory: string;
 	labelGlyph: ContextRailGlyphAsset;
 	pointerGlyph: ContextRailGlyphAsset;
+	mode: ContextRailMode;
+	speculation: ContextRailRoleConfig;
+	compaction: ContextRailRoleConfig;
+	maximum: ContextRailRoleConfig;
+	custom: ContextRailCustomConfig;
+};
+
+/**
+ * Input shape accepted by config editors and persistence helpers.
+ *
+ * `normalizeContextRailConfig` also accepts arbitrary JSON at runtime, but
+ * this type keeps the legacy pointer scalar and partial role edits type-safe.
+ */
+export type ContextRailConfigUpdate = Partial<
+	Pick<
+		ContextRailConfig,
+		| "enabled"
+		| "placement"
+		| "visibility"
+		| "labels"
+		| "labelPosition"
+		| "showLabelGlyph"
+		| "glyphDirectory"
+		| "mode"
+	>
+> & {
+	pointer?: ContextRailPointer | Partial<ContextRailPointerRoleConfig>;
+	speculation?: Partial<ContextRailRoleConfig>;
+	compaction?: Partial<ContextRailRoleConfig>;
+	maximum?: Partial<ContextRailRoleConfig>;
+	custom?: Omit<Partial<ContextRailCustomConfig>, "items"> & {
+		items?: readonly unknown[];
+	};
 };
 
 export const DEFAULT_CONTEXT_RAIL_CONFIG: ContextRailConfig = {
 	enabled: true,
 	placement: "inside",
 	visibility: "always",
-	pointer: "auto",
+	pointer: { ...DEFAULT_CONTEXT_RAIL_ROLE_CONFIG.pointer },
 	labels: "auto",
 	labelPosition: "center",
 	showLabelGlyph: true,
 	glyphDirectory: "~/.config/codesook-omp/context-rail",
 	labelGlyph: { frames: [], fps: undefined },
 	pointerGlyph: { frames: [], fps: undefined },
+	mode: "compact",
+	speculation: { ...DEFAULT_CONTEXT_RAIL_ROLE_CONFIG.speculation },
+	compaction: { ...DEFAULT_CONTEXT_RAIL_ROLE_CONFIG.compaction },
+	maximum: { ...DEFAULT_CONTEXT_RAIL_ROLE_CONFIG.maximum },
+	custom: {
+		meaningPlacement: "beside",
+		items: DEFAULT_CONTEXT_RAIL_CUSTOM_ITEMS.map(item => ({ ...item })),
+	},
 };
 
 export type ContextRailUsage = {
@@ -89,6 +192,8 @@ export type ContextRailRenderOptions = {
 	labelGlyphFallback?: string;
 	/** Declared tile dimensions that opt a multiline frame into grid rendering. */
 	labelGlyphSize?: ContextRailGlyphSize;
+	/** Proportional role snapshot supplied by the plugin runtime. */
+	presentation?: ContextRailPresentation;
 };
 
 const ANSI_ESCAPE = "\x1b";
@@ -101,6 +206,8 @@ const VISIBILITIES: readonly ContextRailVisibility[] = ["always", "toggle", "col
 const POINTERS: readonly ContextRailPointer[] = ["auto", "visible", "hidden"];
 const LABELS: readonly ContextRailLabels[] = ["auto", "bar-only", "always"];
 const LABEL_POSITIONS: readonly ContextRailLabelPosition[] = ["left", "center", "right"];
+const MODES: readonly ContextRailMode[] = ["compact", "full", "custom"];
+const MEANING_PLACEMENTS: readonly ContextRailMeaningPlacement[] = ["top", "below", "beside"];
 
 function isOneOf<T extends string>(value: unknown, values: readonly T[]): value is T {
 	return typeof value === "string" && values.includes(value as T);
@@ -150,20 +257,75 @@ export function parseContextRailGlyphAsset(source: string): ContextRailGlyphAsse
 	return buildAsset(frames);
 }
 
+function normalizeRoleConfig(raw: unknown, defaults: ContextRailRoleConfig): ContextRailRoleConfig {
+	const source = typeof raw === "object" && raw !== null ? (raw as Record<string, unknown>) : {};
+	const framesFile =
+		typeof source.framesFile === "string" && source.framesFile.trim().length > 0
+			? source.framesFile
+			: defaults.framesFile;
+	const meaning =
+		typeof source.meaning === "string" && source.meaning.trim().length > 0 ? source.meaning : defaults.meaning;
+	const normalized: ContextRailRoleConfig = { framesFile, meaning };
+	if (typeof source.fps === "number" && Number.isFinite(source.fps) && source.fps > 0) normalized.fps = source.fps;
+	return normalized;
+}
+
+function normalizePointerRoleConfig(raw: unknown): ContextRailPointerRoleConfig {
+	if (isOneOf(raw, POINTERS)) {
+		return {
+			...normalizeRoleConfig(undefined, DEFAULT_CONTEXT_RAIL_ROLE_CONFIG.pointer),
+			visibility: raw,
+		};
+	}
+	const source = typeof raw === "object" && raw !== null ? (raw as Record<string, unknown>) : {};
+	const role = normalizeRoleConfig(source, DEFAULT_CONTEXT_RAIL_ROLE_CONFIG.pointer);
+	return {
+		...role,
+		visibility: isOneOf(source.visibility, POINTERS)
+			? source.visibility
+			: DEFAULT_CONTEXT_RAIL_ROLE_CONFIG.pointer.visibility,
+	};
+}
+
+function hasExactlyOneFrameToken(template: string): boolean {
+	const matches = template.match(/\{frame\}/gu);
+	return matches !== null && matches.length === 1;
+}
+
+function defaultCustomItem(role: ContextRailRole): ContextRailCustomItem {
+	return { ...DEFAULT_CONTEXT_RAIL_CUSTOM_ITEMS.find(item => item.role === role)! };
+}
+
+function normalizeCustomItems(raw: unknown): ContextRailCustomItem[] {
+	const source = typeof raw === "object" && raw !== null ? (raw as Record<string, unknown>) : {};
+	const candidates = Array.isArray(source.items) ? source.items : [];
+	const byRole = new Map<ContextRailRole, ContextRailCustomItem>();
+	for (const candidate of candidates) {
+		if (typeof candidate !== "object" || candidate === null) continue;
+		const item = candidate as Record<string, unknown>;
+		if (!isOneOf(item.role, CONTEXT_RAIL_ROLES) || typeof item.template !== "string") continue;
+		if (byRole.has(item.role)) continue;
+		const template = hasExactlyOneFrameToken(item.template) ? item.template : defaultCustomItem(item.role).template;
+		byRole.set(item.role, { role: item.role, template });
+	}
+	return CONTEXT_RAIL_ROLES.map(role => byRole.get(role) ?? defaultCustomItem(role));
+}
+
 export function normalizeContextRailConfig(
 	raw: unknown,
 	labelGlyphAsset: ContextRailGlyphAsset = { frames: [], fps: undefined },
 	pointerGlyphAsset: ContextRailGlyphAsset = { frames: [], fps: undefined },
 ): ContextRailConfig {
-	if (typeof raw !== "object" || raw === null) {
-		return { ...DEFAULT_CONTEXT_RAIL_CONFIG, labelGlyph: labelGlyphAsset, pointerGlyph: pointerGlyphAsset };
-	}
-	const config = raw as Record<string, unknown>;
+	const config = typeof raw === "object" && raw !== null ? (raw as Record<string, unknown>) : {};
+	const customSource = typeof config.custom === "object" && config.custom !== null ? (config.custom as Record<string, unknown>) : {};
+	const normalizedCustomPlacement = isOneOf(customSource.meaningPlacement, MEANING_PLACEMENTS)
+		? customSource.meaningPlacement
+		: DEFAULT_CONTEXT_RAIL_CONFIG.custom.meaningPlacement;
 	return {
 		enabled: typeof config.enabled === "boolean" ? config.enabled : DEFAULT_CONTEXT_RAIL_CONFIG.enabled,
 		placement: isOneOf(config.placement, PLACEMENTS) ? config.placement : DEFAULT_CONTEXT_RAIL_CONFIG.placement,
 		visibility: isOneOf(config.visibility, VISIBILITIES) ? config.visibility : DEFAULT_CONTEXT_RAIL_CONFIG.visibility,
-		pointer: isOneOf(config.pointer, POINTERS) ? config.pointer : DEFAULT_CONTEXT_RAIL_CONFIG.pointer,
+		pointer: normalizePointerRoleConfig(config.pointer),
 		labels: isOneOf(config.labels, LABELS) ? config.labels : DEFAULT_CONTEXT_RAIL_CONFIG.labels,
 		labelPosition: isOneOf(config.labelPosition, LABEL_POSITIONS) ? config.labelPosition : DEFAULT_CONTEXT_RAIL_CONFIG.labelPosition,
 		showLabelGlyph: typeof config.showLabelGlyph === "boolean" ? config.showLabelGlyph : DEFAULT_CONTEXT_RAIL_CONFIG.showLabelGlyph,
@@ -173,6 +335,14 @@ export function normalizeContextRailConfig(
 				: DEFAULT_CONTEXT_RAIL_CONFIG.glyphDirectory,
 		labelGlyph: labelGlyphAsset,
 		pointerGlyph: pointerGlyphAsset,
+		mode: isOneOf(config.mode, MODES) ? config.mode : DEFAULT_CONTEXT_RAIL_CONFIG.mode,
+		speculation: normalizeRoleConfig(config.speculation, DEFAULT_CONTEXT_RAIL_CONFIG.speculation),
+		compaction: normalizeRoleConfig(config.compaction, DEFAULT_CONTEXT_RAIL_CONFIG.compaction),
+		maximum: normalizeRoleConfig(config.maximum, DEFAULT_CONTEXT_RAIL_CONFIG.maximum),
+		custom: {
+			meaningPlacement: normalizedCustomPlacement,
+			items: normalizeCustomItems(config.custom),
+		},
 	};
 }
 
@@ -420,7 +590,14 @@ function normalizeWidth(width: number): number {
 }
 
 function isKnownUsage(value: ContextRailUsage | undefined): value is ContextRailUsage {
-	return typeof value === "object" && value !== null && Number.isFinite(value.percent);
+	return (
+		typeof value === "object" &&
+		value !== null &&
+		Number.isFinite(value.tokens) &&
+		Number.isFinite(value.contextWindow) &&
+		value.contextWindow > 0 &&
+		Number.isFinite(value.percent)
+	);
 }
 
 function clampPercent(percent: number): number {
@@ -601,6 +778,542 @@ function renderUnknownRail(width: number, palette: ContextRailPalette): string {
 	return safeColor(palette.muted, cells.join(""));
 }
 
+type MarkerRolePlacement = {
+	role: ContextRailRole;
+	tile: string;
+	meaning: string;
+	anchor: number;
+	nominalStart: number;
+	start: number;
+	width: number;
+};
+
+type MarkerGrid = {
+	cells: string[];
+	occupied: boolean[];
+	markers: MarkerRolePlacement[];
+};
+
+type DisplayUnit = {
+	value: string;
+	width: number;
+};
+
+const MARKER_PRIORITY: readonly ContextRailRole[] = ["maximum", "compaction", "speculation", "pointer"];
+const TEMPLATE_TOKEN_PATTERN = /\{(frame|text-meaning|percent|tokens|window|role)\}/gu;
+const FRAME_TOKEN_PATTERN = /\{frame\}/gu;
+
+function markerRoleColor(palette: ContextRailPalette, role: ContextRailRole): ContextRailColor {
+	switch (role) {
+		case "speculation":
+			return palette.purple;
+		case "pointer":
+			return palette.normal;
+		case "compaction":
+			return palette.warning;
+		case "maximum":
+			return palette.label;
+	}
+}
+
+function markerFallback(palette: ContextRailPalette, role: ContextRailRole): string {
+	switch (role) {
+		case "speculation":
+			return palette.speculation;
+		case "pointer":
+			return palette.pointer;
+		case "compaction":
+			return palette.threshold;
+		case "maximum":
+			return "│";
+	}
+}
+
+function displayUnits(value: string): DisplayUnit[] {
+	const units: DisplayUnit[] = [];
+	let pendingEscape = "";
+	for (let index = 0; index < value.length; ) {
+		const escapeLength = ansiEscapeLength(value, index);
+		if (escapeLength > 0) {
+			pendingEscape += value.slice(index, index + escapeLength);
+			index += escapeLength;
+			continue;
+		}
+		const codePoint = value.codePointAt(index) ?? 0;
+		const characterLength = codePoint > 0xffff ? 2 : 1;
+		const character = value.slice(index, index + characterLength);
+		const characterWidth = codePointWidth(codePoint);
+		if (characterWidth === 0) {
+			if (units.length > 0) {
+				units[units.length - 1]!.value += `${pendingEscape}${character}`;
+				pendingEscape = "";
+			} else {
+				pendingEscape += character;
+			}
+		} else {
+			units.push({ value: `${pendingEscape}${character}`, width: characterWidth });
+			pendingEscape = "";
+		}
+		index += characterLength;
+	}
+	if (pendingEscape.length > 0) {
+		if (units.length > 0) units[units.length - 1]!.value += pendingEscape;
+		else units.push({ value: pendingEscape, width: 0 });
+	}
+	return units;
+}
+
+function unitsWidth(units: readonly DisplayUnit[]): number {
+	let width = 0;
+	for (const unit of units) width += unit.width;
+	return width;
+}
+
+function canWriteUnits(
+	occupied: readonly boolean[],
+	start: number,
+	units: readonly DisplayUnit[],
+): boolean {
+	if (start < 0) return false;
+	let offset = 0;
+	for (const unit of units) {
+		if (unit.width === 0) continue;
+		if (start + offset + unit.width > occupied.length) return false;
+		for (let column = 0; column < unit.width; column += 1) {
+			if (occupied[start + offset + column]) return false;
+		}
+		offset += unit.width;
+	}
+	return true;
+}
+
+function writeUnits(
+	cells: string[],
+	occupied: boolean[],
+	start: number,
+	units: readonly DisplayUnit[],
+): boolean {
+	if (!canWriteUnits(occupied, start, units)) return false;
+	let offset = 0;
+	let lastVisibleCell = start;
+	for (const unit of units) {
+		if (unit.width === 0) {
+			if (lastVisibleCell >= 0 && lastVisibleCell < cells.length) cells[lastVisibleCell] += unit.value;
+			continue;
+		}
+		const target = start + offset;
+		cells[target] = unit.value;
+		occupied[target] = true;
+		lastVisibleCell = target;
+		for (let column = 1; column < unit.width; column += 1) {
+			cells[target + column] = "";
+			occupied[target + column] = true;
+		}
+		offset += unit.width;
+	}
+	return true;
+}
+
+function candidateStarts(width: number, textWidth: number, preferred: number): number[] {
+	const lastStart = width - textWidth;
+	if (lastStart < 0) return [];
+	const centered = Math.min(lastStart, Math.max(0, Math.trunc(preferred)));
+	const starts: number[] = [];
+	for (let distance = 0; distance <= lastStart; distance += 1) {
+		const left = centered - distance;
+		const right = centered + distance;
+		if (left >= 0) starts.push(left);
+		if (distance > 0 && right <= lastStart) starts.push(right);
+	}
+	return starts;
+}
+
+function preservesMarkerAnchorOrder(
+	markers: readonly MarkerRolePlacement[],
+	anchor: number,
+	start: number,
+	width: number,
+): boolean {
+	for (const marker of markers) {
+		if (anchor < marker.anchor && start + width > marker.start) return false;
+		if (anchor > marker.anchor && start < marker.start + marker.width) return false;
+		if (anchor === marker.anchor && start + width > marker.start) return false;
+	}
+	return true;
+}
+
+function writeMarkerTile(
+	cells: string[],
+	occupied: boolean[],
+	start: number,
+	tile: string,
+	color: ContextRailColor,
+): boolean {
+	const styled = safeColor(color, tile);
+	const units = displayUnits(styled);
+	if (unitsWidth(units) === 0 || !canWriteUnits(occupied, start, units)) return false;
+	return writeUnits(cells, occupied, start, units);
+}
+
+function placeAnnotation(
+	cells: string[],
+	occupied: boolean[],
+	value: string,
+	preferred: number,
+	color: ContextRailColor,
+	rangeStart = 0,
+	rangeEnd = occupied.length,
+): boolean {
+	const styled = safeColor(color, value);
+	const fullUnits = displayUnits(styled);
+	const fullWidth = unitsWidth(fullUnits);
+	const startLimit = Math.max(0, Math.floor(rangeStart));
+	const endLimit = Math.min(occupied.length, Math.floor(rangeEnd));
+	if (fullWidth === 0 || endLimit <= startLimit) return false;
+	for (const start of candidateStarts(cells.length, fullWidth, preferred)) {
+		if (start < startLimit || start + fullWidth > endLimit) continue;
+		if (writeUnits(cells, occupied, start, fullUnits)) return true;
+	}
+
+	let bestStart: number | undefined;
+	let bestWidth = 0;
+	let runStart = startLimit;
+	while (runStart < endLimit) {
+		while (runStart < endLimit && occupied[runStart]) runStart += 1;
+		if (runStart >= endLimit) break;
+		let runEnd = runStart;
+		while (runEnd < endLimit && !occupied[runEnd]) runEnd += 1;
+		const available = Math.min(fullWidth, runEnd - runStart);
+		const candidate = Math.max(runStart, Math.min(runEnd - available, Math.trunc(preferred)));
+		if (
+			available > bestWidth ||
+			(available === bestWidth &&
+				(bestStart === undefined || Math.abs(candidate - preferred) < Math.abs(bestStart - preferred)))
+		) {
+			bestStart = candidate;
+			bestWidth = available;
+		}
+		runStart = runEnd;
+	}
+	if (bestStart === undefined || bestWidth <= 0) return false;
+	const truncated = truncateAnsiToWidth(styled, bestWidth);
+	const truncatedUnits = displayUnits(truncated);
+	return writeUnits(cells, occupied, bestStart, truncatedUnits);
+}
+
+function markerPercent(percent: number): string {
+	if (!Number.isFinite(percent)) return "0%";
+	const safePercent = Math.max(0, percent);
+	if (safePercent > 0 && safePercent < 1) {
+		const fractional = Math.round(safePercent * 10) / 10;
+		return `${fractional}%`;
+	}
+	return `${Math.round(safePercent)}%`;
+}
+
+function markerNumber(value: number): string {
+	if (!Number.isFinite(value)) return "?";
+	if (value < 1_000) return value.toString();
+	if (value < 10_000) return `${trimMarkerNumber(value / 1_000)}K`;
+	if (value < 1_000_000) return `${Math.round(value / 1_000)}K`;
+	if (value < 10_000_000) return `${trimMarkerNumber(value / 1_000_000)}M`;
+	if (value < 1_000_000_000) return `${Math.round(value / 1_000_000)}M`;
+	if (value < 10_000_000_000) return `${trimMarkerNumber(value / 1_000_000_000)}B`;
+	return `${Math.round(value / 1_000_000_000)}B`;
+}
+
+function trimMarkerNumber(value: number): string {
+	const formatted = value.toFixed(1);
+	return formatted.endsWith(".0") ? formatted.slice(0, -2) : formatted;
+}
+
+function normalizedPresentationMode(value: ContextRailMode): ContextRailMode {
+	return isOneOf(value, MODES) ? value : "compact";
+}
+
+function normalizedMeaningPlacement(value: ContextRailMeaningPlacement): ContextRailMeaningPlacement {
+	return isOneOf(value, MEANING_PLACEMENTS) ? value : "beside";
+}
+
+function templateValue(
+	token: string,
+	role: ContextRailRole,
+	presentationRole: { frame: string; meaning: string; visible: boolean },
+	usage: ContextRailUsage,
+): string {
+	switch (token) {
+		case "text-meaning":
+			return presentationRole.meaning;
+		case "percent":
+			return markerPercent(usage.percent);
+		case "tokens":
+			return markerNumber(usage.tokens);
+		case "window":
+			return markerNumber(usage.contextWindow);
+		case "role":
+			return role;
+		case "frame":
+			return presentationRole.frame;
+		default:
+			return `{${token}}`;
+	}
+}
+
+function expandTemplateText(
+	template: string,
+	role: ContextRailRole,
+	presentationRole: { frame: string; meaning: string; visible: boolean },
+	usage: ContextRailUsage,
+): string {
+	return template.replace(TEMPLATE_TOKEN_PATTERN, (_match, token: string) =>
+		templateValue(token, role, presentationRole, usage),
+	);
+}
+
+function customTemplateForRole(presentation: ContextRailPresentation, role: ContextRailRole): string {
+	const item = presentation.customItems.find(candidate => candidate.role === role);
+	if (item !== undefined && typeof item.template === "string" && hasExactlyOneFrameToken(item.template)) {
+		return item.template;
+	}
+	return defaultCustomItem(role).template;
+}
+
+function splitCustomTemplate(
+	template: string,
+	role: ContextRailRole,
+	presentationRole: { frame: string; meaning: string; visible: boolean },
+	usage: ContextRailUsage,
+): { before: string; after: string; annotation: string } {
+	FRAME_TOKEN_PATTERN.lastIndex = 0;
+	const frame = FRAME_TOKEN_PATTERN.exec(template);
+	if (frame === null) {
+		const annotation = expandTemplateText(template, role, presentationRole, usage);
+		return { before: "", after: "", annotation };
+	}
+	const frameEnd = frame.index + frame[0].length;
+	const before = expandTemplateText(template.slice(0, frame.index), role, presentationRole, usage);
+	const after = expandTemplateText(template.slice(frameEnd), role, presentationRole, usage);
+	return { before, after, annotation: `${before}${after}` };
+}
+
+function roleAnchor(
+	role: ContextRailRole,
+	usage: ContextRailUsage,
+	boundaries: ContextRailBoundaries | undefined,
+): number | undefined {
+	switch (role) {
+		case "pointer":
+			return Number.isFinite(usage.percent) ? clampPercent(usage.percent) : undefined;
+		case "speculation": {
+			const value = boundaries?.speculationPercent;
+			return typeof value === "number" && Number.isFinite(value) ? clampPercent(value) : undefined;
+		}
+		case "compaction": {
+			const value = boundaries?.thresholdPercent;
+			return typeof value === "number" && Number.isFinite(value) ? clampPercent(value) : undefined;
+		}
+		case "maximum":
+			return usage.contextWindow > 0 && Number.isFinite(usage.contextWindow) ? 100 : undefined;
+	}
+}
+
+function placeMarkerRole(
+	grid: MarkerGrid,
+	placement: MarkerRolePlacement,
+	color: ContextRailColor,
+): boolean {
+	if (!writeMarkerTile(grid.cells, grid.occupied, placement.start, placement.tile, color)) return false;
+	grid.markers.push(placement);
+	return true;
+}
+
+function buildMarkerGrid(
+	width: number,
+	palette: ContextRailPalette,
+	usage: ContextRailUsage,
+	boundaries: ContextRailBoundaries | undefined,
+	presentation: ContextRailPresentation,
+): MarkerGrid {
+	const grid: MarkerGrid = {
+		cells: Array.from({ length: width }, () => EMPTY_CELL),
+		occupied: Array.from({ length: width }, () => false),
+		markers: [],
+	};
+	for (const role of MARKER_PRIORITY) {
+		const roleConfig = presentation.roles[role];
+		if (roleConfig === undefined || roleConfig.visible !== true) continue;
+		const anchor = roleAnchor(role, usage, boundaries);
+		if (anchor === undefined) continue;
+		const fallback = markerFallback(palette, role);
+		const tile = flattenGlyphFrame(roleConfig.frame.trim().length > 0 ? roleConfig.frame : fallback);
+		const tileWidth = visibleWidth(tile);
+		if (tileWidth <= 0 || tileWidth > width) continue;
+		const maxStart = width - tileWidth;
+		const nominalStart =
+			role === "maximum"
+				? maxStart
+				: Math.min(maxStart, Math.max(0, markerPosition(anchor, width) - Math.floor(tileWidth / 2)));
+		const starts = role === "maximum" ? [nominalStart] : candidateStarts(width, tileWidth, nominalStart);
+		let placed = false;
+		for (const start of starts) {
+			const placement: MarkerRolePlacement = {
+				role,
+				tile,
+				meaning: roleConfig.meaning,
+				anchor,
+				nominalStart,
+				start,
+				width: tileWidth,
+			};
+			if (
+				preservesMarkerAnchorOrder(grid.markers, anchor, start, tileWidth) &&
+				!grid.occupied.slice(start, start + tileWidth).some(Boolean) &&
+				placeMarkerRole(grid, placement, markerRoleColor(palette, role))
+			) {
+				placed = true;
+				break;
+			}
+		}
+		if (!placed) continue;
+	}
+	return grid;
+}
+
+function presentationRole(
+	presentation: ContextRailPresentation,
+	role: ContextRailRole,
+): { frame: string; meaning: string; visible: boolean } {
+	const candidate = presentation.roles[role];
+	if (candidate !== undefined) return candidate;
+	return { frame: "", meaning: "", visible: false };
+}
+
+function applyBarBackground(
+	grid: MarkerGrid,
+	width: number,
+	palette: ContextRailPalette,
+	usage: ContextRailUsage,
+): void {
+	const horizontal =
+		typeof palette.horizontal === "string" && visibleWidth(palette.horizontal) > 0
+			? palette.horizontal
+			: DEFAULT_HORIZONTAL;
+	const filledCells = Math.round((clampPercent(usage.percent) / 100) * width);
+	const usedKind = usageRailKind(usage.percent, usage.contextWindow);
+	const cells = Array.from({ length: width }, (_unused, index) =>
+		renderCell(palette, index < filledCells ? usedKind : "unused", fitToWidth(horizontal, 1)),
+	);
+	for (let index = 0; index < width; index += 1) {
+		if (grid.occupied[index]) cells[index] = grid.cells[index]!;
+	}
+	grid.cells = cells;
+}
+
+function renderMarkerPresentation(
+	width: number,
+	palette: ContextRailPalette,
+	usage: ContextRailUsage | undefined,
+	boundaries: ContextRailBoundaries | undefined,
+	presentation: ContextRailPresentation,
+): string {
+	const mode = normalizedPresentationMode(presentation.mode);
+	if (!isKnownUsage(usage)) {
+		const blank = EMPTY_CELL.repeat(width);
+		const customPlacement = mode === "custom" ? normalizedMeaningPlacement(presentation.meaningPlacement) : "beside";
+		return customPlacement === "top" || customPlacement === "below" ? `${blank}\n${blank}` : blank;
+	}
+	const grid = buildMarkerGrid(width, palette, usage, boundaries, presentation);
+	applyBarBackground(grid, width, palette, usage);
+	if (mode === "compact") {
+		placeAnnotation(grid.cells, grid.occupied, markerPercent(usage.percent), 0, palette.label);
+		return grid.cells.join("");
+	}
+	const percent = markerPercent(usage.percent);
+	const window = markerNumber(usage.contextWindow);
+	if (mode === "full") {
+		placeAnnotation(grid.cells, grid.occupied, percent, 0, palette.label);
+		if (Number.isFinite(usage.contextWindow) && usage.contextWindow > 0) {
+			placeAnnotation(grid.cells, grid.occupied, window, width - visibleWidth(window), palette.label);
+		}
+		for (const marker of grid.markers) {
+			if (marker.meaning.trim().length === 0) continue;
+			const preferred = marker.start + marker.width + 1;
+			placeAnnotation(grid.cells, grid.occupied, marker.meaning, preferred, palette.label);
+		}
+		return grid.cells.join("");
+	}
+
+	const placement = normalizedMeaningPlacement(presentation.meaningPlacement);
+	const annotationCells = Array.from({ length: width }, () => EMPTY_CELL);
+	const annotationOccupied = Array.from({ length: width }, () => false);
+	const markersByRole = new Map<ContextRailRole, MarkerRolePlacement>();
+	for (const marker of grid.markers) markersByRole.set(marker.role, marker);
+	for (const role of CONTEXT_RAIL_ROLES) {
+		const marker = markersByRole.get(role);
+		if (marker === undefined) continue;
+		const roleConfig = presentationRole(presentation, role);
+		const template = customTemplateForRole(presentation, role);
+		const expanded = splitCustomTemplate(template, role, roleConfig, usage);
+		const color = markerRoleColor(palette, role);
+		if (placement === "beside") {
+			const beforeWidth = visibleWidth(expanded.before);
+			const afterWidth = visibleWidth(expanded.after);
+			if (beforeWidth > 0) {
+				const beforePlaced = placeAnnotation(
+					grid.cells,
+					grid.occupied,
+					expanded.before,
+					marker.start - beforeWidth,
+					color,
+					0,
+					marker.start,
+				);
+				if (!beforePlaced) {
+					placeAnnotation(
+						grid.cells,
+						grid.occupied,
+						expanded.before,
+						marker.start + marker.width,
+						color,
+						marker.start + marker.width,
+						width,
+					);
+				}
+			}
+			if (afterWidth > 0) {
+				const afterPlaced = placeAnnotation(
+					grid.cells,
+					grid.occupied,
+					expanded.after,
+					marker.start + marker.width,
+					color,
+					marker.start + marker.width,
+					width,
+				);
+				if (!afterPlaced) {
+					placeAnnotation(
+						grid.cells,
+						grid.occupied,
+						expanded.after,
+						marker.start - afterWidth,
+						color,
+						0,
+						marker.start,
+					);
+				}
+			}
+			continue;
+		}
+		const annotationWidth = visibleWidth(expanded.annotation);
+		if (annotationWidth === 0) continue;
+		const preferred = marker.nominalStart + Math.floor(marker.width / 2) - Math.floor(annotationWidth / 2);
+		placeAnnotation(annotationCells, annotationOccupied, expanded.annotation, preferred, color);
+	}
+	if (placement === "beside") return grid.cells.join("");
+	const annotationRow = annotationCells.join("");
+	return placement === "top" ? `${annotationRow}\n${grid.cells.join("")}` : `${grid.cells.join("")}\n${annotationRow}`;
+}
+
 export function renderContextRail(
 	width: number,
 	palette: ContextRailPalette,
@@ -610,6 +1323,9 @@ export function renderContextRail(
 ): string {
 	const railWidth = normalizeWidth(width);
 	if (railWidth === 0) return "";
+	if (options.presentation !== undefined) {
+		return renderMarkerPresentation(railWidth, palette, usage, boundaries, options.presentation);
+	}
 	if (!isKnownUsage(usage)) return renderUnknownRail(railWidth, palette);
 
 	const horizontal = typeof palette.horizontal === "string" && palette.horizontal.length > 0 ? palette.horizontal : DEFAULT_HORIZONTAL;
@@ -707,6 +1423,10 @@ export function renderContextRailRows(
 ): readonly string[] {
 	const railWidth = normalizeWidth(width);
 	if (railWidth === 0) return [""];
+	if (options.presentation !== undefined) {
+		const rendered = renderMarkerPresentation(railWidth, palette, usage, boundaries, options.presentation);
+		return rendered.split("\n");
+	}
 	if (options.showLabelGlyph === false) {
 		return [renderContextRail(railWidth, palette, usage, boundaries, options)];
 	}

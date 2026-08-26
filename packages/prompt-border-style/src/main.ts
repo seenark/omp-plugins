@@ -1,4 +1,6 @@
 import { CustomEditor, type ExtensionAPI, type ExtensionUIContext, type SpinnerType, type Theme } from "@oh-my-pi/pi-coding-agent";
+import { settings } from "@oh-my-pi/pi-coding-agent/config/settings";
+import { computeCompactionBoundaries } from "@oh-my-pi/pi-coding-agent/modes/utils/context-usage";
 import { mkdir } from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -15,10 +17,12 @@ import {
 	type EditorTopBorder,
 } from "@oh-my-pi/pi-tui";
 import {
+	CONTEXT_RAIL_ROLES,
 	DEFAULT_CONTEXT_RAIL_CONFIG,
 	parseContextRailGlyphAsset,
 	type ContextRailBoundaries,
 	type ContextRailConfig,
+	type ContextRailConfigUpdate,
 	type ContextRailGlyphAsset,
 	type ContextRailLabels,
 	type ContextRailLabelPosition,
@@ -26,6 +30,7 @@ import {
 	type ContextRailPlacement,
 	type ContextRailPointer,
 	type ContextRailRenderOptions,
+	type ContextRailRole,
 	type ContextRailUsage,
 	type ContextRailVisibility,
 	normalizeContextRailConfig,
@@ -80,6 +85,11 @@ export type PromptBorderConfigInput = Omit<PromptBorderConfig, "contextRail"> & 
 	contextRail?: ContextRailConfig;
 };
 
+type ContextRailRoleAssets = Record<ContextRailRole, ContextRailGlyphAsset>;
+type ContextRailRoleFrames = Record<ContextRailRole, number>;
+type ContextRailRoleTimers = Record<ContextRailRole, Timer | undefined>;
+type ContextRailRoleFallbacks = Record<ContextRailRole, string>;
+
 type ContextRailRuntime = {
 	config: ContextRailConfig;
 	usage: ContextRailUsage | undefined;
@@ -87,9 +97,15 @@ type ContextRailRuntime = {
 	toggledVisible: boolean;
 	compactUntil: number;
 	compactTimer: Timer | undefined;
+	roleAssets: ContextRailRoleAssets;
+	roleFrames: ContextRailRoleFrames;
+	roleTimers: ContextRailRoleTimers;
+	roleFallbacks: ContextRailRoleFallbacks;
+	/** Legacy label state retained for existing callers and persisted files. */
 	labelGlyphFrame: number;
 	labelGlyphTimer: Timer | undefined;
 	labelGlyphFallback: string;
+	/** Legacy pointer state retained for existing callers and persisted files. */
 	pointerGlyphFrame: number;
 	pointerGlyphTimer: Timer | undefined;
 	pointerGlyphFallback: string;
@@ -118,11 +134,38 @@ export type PromptAttachmentTheme = Pick<Theme, "symbol" | "fg" | "bold">;
 
 const CONTEXT_RAIL_COMPACT_IDLE_MS = 650;
 
+function emptyContextRailRoleAssets(): ContextRailRoleAssets {
+	return Object.fromEntries(
+		CONTEXT_RAIL_ROLES.map(role => [role, { frames: [], fps: undefined } satisfies ContextRailGlyphAsset]),
+	) as unknown as ContextRailRoleAssets;
+}
+
+function emptyContextRailRoleFrames(): ContextRailRoleFrames {
+	return Object.fromEntries(CONTEXT_RAIL_ROLES.map(role => [role, 0])) as ContextRailRoleFrames;
+}
+
+function emptyContextRailRoleTimers(): ContextRailRoleTimers {
+	return Object.fromEntries(CONTEXT_RAIL_ROLES.map(role => [role, undefined])) as ContextRailRoleTimers;
+}
+
+function contextRailRoleFrameCount(runtime: ContextRailRuntime, role: ContextRailRole): number {
+	return runtime.roleAssets[role].frames.filter(frame => frame.trim().length > 0).length;
+}
+
+function contextRailRoleFps(runtime: ContextRailRuntime, role: ContextRailRole): number | undefined {
+	const configured = runtime.config[role].fps;
+	if (typeof configured === "number" && Number.isFinite(configured) && configured > 0) return configured;
+	const assetFps = runtime.roleAssets[role].fps;
+	return typeof assetFps === "number" && Number.isFinite(assetFps) && assetFps > 0 ? assetFps : undefined;
+}
+
 function createContextRailRuntime(
 	config: ContextRailConfig,
 	palette: (horizontal: string) => ContextRailPalette,
 	labelGlyphFallback: string,
 	pointerGlyphFallback: string,
+	roleAssets: ContextRailRoleAssets = emptyContextRailRoleAssets(),
+	roleFallbacks: ContextRailRoleFallbacks = emptyContextRailRoleFallbacks(),
 ): ContextRailRuntime {
 	return {
 		config,
@@ -131,6 +174,10 @@ function createContextRailRuntime(
 		toggledVisible: true,
 		compactUntil: 0,
 		compactTimer: undefined,
+		roleAssets,
+		roleFrames: emptyContextRailRoleFrames(),
+		roleTimers: emptyContextRailRoleTimers(),
+		roleFallbacks,
 		labelGlyphFrame: 0,
 		labelGlyphTimer: undefined,
 		labelGlyphFallback,
@@ -150,16 +197,45 @@ function contextRailCompact(runtime: ContextRailRuntime, now = Date.now()): bool
 	return runtime.config.visibility === "collapse-while-typing" && runtime.compactUntil > now;
 }
 
-function updateContextRailUsage(runtime: ContextRailRuntime, usage: ContextRailUsage | undefined): boolean {
-	const previous = runtime.usage;
+function contextRailBoundariesEqual(
+	previous: ContextRailBoundaries | undefined,
+	next: ContextRailBoundaries | undefined,
+): boolean {
+	return (
+		previous?.thresholdPercent === next?.thresholdPercent &&
+		previous?.speculationPercent === next?.speculationPercent
+	);
+}
+
+type ContextRailModel = Parameters<typeof computeCompactionBoundaries>[2];
+
+function updateContextRailState(
+	runtime: ContextRailRuntime,
+	usage: ContextRailUsage | undefined,
+	model?: ContextRailModel,
+): boolean {
+	const previousUsage = runtime.usage;
+	const usageChanged =
+		previousUsage?.tokens !== usage?.tokens ||
+		previousUsage?.contextWindow !== usage?.contextWindow ||
+		previousUsage?.percent !== usage?.percent;
+	let boundaries: ContextRailBoundaries | undefined;
 	if (
-		previous?.tokens === usage?.tokens &&
-		previous?.contextWindow === usage?.contextWindow &&
-		previous?.percent === usage?.percent
+		usage !== undefined &&
+		Number.isFinite(usage.contextWindow) &&
+		usage.contextWindow > 0 &&
+		Number.isFinite(usage.percent)
 	) {
-		return false;
+		try {
+			boundaries = computeCompactionBoundaries(settings, usage.contextWindow, model) ?? undefined;
+		} catch {
+			boundaries = undefined;
+		}
 	}
+	const boundariesChanged = !contextRailBoundariesEqual(runtime.boundaries, boundaries);
+	if (!usageChanged && !boundariesChanged) return false;
 	runtime.usage = usage;
+	runtime.boundaries = boundaries;
 	runtime.requestRender?.();
 	return true;
 }
@@ -196,83 +272,116 @@ function resolveThemeSymbol(theme: unknown, name: string, fallback: string): str
 function resolveContextRailFallback(theme: unknown): string {
 	return resolveThemeSymbol(theme, "status.success", "✓");
 }
+
 function resolveContextRailPointerFallback(theme: unknown): string {
 	return resolveThemeSymbol(theme, "context.pointer", "●");
 }
 
-function contextRailLabelFrameCount(runtime: ContextRailRuntime): number {
-	let count = 0;
-	for (const frame of runtime.config.labelGlyph.frames) {
-		if (frame.trim().length > 0) count += 1;
-	}
-	return count;
+function emptyContextRailRoleFallbacks(): ContextRailRoleFallbacks {
+	return Object.fromEntries(CONTEXT_RAIL_ROLES.map(role => [role, ""])) as ContextRailRoleFallbacks;
 }
 
-function scheduleContextRailLabelFrame(runtime: ContextRailRuntime): void {
-	if (runtime.config.showLabelGlyph === false) return;
-	const frameCount = contextRailLabelFrameCount(runtime);
-	const fps = runtime.config.labelGlyph.fps;
-	if (
-		typeof fps !== "number" ||
-		!Number.isFinite(fps) ||
-		fps <= 0 ||
-		frameCount < 2 ||
-		runtime.labelGlyphTimer !== undefined ||
-		runtime.requestRender === undefined
-	) {
-		return;
-	}
-	const frameDelay = Math.max(1, Math.round(1000 / fps));
-	const timer = setTimeout(() => {
-		runtime.labelGlyphTimer = undefined;
-		runtime.labelGlyphFrame = (runtime.labelGlyphFrame + 1) % frameCount;
-		runtime.requestRender?.();
-	}, frameDelay);
-	timer.unref?.();
-	runtime.labelGlyphTimer = timer;
-}
-function contextRailPointerFrameCount(runtime: ContextRailRuntime): number {
-	let count = 0;
-	for (const frame of runtime.config.pointerGlyph.frames) {
-		if (frame.trim().length > 0) count += 1;
-	}
-	return count;
+function resolveContextRailRoleFallbacks(theme: unknown): ContextRailRoleFallbacks {
+	return {
+		speculation: resolveThemeSymbol(theme, "context.speculation", "╎"),
+		pointer: resolveThemeSymbol(theme, "context.pointer", "●"),
+		compaction: resolveThemeSymbol(theme, "context.compaction", "┃"),
+		maximum: resolveThemeSymbol(theme, "boxRound.vertical", "│"),
+	};
 }
 
-function scheduleContextRailPointerFrame(runtime: ContextRailRuntime): void {
-	const frameCount = contextRailPointerFrameCount(runtime);
-	const fps = runtime.config.pointerGlyph.fps;
-	if (
-		typeof fps !== "number" ||
-		!Number.isFinite(fps) ||
-		fps <= 0 ||
-		frameCount < 2 ||
-		runtime.pointerGlyphTimer !== undefined ||
-		runtime.requestRender === undefined
-	) {
-		return;
+function clearContextRailRoleTimers(runtime: ContextRailRuntime): void {
+	for (const role of CONTEXT_RAIL_ROLES) {
+		const timer = runtime.roleTimers[role];
+		if (timer !== undefined) clearTimeout(timer);
+		runtime.roleTimers[role] = undefined;
 	}
-	const frameDelay = Math.max(1, Math.round(1000 / fps));
-	const timer = setTimeout(() => {
-		runtime.pointerGlyphTimer = undefined;
-		runtime.pointerGlyphFrame = (runtime.pointerGlyphFrame + 1) % frameCount;
-		runtime.requestRender?.();
-	}, frameDelay);
-	timer.unref?.();
-	runtime.pointerGlyphTimer = timer;
-}
-
-
-function replaceContextRailConfig(runtime: ContextRailRuntime, config: ContextRailConfig): void {
-	clearTimeout(runtime.labelGlyphTimer);
-	clearTimeout(runtime.pointerGlyphTimer);
+	if (runtime.labelGlyphTimer !== undefined) clearTimeout(runtime.labelGlyphTimer);
+	if (runtime.pointerGlyphTimer !== undefined) clearTimeout(runtime.pointerGlyphTimer);
 	runtime.labelGlyphTimer = undefined;
 	runtime.pointerGlyphTimer = undefined;
+}
+
+function contextRailRoleCanAnimate(runtime: ContextRailRuntime, role: ContextRailRole): boolean {
+	if (!contextRailVisible(runtime)) return false;
+	if (role === "pointer" && runtime.config.pointer.visibility === "hidden") return false;
+	if (role === "speculation" && runtime.boundaries?.speculationPercent == null) return false;
+	if (role === "compaction" && runtime.boundaries?.thresholdPercent == null) return false;
+	if (
+		role === "maximum" &&
+		(runtime.usage === undefined ||
+			!Number.isFinite(runtime.usage.contextWindow) ||
+			runtime.usage.contextWindow <= 0 ||
+			!Number.isFinite(runtime.usage.percent))
+	) {
+		return false;
+	}
+	return true;
+}
+
+function syncLegacyPointerState(runtime: ContextRailRuntime): void {
+	runtime.pointerGlyphFrame = runtime.roleFrames.pointer;
+	runtime.pointerGlyphTimer = runtime.roleTimers.pointer;
+}
+
+function scheduleContextRailRoleFrame(runtime: ContextRailRuntime, role: ContextRailRole): void {
+	const timer = runtime.roleTimers[role];
+	const frameCount = contextRailRoleFrameCount(runtime, role);
+	const fps = contextRailRoleFps(runtime, role);
+	if (
+		!contextRailRoleCanAnimate(runtime, role) ||
+		frameCount < 2 ||
+		fps === undefined ||
+		runtime.requestRender === undefined
+	) {
+		if (timer !== undefined) {
+			clearTimeout(timer);
+			runtime.roleTimers[role] = undefined;
+			if (role === "pointer") syncLegacyPointerState(runtime);
+		}
+		return;
+	}
+	if (timer !== undefined) return;
+	const frameDelay = Math.max(1, Math.round(1000 / fps));
+	const scheduledTimer = setTimeout(() => {
+		runtime.roleTimers[role] = undefined;
+		if (!contextRailRoleCanAnimate(runtime, role)) {
+			if (role === "pointer") syncLegacyPointerState(runtime);
+			return;
+		}
+		const currentFrameCount = contextRailRoleFrameCount(runtime, role);
+		if (currentFrameCount < 2) {
+			if (role === "pointer") syncLegacyPointerState(runtime);
+			return;
+		}
+		runtime.roleFrames[role] = (runtime.roleFrames[role] + 1) % currentFrameCount;
+		if (role === "pointer") syncLegacyPointerState(runtime);
+		runtime.requestRender?.();
+	}, frameDelay);
+	scheduledTimer.unref?.();
+	runtime.roleTimers[role] = scheduledTimer;
+	if (role === "pointer") syncLegacyPointerState(runtime);
+}
+
+function scheduleContextRailRoleFrames(runtime: ContextRailRuntime): void {
+	for (const role of CONTEXT_RAIL_ROLES) scheduleContextRailRoleFrame(runtime, role);
+}
+
+function replaceContextRailConfig(
+	runtime: ContextRailRuntime,
+	config: ContextRailConfig,
+	roleAssets?: ContextRailRoleAssets,
+): void {
+	clearContextRailRoleTimers(runtime);
+	runtime.roleFrames = emptyContextRailRoleFrames();
+	runtime.config = config;
+	if (roleAssets !== undefined) runtime.roleAssets = roleAssets;
 	runtime.labelGlyphFrame = 0;
 	runtime.pointerGlyphFrame = 0;
-	runtime.config = config;
 	runtime.requestRender?.();
 }
+
+
 
 function createContextRailPalette(theme: Theme, horizontal: string): ContextRailPalette {
 	const speculation = resolveThemeSymbol(theme, "context.speculation", "╎");
@@ -538,10 +647,18 @@ function clearPromptLoadingGlyphDebugUi(ctx: { ui: Pick<ExtensionUIContext, "set
 	}
 }
 
+function contextRailRoleFrame(runtime: ContextRailRuntime, role: ContextRailRole): string {
+	const asset = runtime.roleAssets[role];
+	const frames = asset.frames.filter(frame => frame.trim().length > 0);
+	if (frames.length === 0) return runtime.roleFallbacks[role];
+	return frames[Math.abs(Math.trunc(runtime.roleFrames[role])) % frames.length] ?? runtime.roleFallbacks[role];
+}
+
 function contextRailRenderOptions(runtime: ContextRailRuntime): ContextRailRenderOptions {
+	const presentationMode = runtime.config.mode;
 	return {
 		compact: contextRailCompact(runtime),
-		pointer: runtime.config.pointer,
+		pointer: runtime.config.pointer.visibility,
 		labels: runtime.config.labels,
 		labelPosition: runtime.config.labelPosition,
 		showLabelGlyph: runtime.config.showLabelGlyph,
@@ -552,6 +669,33 @@ function contextRailRenderOptions(runtime: ContextRailRuntime): ContextRailRende
 		pointerGlyphs: runtime.config.pointerGlyph.frames,
 		pointerFrame: runtime.pointerGlyphFrame,
 		pointerGlyphFallback: runtime.pointerGlyphFallback,
+		presentation: {
+			mode: presentationMode,
+			meaningPlacement: presentationMode === "full" ? "beside" : runtime.config.custom.meaningPlacement,
+			roles: {
+				speculation: {
+					frame: contextRailRoleFrame(runtime, "speculation"),
+					meaning: runtime.config.speculation.meaning,
+					visible: runtime.boundaries?.speculationPercent != null,
+				},
+				pointer: {
+					frame: contextRailRoleFrame(runtime, "pointer"),
+					meaning: runtime.config.pointer.meaning,
+					visible: runtime.config.pointer.visibility !== "hidden",
+				},
+				compaction: {
+					frame: contextRailRoleFrame(runtime, "compaction"),
+					meaning: runtime.config.compaction.meaning,
+					visible: runtime.boundaries?.thresholdPercent != null,
+				},
+				maximum: {
+					frame: contextRailRoleFrame(runtime, "maximum"),
+					meaning: runtime.config.maximum.meaning,
+					visible: true,
+				},
+			},
+			customItems: runtime.config.custom.items,
+		},
 	};
 }
 
@@ -668,7 +812,14 @@ function mountPromptAttachmentWidget(ctx: {
 
 function mountContextRailWidget(ctx: { hasUI: boolean; ui: { setWidget?: ExtensionUIContext["setWidget"] } }): void {
 	const runtime = activeContextRailRuntime;
-	if (!ctx.hasUI || ctx.ui.setWidget === undefined || runtime === undefined || !contextRailVisible(runtime) || runtime.config.placement === "inside") {
+	if (runtime !== undefined && !contextRailVisible(runtime)) clearContextRailRoleTimers(runtime);
+	if (
+		!ctx.hasUI ||
+		ctx.ui.setWidget === undefined ||
+		runtime === undefined ||
+		!contextRailVisible(runtime) ||
+		runtime.config.placement === "inside"
+	) {
 		ctx.ui.setWidget?.(CONTEXT_RAIL_WIDGET_KEY, undefined);
 		return;
 	}
@@ -678,8 +829,7 @@ function mountContextRailWidget(ctx: { hasUI: boolean; ui: { setWidget?: Extensi
 		(_tui, theme) => ({
 			render(width: number): readonly string[] {
 				if (!contextRailVisible(runtime)) return [];
-				scheduleContextRailLabelFrame(runtime);
-				scheduleContextRailPointerFrame(runtime);
+				scheduleContextRailRoleFrames(runtime);
 				const horizontal = theme.boxRound.horizontal;
 				return renderContextRailRows(
 					width,
@@ -773,6 +923,30 @@ async function readContextRailPointerText(config: ContextRailConfig): Promise<st
 	}
 }
 
+function getContextRailRolePath(config: ContextRailConfig, role: ContextRailRole): string {
+	return path.join(expandHome(config.glyphDirectory), config[role].framesFile);
+}
+
+async function readContextRailRoleAsset(
+	config: ContextRailConfig,
+	role: ContextRailRole,
+): Promise<ContextRailGlyphAsset> {
+	try {
+		const file = Bun.file(getContextRailRolePath(config, role));
+		if (!(await file.exists())) return { frames: [], fps: undefined };
+		return parseContextRailGlyphAsset(await file.text());
+	} catch {
+		return { frames: [], fps: undefined };
+	}
+}
+
+async function loadContextRailRoleAssets(config: ContextRailConfig): Promise<ContextRailRoleAssets> {
+	const entries = await Promise.all(
+		CONTEXT_RAIL_ROLES.map(async role => [role, await readContextRailRoleAsset(config, role)] as const),
+	);
+	return Object.fromEntries(entries) as ContextRailRoleAssets;
+}
+
 function toPromptBorderJson(config: PromptBorderConfig): Record<string, unknown> {
 	return {
 		style: config.style,
@@ -795,11 +969,29 @@ function toPromptBorderJson(config: PromptBorderConfig): Record<string, unknown>
 }
 
 function toContextRailJson(config: ContextRailConfig): Record<string, unknown> {
+	const serializeRole = (role: ContextRailRole): Record<string, unknown> => {
+		const roleConfig = config[role];
+		const serialized: Record<string, unknown> = {
+			framesFile: roleConfig.framesFile,
+			meaning: roleConfig.meaning,
+		};
+		if (roleConfig.fps !== undefined) serialized.fps = roleConfig.fps;
+		if (role === "pointer") serialized.visibility = config.pointer.visibility;
+		return serialized;
+	};
 	return {
 		enabled: config.enabled,
 		placement: config.placement,
 		visibility: config.visibility,
-		pointer: config.pointer,
+		mode: config.mode,
+		speculation: serializeRole("speculation"),
+		pointer: serializeRole("pointer"),
+		compaction: serializeRole("compaction"),
+		maximum: serializeRole("maximum"),
+		custom: {
+			meaningPlacement: config.custom.meaningPlacement,
+			items: config.custom.items.map(item => ({ role: item.role, template: item.template })),
+		},
 		labels: config.labels,
 		labelPosition: config.labelPosition,
 		showLabelGlyph: config.showLabelGlyph !== false,
@@ -810,12 +1002,10 @@ function toContextRailJson(config: ContextRailConfig): Record<string, unknown> {
 function mergePromptBorderJson(raw: Record<string, unknown>): Record<string, unknown> {
 	const merged = { ...raw };
 	const promptBorder = isRecord(raw.promptBorder) ? { ...raw.promptBorder } : {};
-	const contextRail = isRecord(raw.contextRail) ? { ...raw.contextRail } : {};
 	const leftGlyph = isRecord(promptBorder.leftGlyph) ? { ...promptBorder.leftGlyph } : {};
 	const rightGlyph = isRecord(promptBorder.rightGlyph) ? { ...promptBorder.rightGlyph } : {};
 	const spinnerGlyphs = isRecord(promptBorder.spinnerGlyphs) ? { ...promptBorder.spinnerGlyphs } : {};
 	const examplePromptBorder = toPromptBorderJson(EXAMPLE_PROMPT_BORDER_CONFIG);
-	const exampleContextRail = toContextRailJson(EXAMPLE_PROMPT_BORDER_CONFIG.contextRail);
 	const exampleLeftGlyph = isRecord(examplePromptBorder.leftGlyph) ? examplePromptBorder.leftGlyph : {};
 	const exampleRightGlyph = isRecord(examplePromptBorder.rightGlyph) ? examplePromptBorder.rightGlyph : {};
 	const exampleSpinnerGlyphs = isRecord(examplePromptBorder.spinnerGlyphs) ? examplePromptBorder.spinnerGlyphs : {};
@@ -839,22 +1029,14 @@ function mergePromptBorderJson(raw: Record<string, unknown>): Record<string, unk
 		spinnerGlyphs[slot] = spinnerGlyph;
 	}
 
-	delete contextRail.labelGlyph;
-	delete contextRail.pointerGlyph;
-	delete contextRail.glyphs;
-	delete contextRail.frames;
-	delete contextRail.fps;
-	delete contextRail.size;
 	delete promptBorder.loadingGlyph;
 	promptBorder.leftGlyph = leftGlyph;
 	promptBorder.rightGlyph = rightGlyph;
 	promptBorder.spinnerGlyphs = spinnerGlyphs;
 	merged.promptBorder = promptBorder;
-	const mergedContextRail = { ...exampleContextRail, ...contextRail };
-	if (typeof mergedContextRail.showLabelGlyph !== "boolean") {
-		mergedContextRail.showLabelGlyph = exampleContextRail.showLabelGlyph;
-	}
-	merged.contextRail = mergedContextRail;
+	merged.contextRail = toContextRailJson(
+		normalizeContextRailConfig(isRecord(raw.contextRail) ? raw.contextRail : undefined),
+	);
 	return merged;
 }
 
@@ -1076,8 +1258,29 @@ export async function writePromptBorderConfigSelection(
 	);
 }
 
+function mergeContextRailConfigUpdate(
+	current: ContextRailConfig,
+	update: ContextRailConfigUpdate,
+): Record<string, unknown> {
+	const merged: Record<string, unknown> = { ...current };
+	for (const [key, value] of Object.entries(update)) {
+		if (key === "pointer" && typeof value === "string" && isRecord(merged.pointer)) {
+			merged.pointer = { ...(merged.pointer as Record<string, unknown>), visibility: value };
+		} else if (
+			((CONTEXT_RAIL_ROLES as readonly string[]).includes(key) || key === "custom") &&
+			isRecord(value) &&
+			isRecord(merged[key])
+		) {
+			merged[key] = { ...(merged[key] as Record<string, unknown>), ...value };
+		} else {
+			merged[key] = value;
+		}
+	}
+	return merged;
+}
+
 export async function writeContextRailConfigSelection(
-	update: Partial<ContextRailConfig>,
+	update: ContextRailConfigUpdate,
 	configPath = CONFIG_PATH,
 ): Promise<PromptBorderConfig> {
 	const persisted = await ensurePersistedPromptBorderConfig(configPath);
@@ -1086,7 +1289,7 @@ export async function writeContextRailConfigSelection(
 		return DEFAULT_PROMPT_BORDER_CONFIG;
 	}
 	const current = normalizeContextRailConfig(persisted.merged.contextRail);
-	const next = normalizeContextRailConfig({ ...current, ...update });
+	const next = normalizeContextRailConfig(mergeContextRailConfigUpdate(current, update));
 	persisted.merged.contextRail = toContextRailJson(next);
 	didReadInvalidConfig = false;
 	await Bun.write(configPath, `${JSON.stringify(persisted.merged, null, 2)}\n`);
@@ -1211,7 +1414,7 @@ export function getPromptBorderArgumentCompletions(argumentPrefix: string): Auto
 export type ContextRailAction =
 	| { kind: "status" }
 	| { kind: "toggle" }
-	| { kind: "set"; update: Partial<ContextRailConfig> }
+	| { kind: "set"; update: ContextRailConfigUpdate }
 	| { kind: "init"; target: "glyphs" }
 	| { kind: "invalid" };
 
@@ -1806,8 +2009,7 @@ export class PromptBorderEditor extends CustomEditor {
 	#renderContextRailRows(width: number): readonly string[] | undefined {
 		const runtime = this.#contextRail;
 		if (runtime === undefined || runtime.config.placement !== "inside" || !contextRailVisible(runtime)) return undefined;
-		scheduleContextRailLabelFrame(runtime);
-		scheduleContextRailPointerFrame(runtime);
+		scheduleContextRailRoleFrames(runtime);
 		const innerWidth = Math.max(0, width - 2);
 		const contents = renderContextRailRows(
 			innerWidth,
@@ -1934,23 +2136,23 @@ function installPromptBorderEditor(ctx: { ui: ExtensionUIContext }): void {
 function refreshContextRail(ctx: {
 	hasUI: boolean;
 	getContextUsage?(): { tokens: number; contextWindow: number; percent: number } | undefined;
+	model?: ContextRailModel | null;
 }): void {
 	if (!ctx.hasUI || activeContextRailRuntime === undefined) return;
 	const raw = ctx.getContextUsage?.();
-	updateContextRailUsage(
+	updateContextRailState(
 		activeContextRailRuntime,
 		raw === undefined ? undefined : { tokens: raw.tokens, contextWindow: raw.contextWindow, percent: raw.percent },
+		ctx.model,
 	);
 }
 
 function disposeContextRailRuntime(): void {
 	if (activeContextRailRuntime === undefined) return;
 	clearTimeout(activeContextRailRuntime.compactTimer);
-	clearTimeout(activeContextRailRuntime.labelGlyphTimer);
-	clearTimeout(activeContextRailRuntime.pointerGlyphTimer);
 	activeContextRailRuntime.compactTimer = undefined;
-	activeContextRailRuntime.labelGlyphTimer = undefined;
-	activeContextRailRuntime.pointerGlyphTimer = undefined;
+	clearContextRailRoleTimers(activeContextRailRuntime);
+	activeContextRailRuntime.roleFrames = emptyContextRailRoleFrames();
 	activeContextRailRuntime.labelGlyphFrame = 0;
 	activeContextRailRuntime.pointerGlyphFrame = 0;
 	activeContextRailRuntime.requestRender = undefined;
@@ -1963,7 +2165,7 @@ function formatContextRailStatus(runtime: ContextRailRuntime): string {
 		usage !== undefined && Number.isFinite(usage.percent)
 			? `${usage.percent.toFixed(1)}%/${usage.contextWindow.toLocaleString()}`
 			: "unknown";
-	return `Context Rail: ${runtime.config.enabled ? "on" : "off"} · ${runtime.config.placement} · ${runtime.config.visibility} · label-position ${runtime.config.labelPosition} · label-glyph ${runtime.config.showLabelGlyph === false ? "off" : "on"} · ${usageText}`;
+	return `Context Rail: ${runtime.config.enabled ? "on" : "off"} · ${runtime.config.mode} · ${runtime.config.placement} · ${runtime.config.visibility} · pointer ${runtime.config.pointer.visibility} · label-position ${runtime.config.labelPosition} · label-glyph ${runtime.config.showLabelGlyph === false ? "off" : "on"} · ${usageText}`;
 }
 
 async function initializeContextRailGlyphs(
@@ -1977,7 +2179,7 @@ async function initializeContextRailGlyphs(
 			content: `${resolveContextRailFallback(ctx.ui.theme)}\n`,
 		},
 		{
-			path: getContextRailPointerPath(contextRail),
+			path: getContextRailRolePath(contextRail, "pointer"),
 			content: `${resolveContextRailPointerFallback(ctx.ui.theme)}\n`,
 		},
 	];
@@ -2021,7 +2223,11 @@ async function initializeContextRailGlyphs(
 
 	activeConfig = await ensurePromptBorderConfigFile(configPath);
 	if (activeContextRailRuntime !== undefined) {
-		replaceContextRailConfig(activeContextRailRuntime, activeConfig.contextRail);
+		replaceContextRailConfig(
+			activeContextRailRuntime,
+			activeConfig.contextRail,
+			await loadContextRailRoleAssets(activeConfig.contextRail),
+		);
 		mountContextRailWidget(ctx);
 		activeContextRailRuntime.requestRender?.();
 	}
@@ -2029,17 +2235,22 @@ async function initializeContextRailGlyphs(
 
 async function persistContextRailUpdate(
 	ctx: { hasUI: boolean; ui: ExtensionUIContext },
-	update: Partial<ContextRailConfig>,
+	update: ContextRailConfigUpdate,
 	configPath: string,
 ): Promise<void> {
 	activeConfig = await writeContextRailConfigSelection(update, configPath);
 	if (activeContextRailRuntime !== undefined) {
-		replaceContextRailConfig(activeContextRailRuntime, activeConfig.contextRail);
+		replaceContextRailConfig(
+			activeContextRailRuntime,
+			activeConfig.contextRail,
+			await loadContextRailRoleAssets(activeConfig.contextRail),
+		);
 		if (update.enabled === true || update.visibility !== undefined) activeContextRailRuntime.toggledVisible = true;
 		mountContextRailWidget(ctx);
 		activeContextRailRuntime.requestRender?.();
 	}
 }
+
 
 export default function promptBorderStyle(pi: ExtensionAPI, configPath = CONFIG_PATH): void {
 	pi.setLabel("Prompt Border Style");
@@ -2055,6 +2266,8 @@ export default function promptBorderStyle(pi: ExtensionAPI, configPath = CONFIG_
 			horizontal => createContextRailPalette(ctx.ui.theme, horizontal),
 			resolveContextRailFallback(ctx.ui.theme),
 			resolveContextRailPointerFallback(ctx.ui.theme),
+			await loadContextRailRoleAssets(activeConfig.contextRail),
+			resolveContextRailRoleFallbacks(ctx.ui.theme),
 		);
 		refreshContextRail(ctx);
 		mountPromptAttachmentWidget(ctx);
@@ -2088,7 +2301,13 @@ export default function promptBorderStyle(pi: ExtensionAPI, configPath = CONFIG_
 		getArgumentCompletions: getContextRailArgumentCompletions,
 		handler: async (args, ctx) => {
 			activeConfig = await ensurePromptBorderConfigFile(configPath);
-			if (activeContextRailRuntime !== undefined) replaceContextRailConfig(activeContextRailRuntime, activeConfig.contextRail);
+			if (activeContextRailRuntime !== undefined) {
+				replaceContextRailConfig(
+					activeContextRailRuntime,
+					activeConfig.contextRail,
+					await loadContextRailRoleAssets(activeConfig.contextRail),
+				);
+			}
 			refreshContextRail(ctx);
 			const action = parseContextRailArgs(args);
 			if (action.kind === "invalid") {
@@ -2108,6 +2327,8 @@ export default function promptBorderStyle(pi: ExtensionAPI, configPath = CONFIG_
 								() => createContextRailPalette(ctx.ui.theme, "─"),
 								resolveContextRailFallback(ctx.ui.theme),
 								resolveContextRailPointerFallback(ctx.ui.theme),
+								undefined,
+								resolveContextRailRoleFallbacks(ctx.ui.theme),
 							),
 					),
 					"info",
@@ -2138,7 +2359,13 @@ export default function promptBorderStyle(pi: ExtensionAPI, configPath = CONFIG_
 		handler: async (args, ctx) => {
 			if (!ctx.hasUI) return;
 			activeConfig = await ensurePromptBorderConfigFile(configPath);
-			if (activeContextRailRuntime !== undefined) replaceContextRailConfig(activeContextRailRuntime, activeConfig.contextRail);
+			if (activeContextRailRuntime !== undefined) {
+				replaceContextRailConfig(
+					activeContextRailRuntime,
+					activeConfig.contextRail,
+					await loadContextRailRoleAssets(activeConfig.contextRail),
+				);
+			}
 			applySpinnerGlyphFrames(ctx.ui.theme, activeConfig);
 			notifyInvalidConfig(ctx);
 			const action = parsePromptLoadingGlyphArgs(args);
@@ -2171,7 +2398,13 @@ export default function promptBorderStyle(pi: ExtensionAPI, configPath = CONFIG_
 		handler: async (args, ctx) => {
 			if (!ctx.hasUI) return;
 			activeConfig = await ensurePromptBorderConfigFile(configPath);
-			if (activeContextRailRuntime !== undefined) replaceContextRailConfig(activeContextRailRuntime, activeConfig.contextRail);
+			if (activeContextRailRuntime !== undefined) {
+				replaceContextRailConfig(
+					activeContextRailRuntime,
+					activeConfig.contextRail,
+					await loadContextRailRoleAssets(activeConfig.contextRail),
+				);
+			}
 			applySpinnerGlyphFrames(ctx.ui.theme, activeConfig);
 			notifyInvalidConfig(ctx);
 			const action = parsePromptBorderArgs(args, activeBorder);
@@ -2188,7 +2421,13 @@ export default function promptBorderStyle(pi: ExtensionAPI, configPath = CONFIG_
 			}
 			activeBorder = action.state;
 			activeConfig = await writePromptBorderConfigSelection(activeBorder, configPath);
-			if (activeContextRailRuntime !== undefined) replaceContextRailConfig(activeContextRailRuntime, activeConfig.contextRail);
+			if (activeContextRailRuntime !== undefined) {
+				replaceContextRailConfig(
+					activeContextRailRuntime,
+					activeConfig.contextRail,
+					await loadContextRailRoleAssets(activeConfig.contextRail),
+				);
+			}
 			applySpinnerGlyphFrames(ctx.ui.theme, activeConfig);
 			notifyInvalidConfig(ctx);
 			mountContextRailWidget(ctx);

@@ -1000,11 +1000,10 @@ describe("prompt border config", () => {
 		const saved = JSON.parse(await Bun.file(configPath).text());
 
 		expect(config.contextRail).toEqual({
-			enabled: true,
+			...DEFAULT_CONTEXT_RAIL_CONFIG,
 			placement: "below",
 			visibility: "toggle",
-			pointer: "hidden",
-			labels: "auto",
+			pointer: { ...DEFAULT_CONTEXT_RAIL_CONFIG.pointer, visibility: "hidden" },
 			labelPosition: "right",
 			showLabelGlyph: false,
 			glyphDirectory,
@@ -1017,6 +1016,93 @@ describe("prompt border config", () => {
 		expect(saved.contextRail.glyphDirectory).toBe(glyphDirectory);
 		expect(saved.contextRail.showLabelGlyph).toBe(false);
 		expect(saved.contextRail.labelGlyph).toBeUndefined();
+	});
+	test("normalizes and round-trips marker role configuration without runtime assets", async () => {
+		const dir = await mkdtemp(path.join(os.tmpdir(), "prompt-border-"));
+		const configPath = path.join(dir, "config.json");
+		const glyphDirectory = path.join(dir, "context-rail-glyphs");
+		await Bun.write(
+			configPath,
+			JSON.stringify(
+				{
+					welcomeScreen: { mainText: "Keep Me" },
+					contextRail: {
+						glyphDirectory,
+						mode: "full",
+						speculation: { framesFile: "speculation.frames", fps: 12, meaning: "think" },
+						pointer: { framesFile: "pointer.frames", visibility: "hidden", meaning: "cursor" },
+						compaction: { meaning: "compact-now" },
+						custom: {
+							meaningPlacement: "top",
+							items: [{ role: "pointer", template: "{frame} {percent}" }],
+						},
+					},
+				},
+				null,
+				2,
+			),
+		);
+
+		const config = await readPromptBorderConfig(configPath);
+		expect(config.contextRail.mode).toBe("full");
+		expect(config.contextRail.speculation).toEqual({
+			framesFile: "speculation.frames",
+			fps: 12,
+			meaning: "think",
+		});
+		expect(config.contextRail.pointer).toEqual({
+			framesFile: "pointer.frames",
+			visibility: "hidden",
+			meaning: "cursor",
+		});
+		expect(config.contextRail.compaction).toEqual({
+			framesFile: "compaction.txt",
+			meaning: "compact-now",
+		});
+		expect(config.contextRail.custom.meaningPlacement).toBe("top");
+		expect(config.contextRail.custom.items).toHaveLength(4);
+
+		await ensurePromptBorderConfigFile(configPath);
+		const saved = JSON.parse(await Bun.file(configPath).text());
+		expect(saved.welcomeScreen.mainText).toBe("Keep Me");
+		expect(saved.contextRail.mode).toBe("full");
+		expect(saved.contextRail.speculation).toEqual({
+			framesFile: "speculation.frames",
+			fps: 12,
+			meaning: "think",
+		});
+		expect(saved.contextRail.pointer).toEqual({
+			framesFile: "pointer.frames",
+			visibility: "hidden",
+			meaning: "cursor",
+		});
+		expect(saved.contextRail.compaction).toEqual({
+			framesFile: "compaction.txt",
+			meaning: "compact-now",
+		});
+		expect(saved.contextRail.custom.items).toHaveLength(4);
+		expect(saved.contextRail.labelGlyph).toBeUndefined();
+		expect(saved.contextRail.pointerGlyph).toBeUndefined();
+	});
+
+	test("migrates legacy pointer visibility into the normalized pointer role", async () => {
+		const dir = await mkdtemp(path.join(os.tmpdir(), "prompt-border-"));
+		const configPath = path.join(dir, "config.json");
+		await Bun.write(configPath, JSON.stringify({ contextRail: { pointer: "visible" } }));
+
+		const config = await readPromptBorderConfig(configPath);
+		expect(config.contextRail.pointer).toEqual({
+			framesFile: "pointer.txt",
+			visibility: "visible",
+			meaning: "now",
+		});
+		await ensurePromptBorderConfigFile(configPath);
+		const saved = JSON.parse(await Bun.file(configPath).text());
+		expect(saved.contextRail.pointer).toEqual({
+			framesFile: "pointer.txt",
+			visibility: "visible",
+			meaning: "now",
+		});
 	});
 });
 
@@ -1899,12 +1985,12 @@ describe("Context Rail command", () => {
 	});
 });
 
-test("uses the theme success glyph or the hard fallback for missing label assets", async () => {
+test("uses theme role symbols or hard fallbacks for missing role assets", async () => {
 	for (const variant of [
-		{ expected: "★", symbol: (name: string) => (name === "status.success" ? "★" : "") },
-		{ expected: "✓", symbol: () => "" },
-		{ expected: "✓", symbol: () => { throw new Error("theme symbol failure"); } },
-		{ expected: "✓", symbol: "not callable" },
+		{ expected: "★", symbol: (name: string) => (name === "context.pointer" ? "★" : "") },
+		{ expected: "●", symbol: () => "" },
+		{ expected: "●", symbol: () => { throw new Error("theme symbol failure"); } },
+		{ expected: "●", symbol: "not callable" },
 	] as const) {
 		const dir = await mkdtemp(path.join(os.tmpdir(), "prompt-border-"));
 		const configPath = path.join(dir, "config.json");
@@ -1914,9 +2000,8 @@ test("uses the theme success glyph or the hard fallback for missing label assets
 			JSON.stringify({
 				promptBorder: { style: "double", layout: "full" },
 				contextRail: {
-					pointer: "hidden",
-					labels: "always",
-					labelPosition: "left",
+					pointer: { visibility: "visible" },
+					mode: "compact",
 					glyphDirectory,
 				},
 			}),
@@ -1932,7 +2017,9 @@ test("uses the theme success glyph or the hard fallback for missing label assets
 
 		let sessionStart: ((event: unknown, ctx: unknown) => Promise<void>) | undefined;
 		let sessionShutdown: ((event: unknown, ctx: unknown) => void) | undefined;
-		let editorFactory: ((tui: { requestRender: () => void }, editorTheme: EditorTheme) => PromptBorderEditor) | undefined;
+		let editorFactory:
+			| ((tui: { requestRender: () => void }, editorTheme: EditorTheme) => PromptBorderEditor)
+			| undefined;
 		const agentTheme = {
 			symbol: variant.symbol,
 			fg: (_name: string, value: string) => value,
@@ -1965,14 +2052,14 @@ test("uses the theme success glyph or the hard fallback for missing label assets
 		promptBorderStyle(pi, configPath);
 		await sessionStart?.({}, ctx);
 		const editor = editorFactory?.({ requestRender: () => {} }, theme);
-		const line = editor?.render(20).find(value => value.includes("50%")) ?? "";
-		expect(line).toContain(`${variant.expected}50%`);
+		const line = editor?.render(20).find(value => value.includes(variant.expected)) ?? "";
+		expect(line).toContain(variant.expected);
 		expect(visibleWidth(line)).toBe(20);
 		sessionShutdown?.({}, ctx);
 	}
 });
 
-test("animates Context Rail labels across inside, above, and below placements", async () => {
+test("animates marker role frames across inside, above, and below placements", async () => {
 	vi.useFakeTimers();
 	try {
 		for (const placement of ["inside", "above", "below"] as const) {
@@ -1980,17 +2067,17 @@ test("animates Context Rail labels across inside, above, and below placements", 
 			const configPath = path.join(dir, "config.json");
 			const glyphDirectory = path.join(dir, "context-rail-glyphs");
 			await mkdir(glyphDirectory, { recursive: true });
-			await Bun.write(path.join(glyphDirectory, "label.txt"), "fps=16\nsize=2x2\nA0A1\nB0B1\n\nC0C1\nD0D1\n");
 			await Bun.write(path.join(glyphDirectory, "pointer.txt"), "fps=16\no\n\nO\n");
+			await Bun.write(path.join(glyphDirectory, "maximum.txt"), "fps=16\nM0\n\nM1\n");
 			await Bun.write(
 				configPath,
 				JSON.stringify({
 					promptBorder: { style: "double", layout: "full" },
 					contextRail: {
 						placement,
-						pointer: "visible",
-						labels: "always",
-						labelPosition: "left",
+						visibility: "always",
+						mode: "compact",
+						pointer: { visibility: "visible" },
 						glyphDirectory,
 					},
 				}),
@@ -2006,13 +2093,12 @@ test("animates Context Rail labels across inside, above, and below placements", 
 
 			type EditorFactory = (tui: { requestRender: () => void }, editorTheme: EditorTheme) => PromptBorderEditor;
 			type Widget = { render: (width: number) => readonly string[] };
-			type WidgetFactory = (tui: unknown, widgetTheme: EditorTheme) => Widget;
 			type LifecycleHandler = (event: unknown, ctx: unknown) => Promise<void> | void;
 			type CommandHandler = (args: string, ctx: unknown) => Promise<void>;
 			let sessionStart: LifecycleHandler | undefined;
 			let sessionShutdown: LifecycleHandler | undefined;
 			let editorFactory: EditorFactory | undefined;
-			let widgetFactory: WidgetFactory | undefined;
+			let widgetFactory: ((tui: unknown, widgetTheme: EditorTheme) => Widget) | undefined;
 			let contextRailHandler: CommandHandler | undefined;
 			const pi = {
 				setLabel: () => {},
@@ -2025,13 +2111,18 @@ test("animates Context Rail labels across inside, above, and below placements", 
 				},
 			} as unknown as ExtensionAPI;
 			const agentTheme = {
-				symbol: (name: string) => (name === "status.success" ? "✓" : ""),
+				symbol: (name: string) =>
+					({
+						"context.pointer": "●",
+						"context.speculation": "╎",
+						"context.compaction": "┃",
+						"boxRound.vertical": "│",
+					})[name] ?? "",
 				fg: (_name: string, value: string) => value,
 				getSpinnerFrames: () => [] as string[],
 				boxRound: borderStyles.round,
 			};
 			let repaints = 0;
-			const setWorkingMessage = () => {};
 			const ctx = {
 				hasUI: true as const,
 				getContextUsage: () => ({ tokens: 50_000, contextWindow: 100_000, percent: 50 }),
@@ -2041,9 +2132,9 @@ test("animates Context Rail labels across inside, above, and below placements", 
 						if (typeof value === "function") editorFactory = value as EditorFactory;
 					},
 					setWidget: (_key: string, value: unknown) => {
-						if (typeof value === "function") widgetFactory = value as WidgetFactory;
+						if (typeof value === "function") widgetFactory = value as (tui: unknown, theme: EditorTheme) => Widget;
 					},
-					setWorkingMessage,
+					setWorkingMessage: () => {},
 					notify: () => {},
 				},
 			};
@@ -2054,67 +2145,201 @@ test("animates Context Rail labels across inside, above, and below placements", 
 			const widget = placement === "inside" ? undefined : widgetFactory?.({}, agentTheme as unknown as EditorTheme);
 			const renderRail = (): readonly string[] => {
 				const lines = placement === "inside" ? editor?.render(20) ?? [] : widget?.render(20) ?? [];
-				const gaugeLine = lines.find(value => value.includes("50%")) ?? "";
-				expect(visibleWidth(gaugeLine)).toBe(20);
-				expect(lines.some(value => value.includes("A0A1") || value.includes("C0C1"))).toBe(true);
-				expect(lines.some(value => value.includes("B0B1") || value.includes("D0D1"))).toBe(true);
+				const railLine = lines.find(value => value.includes("M0") || value.includes("M1") || value.includes("o") || value.includes("O")) ?? "";
+				expect(visibleWidth(railLine)).toBe(20);
 				return lines;
 			};
 
 			let lines = renderRail();
-			expect(lines.some(value => value.includes("A0A1"))).toBe(true);
-			expect(lines.some(value => value.includes("B0B1"))).toBe(true);
+			expect(lines.some(value => value.includes("M0"))).toBe(true);
 			expect(lines.some(value => value.includes("o"))).toBe(true);
 			vi.advanceTimersByTime(62);
 			expect(repaints).toBe(0);
 			vi.advanceTimersByTime(1);
 			expect(repaints).toBe(2);
 			lines = renderRail();
-			expect(lines.some(value => value.includes("C0C1"))).toBe(true);
-			expect(lines.some(value => value.includes("D0D1"))).toBe(true);
+			expect(lines.some(value => value.includes("M1"))).toBe(true);
 			expect(lines.some(value => value.includes("O"))).toBe(true);
 
-			const beforeWrap = repaints;
-			vi.advanceTimersByTime(63);
-			expect(repaints).toBe(beforeWrap + 2);
-			lines = renderRail();
-			expect(lines.some(value => value.includes("A0A1"))).toBe(true);
-			expect(lines.some(value => value.includes("o"))).toBe(true);
-
-			const beforeReload = repaints;
-			await contextRailHandler?.("labels always", ctx);
-			const afterReload = repaints;
-			expect(afterReload).toBeGreaterThanOrEqual(beforeReload);
-			vi.advanceTimersByTime(63);
-			expect(repaints).toBe(afterReload);
-			const beforeHide = repaints;
-			await contextRailHandler?.("label-glyph off", ctx);
-			const afterHide = repaints;
-			expect(afterHide).toBeGreaterThanOrEqual(beforeHide);
-			let hiddenLines = placement === "inside" ? editor?.render(20) ?? [] : widget?.render(20) ?? [];
-			const hiddenGaugeLine = hiddenLines.find(value => value.includes("50%")) ?? "";
-			expect(visibleWidth(hiddenGaugeLine)).toBe(20);
-			expect(hiddenLines.some(value => value.includes("A0A1") || value.includes("C0C1"))).toBe(false);
-			expect(hiddenLines.some(value => value.includes("B0B1") || value.includes("D0D1"))).toBe(false);
-			expect(hiddenLines.some(value => value.includes("o"))).toBe(true);
-			const beforeHiddenTimer = repaints;
-			vi.advanceTimersByTime(62);
-			expect(repaints).toBe(beforeHiddenTimer);
-			vi.advanceTimersByTime(1);
-			expect(repaints).toBe(beforeHiddenTimer + 1);
-			hiddenLines = placement === "inside" ? editor?.render(20) ?? [] : widget?.render(20) ?? [];
-			expect(hiddenLines.some(value => value.includes("50%"))).toBe(true);
-			expect(hiddenLines.some(value => value.includes("A0A1") || value.includes("C0C1"))).toBe(false);
-			expect(hiddenLines.some(value => value.includes("B0B1") || value.includes("D0D1"))).toBe(false);
-			expect(hiddenLines.some(value => value.includes("O"))).toBe(true);
-
-			const beforeShutdown = repaints;
+			await contextRailHandler?.("off", ctx);
+			const beforeHidden = repaints;
+			vi.advanceTimersByTime(200);
+			expect(repaints).toBe(beforeHidden);
 			sessionShutdown?.({}, ctx);
-			vi.advanceTimersByTime(63);
-			expect(repaints).toBe(beforeShutdown);
-			vi.clearAllTimers();
 		}
 	} finally {
+		vi.clearAllTimers();
+		vi.useRealTimers();
+	}
+});
+
+test("loads role assets from glyphDirectory and lets JSON fps override asset fps", async () => {
+	vi.useFakeTimers();
+	try {
+		const dir = await mkdtemp(path.join(os.tmpdir(), "prompt-border-"));
+		const configPath = path.join(dir, "config.json");
+		const glyphDirectory = path.join(dir, "context-rail-glyphs");
+		await mkdir(glyphDirectory, { recursive: true });
+		await Bun.write(path.join(glyphDirectory, "speculation.txt"), "S0 S1");
+		await Bun.write(path.join(glyphDirectory, "pointer.txt"), "fps=8\no\n\nO\n");
+		await Bun.write(path.join(glyphDirectory, "compaction.txt"), "C0 C1");
+		await Bun.write(
+			configPath,
+			JSON.stringify({
+				promptBorder: { style: "double", layout: "full" },
+				contextRail: {
+					placement: "above",
+					mode: "compact",
+					glyphDirectory,
+					pointer: { visibility: "visible", fps: 32 },
+				},
+			}),
+		);
+		type EditorFactory = (tui: { requestRender: () => void }, editorTheme: EditorTheme) => PromptBorderEditor;
+		type Widget = { render: (width: number) => readonly string[] };
+		type LifecycleHandler = (event: unknown, ctx: unknown) => Promise<void> | void;
+		let sessionStart: LifecycleHandler | undefined;
+		let sessionShutdown: LifecycleHandler | undefined;
+		let editorFactory: EditorFactory | undefined;
+		let widgetFactory: ((tui: unknown, widgetTheme: EditorTheme) => Widget) | undefined;
+		const pi = {
+			setLabel: () => {},
+			on: (event: string, handler: LifecycleHandler) => {
+				if (event === "session_start") sessionStart = handler;
+				if (event === "session_shutdown") sessionShutdown = handler;
+			},
+			registerCommand: () => {},
+		} as unknown as ExtensionAPI;
+		const agentTheme = {
+			symbol: (name: string) =>
+				({
+					"context.pointer": "●",
+					"context.speculation": "╎",
+					"context.compaction": "┃",
+					"boxRound.vertical": "│",
+				})[name] ?? "",
+			fg: (_name: string, value: string) => value,
+			getSpinnerFrames: () => [] as string[],
+			boxRound: borderStyles.round,
+		};
+		let repaints = 0;
+		const ctx = {
+			hasUI: true as const,
+			getContextUsage: () => ({ tokens: 62_000, contextWindow: 100_000, percent: 62 }),
+			ui: {
+				theme: agentTheme,
+				setEditorComponent: (value: unknown) => {
+					if (typeof value === "function") editorFactory = value as EditorFactory;
+				},
+				setWidget: (_key: string, value: unknown) => {
+					if (typeof value === "function") widgetFactory = value as (tui: unknown, theme: EditorTheme) => Widget;
+				},
+				setWorkingMessage: () => {},
+				notify: () => {},
+			},
+		};
+
+		promptBorderStyle(pi, configPath);
+		await sessionStart?.({}, ctx);
+		editorFactory?.({ requestRender: () => (repaints += 1) }, theme);
+		const widget = widgetFactory?.({}, agentTheme as unknown as EditorTheme);
+		const initial = widget?.render(40).join("\n") ?? "";
+		expect(initial).toContain("o");
+		expect(initial).toContain("│");
+		expect(initial).not.toContain("S0");
+		expect(initial).not.toContain("C0");
+		expect(visibleWidth(initial.split("\n")[0] ?? "")).toBe(40);
+
+		vi.advanceTimersByTime(30);
+		expect(repaints).toBe(0);
+		vi.advanceTimersByTime(1);
+		expect(repaints).toBe(1);
+		expect(widget?.render(40).join("\n")).toContain("O");
+		sessionShutdown?.({}, ctx);
+	} finally {
+		vi.clearAllTimers();
+		vi.useRealTimers();
+	}
+});
+
+test("uses static fallbacks for missing role assets and invalid fps", async () => {
+	vi.useFakeTimers();
+	try {
+		for (const pointerAsset of [undefined, "o\n\nO\n"] as const) {
+			const dir = await mkdtemp(path.join(os.tmpdir(), "prompt-border-"));
+			const configPath = path.join(dir, "config.json");
+			const glyphDirectory = path.join(dir, "context-rail-glyphs");
+			await mkdir(glyphDirectory, { recursive: true });
+			if (pointerAsset !== undefined) await Bun.write(path.join(glyphDirectory, "pointer.txt"), pointerAsset);
+			await Bun.write(
+				configPath,
+				JSON.stringify({
+					contextRail: {
+						placement: "above",
+						mode: "compact",
+						glyphDirectory,
+						pointer: { visibility: "visible", fps: pointerAsset === undefined ? undefined : 0 },
+					},
+				}),
+			);
+			type EditorFactory = (tui: { requestRender: () => void }, editorTheme: EditorTheme) => PromptBorderEditor;
+			type Widget = { render: (width: number) => readonly string[] };
+			type LifecycleHandler = (event: unknown, ctx: unknown) => Promise<void> | void;
+			let sessionStart: LifecycleHandler | undefined;
+			let sessionShutdown: LifecycleHandler | undefined;
+			let editorFactory: EditorFactory | undefined;
+			let widgetFactory: ((tui: unknown, widgetTheme: EditorTheme) => Widget) | undefined;
+			const pi = {
+				setLabel: () => {},
+				on: (event: string, handler: LifecycleHandler) => {
+					if (event === "session_start") sessionStart = handler;
+					if (event === "session_shutdown") sessionShutdown = handler;
+				},
+				registerCommand: () => {},
+			} as unknown as ExtensionAPI;
+			const agentTheme = {
+				symbol: (name: string) =>
+					({
+						"context.pointer": "●",
+						"context.speculation": "╎",
+						"context.compaction": "┃",
+						"boxRound.vertical": "│",
+					})[name] ?? "",
+				fg: (_name: string, value: string) => value,
+				getSpinnerFrames: () => [] as string[],
+				boxRound: borderStyles.round,
+			};
+			let repaints = 0;
+			const ctx = {
+				hasUI: true as const,
+				getContextUsage: () => ({ tokens: 50_000, contextWindow: 100_000, percent: 50 }),
+				ui: {
+					theme: agentTheme,
+					setEditorComponent: (value: unknown) => {
+						if (typeof value === "function") editorFactory = value as EditorFactory;
+					},
+					setWidget: (_key: string, value: unknown) => {
+						if (typeof value === "function") widgetFactory = value as (tui: unknown, theme: EditorTheme) => Widget;
+					},
+					setWorkingMessage: () => {},
+					notify: () => {},
+				},
+			};
+
+			promptBorderStyle(pi, configPath);
+			await sessionStart?.({}, ctx);
+			editorFactory?.({ requestRender: () => (repaints += 1) }, theme);
+			const widget = widgetFactory?.({}, agentTheme as unknown as EditorTheme);
+			const line = widget?.render(32)[0] ?? "";
+			expect(visibleWidth(line)).toBe(32);
+			expect(line).toContain(pointerAsset === undefined ? "●" : "o");
+			expect(line).toContain("│");
+			vi.advanceTimersByTime(1_000);
+			expect(repaints).toBe(0);
+			sessionShutdown?.({}, ctx);
+		}
+	} finally {
+		vi.clearAllTimers();
 		vi.useRealTimers();
 	}
 });

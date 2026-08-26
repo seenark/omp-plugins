@@ -8,7 +8,6 @@ Prompt border styles for the oh-my-pi input editor.
 
 This plugin registers a `/prompt-border` command that lets you switch the prompt editor border style and layout at runtime.
 
-It customizes:
 - the surrounding top status-line frame glyphs while preserving the upstream status content/context gauge, including its colors and boundary markers
 - the editor side borders
 - a synthetic bottom border for layouts that use one
@@ -16,7 +15,8 @@ It customizes:
 - config-driven status and activity spinner glyphs that preserve Oh My Pi defaults for any unconfigured spinner group
 - slash-command argument completions for the command itself
 - the plugin-owned Context Rail, which renders independently from OMP's native context gauge
-- configurable Context Rail placement (`inside`, `above`, or `below`), visibility mode, pointer, adaptive percentage label, and label position (`left`, `center`, or `right`)
+- a continuous proportional Context Rail bar with positioned role tiles and `compact` (default), `full`, and `custom` presentation modes
+- configurable Context Rail placement (`inside`, `above`, or `below`), visibility mode, role glyph assets, meanings, templates, and pointer visibility
 - multiline paste attachment cards above the prompt, alongside the host editor replacement
 
 The default active state is:
@@ -47,6 +47,40 @@ omp plugin install "$PWD/packages/prompt-border-style"
 
 This repo exposes the extension through `omp.extensions` in `package.json`, pointing at `./src/main.ts`.
 
+## Quick start
+
+1. Install the plugin and start OMP:
+
+   ```bash
+   omp plugin install @codesook/omp-prompt-border-style
+   omp
+   ```
+
+2. Create the Context Rail asset directory:
+
+   ```bash
+   mkdir -p ~/.config/codesook-omp/context-rail
+   ```
+
+3. Add one frame file for each semantic role. The default filenames are:
+
+   ```text
+   speculation.txt
+   pointer.txt
+   compaction.txt
+   maximum.txt
+   ```
+
+4. Set `contextRail.mode` in `~/.config/codesook-omp/config.json` to `compact`, `full`, or `custom`. `compact` is the default.
+
+5. Reload the configuration without restarting the session:
+
+   ```text
+   /context-rail status
+   ```
+
+The Context Rail is a plugin-owned row. It does not replace or reconfigure OMP's native context gauge, so both displays can be enabled at the same time.
+
 ## Command
 
 ```text
@@ -64,6 +98,56 @@ This repo exposes the extension through `omp.extensions` in `package.json`, poin
 ```
 
 If the arguments are invalid, the plugin shows the matching command usage string in the UI.
+
+### Context Rail commands
+
+The command handler reloads and normalizes the shared configuration before applying an update.
+
+```text
+/context-rail status
+```
+
+Shows enabled state, placement, visibility, pointer visibility, presentation mode, label compatibility settings, and the latest known usage. It does not change configuration.
+
+```text
+/context-rail on
+/context-rail off
+/context-rail toggle
+```
+
+`on` and `off` persist the enabled state. `toggle` switches the current display when `visibility` is `toggle`; otherwise it toggles the persisted enabled state.
+
+```text
+/context-rail placement inside
+/context-rail placement above
+/context-rail placement below
+```
+
+- `inside` inserts the rail inside the prompt editor border.
+- `above` mounts it as a widget above the editor.
+- `below` mounts it as a widget below the editor.
+
+```text
+/context-rail visibility always
+/context-rail visibility toggle
+/context-rail visibility collapse-while-typing
+```
+
+- `always` keeps the rail visible while enabled.
+- `toggle` allows `/context-rail toggle` to hide or show it.
+- `collapse-while-typing` temporarily reduces the legacy presentation while draft text is active. The selected mode still owns the visible bar and role content.
+
+```text
+/context-rail pointer auto
+/context-rail pointer visible
+/context-rail pointer hidden
+```
+
+These values control the `pointer` role. `auto` is the default; `visible` forces the current-usage marker on; `hidden` removes it. The old scalar form is accepted in JSON and is rewritten as `pointer.visibility`.
+
+The `labels`, `label-glyph`, and `position` commands remain available for older configurations. Their values are still persisted, but they do not inject a legacy percentage label into `compact`, `full`, or `custom` bar output.
+
+`/context-rail init glyphs` is an explicit legacy initializer. It creates or replaces `label.txt` and the configured pointer file after confirmation. It does not generate speculation, compaction, or maximum role files.
 
 ## Styles
 
@@ -95,49 +179,262 @@ For non-`default` layouts, the plugin inserts the synthetic bottom border before
 
 ## Configuration
 
-The plugin Context Rail is independent from OMP's `statusLine.contextLine` setting. OMP's native gauge may remain enabled, be reduced to its percentage mode, or be disabled separately. The plugin reads context usage through the extension API and degrades to a muted rail when usage is unavailable; predictive compaction markers are only rendered when boundary data is available.
+The plugin Context Rail is independent from OMP's `statusLine.contextLine` setting. OMP's native gauge may remain enabled, be reduced to its percentage mode, or be disabled separately. The plugin reads context usage through the extension API and renders a continuous proportional bar with role markers; predictive boundary markers are only rendered when OMP reports boundary data.
 
-The plugin reads optional settings from `~/.config/codesook-omp/config.json` and writes `style`/`layout` changes there when `/prompt-border` applies a new selection. `/context-rail` updates, including `labelPosition`, are persisted in the same file. That JSON is safe to share across computers.
+The plugin reads optional settings from `~/.config/codesook-omp/config.json` and writes normalized Context Rail settings there. `/context-rail` placement, visibility, pointer visibility, and legacy label settings remain supported. That JSON is safe to share across computers.
 
-`style` and `layout` set the initial prompt border, while the `contextRail` settings set the initial rail behavior. The same shared file may also contain a `welcomeScreen` section managed by `codesook-omp`; this plugin preserves that section when it updates `promptBorder`. Local glyph frame text lives next to the JSON in `~/.config/codesook-omp/prompt-border-left-glyphs.txt`, `~/.config/codesook-omp/prompt-border-right-glyphs.txt`, `~/.config/codesook-omp/prompt-border-status-spinner-glyphs.txt`, and `~/.config/codesook-omp/prompt-border-activity-spinner-glyphs.txt`. Frames are whitespace-separated in those text files. Oh My Pi currently has two spinner groups: status and activity. Status frames are used by theme.spinnerFrames/status UI spinners; activity frames are used by getSymbolTheme().spinnerFrames/loading activity…
+`style` and `layout` set the initial prompt border, while the `contextRail` settings set the initial rail behavior. The same shared file may also contain a `welcomeScreen` section managed by `codesook-omp`; this plugin preserves that section when it updates `promptBorder`. Local glyph frame text lives next to the JSON in `~/.config/codesook-omp/prompt-border-left-glyphs.txt`, `~/.config/codesook-omp/prompt-border-right-glyphs.txt`, `~/.config/codesook-omp/prompt-border-status-spinner-glyphs.txt`, and `~/.config/codesook-omp/prompt-border-activity-spinner-glyphs.txt`. Context Rail role frames live under `contextRail.glyphDirectory`, one file per role. Frames are whitespace-separated; `fps=` and `size=` directives remain supported. Missing role files use static theme-derived fallback tiles and are never created automatically.
 
 ```json
 {
   "promptBorder": {
     "style": "double",
-    "layout": "full",
-    "leftGlyph": {
-      "frameMs": 70
-    },
-    "rightGlyph": {
-      "frameMs": 70
-    },
-    "spinnerGlyphs": {
-      "status": {
-        "frameMs": 80
-      },
-      "activity": {
-        "frameMs": 80
-      }
-    }
+    "layout": "full"
   },
   "contextRail": {
     "enabled": true,
     "placement": "inside",
     "visibility": "always",
-    "pointer": "auto",
+    "mode": "compact",
+    "speculation": {
+      "framesFile": "speculation.txt",
+      "meaning": "spec"
+    },
+    "pointer": {
+      "framesFile": "pointer.txt",
+      "visibility": "auto",
+      "meaning": "now"
+    },
+    "compaction": {
+      "framesFile": "compaction.txt",
+      "meaning": "compact"
+    },
+    "maximum": {
+      "framesFile": "maximum.txt",
+      "meaning": "max"
+    },
+    "custom": {
+      "meaningPlacement": "beside",
+      "items": [
+        { "role": "speculation", "template": "{frame} {text-meaning}" },
+        { "role": "pointer", "template": "{frame} {percent}" },
+        { "role": "compaction", "template": "{frame} {text-meaning}" },
+        { "role": "maximum", "template": "{frame} {window} {text-meaning}" }
+      ]
+    },
     "labels": "auto",
     "labelPosition": "center",
-    "showLabelGlyph": true
+    "showLabelGlyph": true,
+    "glyphDirectory": "~/.config/codesook-omp/context-rail"
   }
 }
 ```
 
-`contextRail.labelPosition` controls where the percentage label is placed on the rail. The accepted values are `left`, `center`, and `right`; `center` is the default and canonical value for the middle position. Marker cells remain protected, so a label may shift or be omitted when it cannot fit safely.
+`compact` is the default and renders a continuous bar, the current percentage, and positioned role tiles. It omits Meaning Text, token counts, and window values. `full` adds Meaning Text beside feasible tiles and the context-window value. `custom` expands `{frame}`, `{text-meaning}`, `{percent}`, `{tokens}`, `{window}`, and `{role}` from one normalized item per role; `meaningPlacement` may be `beside`, `top`, or `below`. Unknown brace expressions stay literal.
 
-`/context-rail label-glyph off` hides only the label glyph immediately before the percentage. It does not hide the percentage, usage pointer, compaction-boundary markers, or the entire rail. Missing or invalid `contextRail.showLabelGlyph` values default to `true` for backward compatibility.
+`contextRail.labelPosition` and `showLabelGlyph` remain readable for compatibility with older configurations and the legacy renderer path. They do not add legacy label decoration to the bar-based presentation.
 
-Context Rail glyph frames are read from `contextRail.glyphDirectory` as `label.txt` and `pointer.txt`. Whitespace separates frames; contiguous glyph characters such as `􂹽􂹾` are one frame and render together. Pointer frames may occupy multiple terminal columns and are kept intact.
+Role frames are read from `contextRail.glyphDirectory` using each role's `framesFile`. Whitespace separates one-row frames; contiguous glyph characters such as `􂹽􂹾` stay in one tile. Pointer visibility remains `auto`, `visible`, or `hidden`. Missing, empty, or unreadable role files use static theme-derived fallback tiles.
+
+### Context Rail fields
+
+The `contextRail` object has two groups of settings:
+
+- **Rail topology:** `enabled`, `placement`, `visibility`, and `glyphDirectory`.
+- **Presentation:** `mode`, the four semantic role objects, and `custom`.
+
+| Field | Values | Description |
+| --- | --- | --- |
+| `enabled` | `true` / `false` | Enables or disables the plugin-owned row. |
+| `placement` | `inside`, `above`, `below` | Chooses the row's position relative to the prompt editor. |
+| `visibility` | `always`, `toggle`, `collapse-while-typing` | Controls whether the row is mounted and how draft activity affects legacy decoration. |
+| `mode` | `compact`, `full`, `custom` | Selects the continuous-bar presentation. Defaults to `compact`. |
+| `glyphDirectory` | path or `~` path | Directory containing role frame files. |
+| `pointer.visibility` | `auto`, `visible`, `hidden` | Controls only the current-usage pointer tile. Defaults to `auto`. |
+| `role.framesFile` | non-empty filename | Role asset filename, resolved relative to `glyphDirectory`. |
+| `role.fps` | positive number | Optional JSON animation rate. It overrides a valid `fps=` directive in the role asset. |
+| `role.meaning` | non-empty text | Meaning Text used by `full` and custom templates. |
+| `custom.meaningPlacement` | `beside`, `top`, `below` | Places custom non-frame output beside the tile or in an aligned annotation row. |
+| `custom.items` | one item per role | Custom templates. Every normalized item contains exactly one `{frame}` token. |
+
+The four role keys are semantic and stable:
+
+```text
+speculation
+pointer
+compaction
+maximum
+```
+
+Role names are independent of their displayed text. Change `meaning` when you want different wording without changing the role's boundary semantics.
+
+### Role frame files
+
+Each role is loaded independently:
+
+```text
+<glyphDirectory>/speculation.txt
+<glyphDirectory>/pointer.txt
+<glyphDirectory>/compaction.txt
+<glyphDirectory>/maximum.txt
+```
+
+For a one-row frame sequence, separate complete frames with whitespace:
+
+```text
+S0 S1 S2
+```
+
+Here `S0`, `S1`, and `S2` are three frames. Characters inside one whitespace-separated item stay in the same Glyph Tile, so a two-column tile can be written as `╎0`, `╎1`, or `AB`, `CD`.
+
+Put `fps=` on the first non-empty directive line to animate an asset:
+
+```text
+fps=8
+╎0 ╎1 ╎2
+```
+
+The animation rate is selected in this order:
+
+1. A valid positive `role.fps` in JSON.
+2. A valid positive `fps=` directive in the asset file.
+3. Static rendering when neither value is valid.
+
+A one-frame asset is always static, even when an FPS is configured. Empty frames are ignored for animation and rendering. A missing, empty, unreadable, or unusable file produces one static theme-derived Default Glyph Tile; the plugin does not create missing role files during normal startup.
+
+The existing `size=WxH` directive remains accepted for compatibility with legacy block-art assets. Inline role tiles are always flattened to one row before measuring terminal width; newline characters do not create extra rail rows. The old `label.txt` and `pointer.txt` files remain readable for legacy settings and explicit initialization.
+
+### Marker placement and boundaries
+
+The rail uses the entire requested width as a proportional scale:
+
+- `pointer` is positioned at the current usage percentage.
+- `speculation` is positioned at OMP's speculative-compaction boundary.
+- `compaction` is positioned at OMP's automatic-compaction threshold.
+- `maximum` is anchored to the final cells at the 100% context-window edge.
+
+The plugin obtains the two compaction boundaries from OMP's shared boundary calculation. It never guesses a threshold. If OMP does not provide a boundary, only that boundary role is hidden; pointer and maximum can still render. If usage is unknown, the rail returns fixed-width blank rows without the bar, semantic markers, or numeric values.
+
+When tiles collide, the fixed priority is:
+
+```text
+maximum > compaction > speculation > pointer
+```
+
+Higher-priority tiles keep their nominal positions. Lower-priority tiles move to the nearest valid non-overlapping cells while preserving anchor order. Tiles are never split or truncated. The continuous bar remains underneath feasible tiles and annotations. If the terminal is too narrow, lower-priority tiles—especially the pointer—are omitted before annotation text is sacrificed.
+
+### Presentation modes
+
+#### Compact mode
+
+`compact` renders one inline row containing the continuous usage bar, the current percentage, and feasible Glyph Tiles. It does not render Meaning Text, token counts, or window values.
+
+```json
+{
+  "contextRail": {
+    "mode": "compact"
+  }
+}
+```
+
+#### Full mode
+
+`full` renders the continuous bar, positioned tiles, Meaning Text beside each feasible tile, the current percentage on the left, and the context-window size on the right. Percentages use native-like formatting: `62%`, `0.5%` below one percent, and values such as `120%` are not clamped in text. Token and window counts use compact values such as `620K` and `1M`.
+
+```json
+{
+  "contextRail": {
+    "mode": "full"
+  }
+}
+```
+
+#### Custom mode
+
+`custom` renders the continuous bar and uses one template item per role. The physical tiles are still sorted by their actual context anchors; changing `custom.items` order does not reorder the tiles.
+
+```json
+{
+  "contextRail": {
+    "mode": "custom",
+    "custom": {
+      "meaningPlacement": "below",
+      "items": [
+        { "role": "speculation", "template": "{frame} {role}" },
+        { "role": "pointer", "template": "{frame} {percent} / {tokens}" },
+        { "role": "compaction", "template": "{frame} {text-meaning}" },
+        { "role": "maximum", "template": "{frame} {window} {text-meaning}" }
+      ]
+    }
+  }
+}
+```
+
+The supported tokens are:
+
+| Token | Expansion |
+| --- | --- |
+| `{frame}` | The selected role Glyph Tile. Required exactly once per item. |
+| `{text-meaning}` | The role's configured `meaning`. |
+| `{percent}` | Current usage percentage. |
+| `{tokens}` | Current used token count. |
+| `{window}` | Current context-window size. |
+| `{role}` | The semantic role key. |
+
+With `meaningPlacement: "beside"`, non-frame text remains adjacent to its tile as far as the available cells allow, over the continuous bar. With `top` or `below`, `{frame}` remains in the inline bar row and all other expanded output is placed in an aligned annotation row. Annotation text can be truncated at narrow widths, but Glyph Tiles remain complete. Unknown brace expressions are kept literally so configuration mistakes are visible.
+
+Template whitespace is preserved exactly. The renderer does not insert a separator between a frame and adjacent output:
+
+```json
+{ "role": "pointer", "template": "{frame}{percent}" }
+```
+
+renders as:
+
+```text
+􂻍􂻎2%
+```
+
+To add a gap, put it in the template explicitly:
+
+```json
+{ "role": "pointer", "template": "{frame} {percent}" }
+```
+
+which renders as:
+
+```text
+􂻍􂻎 2%
+```
+
+### Compatibility and migration
+
+Older configurations can continue to use:
+
+```json
+{
+  "contextRail": {
+    "pointer": "hidden",
+    "labels": "always",
+    "labelPosition": "right",
+    "showLabelGlyph": false
+  }
+}
+```
+
+On the next config read or write, the legacy pointer scalar becomes:
+
+```json
+{
+  "pointer": {
+    "framesFile": "pointer.txt",
+    "visibility": "hidden",
+    "meaning": "now"
+  }
+}
+```
+
+Legacy label fields and `label.txt`/`pointer.txt` assets remain readable and writable. In the bar-based presentation modes, the new role/mode presentation is authoritative, so legacy label decoration is not inserted into the rail row.
 
 `spinnerGlyphs.status.frameMs` and `spinnerGlyphs.activity.frameMs` set the desired source-frame duration in milliseconds for each spinner group.
 
