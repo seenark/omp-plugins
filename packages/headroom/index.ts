@@ -1,29 +1,34 @@
 import type { ContextEvent, ExtensionAPI, ExtensionContext } from "@oh-my-pi/pi-coding-agent";
-import { truncateToWidth, visibleWidth } from "@oh-my-pi/pi-tui";
+import { getSettingsListTheme } from "@oh-my-pi/pi-coding-agent";
+import {
+	Input,
+	SettingsList,
+	Text,
+	type Component,
+	type SettingItem,
+} from "@oh-my-pi/pi-tui";
+import {
+	connectSharedDisplay,
+	type SharedDisplayPublisher,
+} from "@codesook/omp-shared-display/client";
 import { applyCompressionResult, buildCompressionPayload } from "./bridge.ts";
 import { HeadroomHttpClient } from "./client.ts";
-import { isRemoteBlocked, loadHeadroomConfig } from "./config.ts";
 import {
-	DISPLAY_CONFIG_PATH,
-	isDisplayVisible,
-	isPonytailDisplayVisible,
-	isPonytailNativeVisible,
-	isStatusSegmentEnabled,
-	loadDisplayConfig,
+	HEADROOM_CONFIG_FILE,
+	isRemoteBlocked,
+	loadHeadroomConfig,
+	normalizeHeadroomConfig,
+	writeHeadroomConfig,
+	type HeadroomConfig,
+	type HeadroomConfigLoadOptions,
+} from "./config.ts";
+import {
+	DEFAULT_GLYPHS,
 	loadGlyphAsset,
-	loadPonytailGlyphAsset,
-	parsePonytailStatus,
-	renderDisplay,
-	renderPonytailDisplay,
-	renderStatusSegments,
-	resolvePonytailSessionStatus,
+	renderDisplayFrames,
 	resolveThemeGlyph,
 	widgetState,
-	writeDisplaySegmentVisibility,
-	writePonytailNativeVisibility,
 	type DisplayState,
-	type PonytailStatus,
-	type StatusSegmentName,
 } from "./display.ts";
 import {
 	buildHeadroomInitFiles,
@@ -32,84 +37,88 @@ import {
 	type HeadroomInitTarget,
 } from "./init.ts";
 import { startPersistentHeadroomProxy } from "./proxy-manager.ts";
-import type { AgentMessage, CompressResult, HeadroomConfig, HeadroomStats } from "./types.ts";
+import type { AgentMessage, CompressResult, HeadroomStats } from "./types.ts";
 
-const STATUS_KEY = "headroom";
-const SUBCOMMANDS = ["status", "on", "off", "display", "health", "stats", "init"] as const;
-const DISPLAY_ACTIONS = ["on", "off", "toggle", "status"] as const;
-const INIT_TARGETS = ["config", "display", "glyphs", "all"] as const;
-const HEADROOM_USAGE =
-	"Usage: /headroom [on|off|status|display [on|off|toggle|status]|health|stats|init [config|display|glyphs|all]]";
-const PONYTAIL_DISPLAY_USAGE = "Usage: /ponytail-display [on|off|toggle|status]";
-const PONYTAIL_NATIVE_USAGE = "Usage: /ponytail-native [on|off|toggle|status]";
+const SUBCOMMANDS = ["config", "status", "on", "off", "health", "stats", "init"] as const;
+const INIT_TARGETS = ["config", "glyphs", "all"] as const;
+const HEADROOM_USAGE = "Usage: /headroom [config|status|on|off|health|stats|init [config|glyphs|all]]";
 
 type Subcommand = (typeof SUBCOMMANDS)[number];
-type DisplayAction = (typeof DISPLAY_ACTIONS)[number];
+type ParsedCommand = { command: Subcommand | "invalid"; initTarget?: HeadroomInitTarget };
 
-interface ParsedCommand {
-	command: Subcommand;
-	initTarget?: HeadroomInitTarget;
-	displayAction?: DisplayAction;
-}
-
-interface HeadroomRuntimeState {
+type HeadroomRuntimeState = {
 	enabled: boolean;
-	displayVisible: boolean;
-	ponytailDisplayVisible: boolean;
-	ponytailNativeVisible: boolean;
-	ponytailNativeText?: string;
+	sessionEnabledOverride: boolean | undefined;
 	proxyOnline: boolean | null;
 	proxyStarting: boolean;
 	proxyStartAttempted: boolean;
 	remoteWarningShown: boolean;
 	offlineWarningShown: boolean;
 	stats: HeadroomStats;
-	ponytailStatus?: PonytailStatus;
-}
+};
 
-interface HeadroomRuntime {
+type HeadroomRuntime = {
 	config: HeadroomConfig;
 	client: HeadroomHttpClient;
 	state: HeadroomRuntimeState;
+	publisher: SharedDisplayPublisher | undefined;
+	configPath: string;
+	glyphDirectoryOverride: string | undefined;
+	env: NodeJS.ProcessEnv;
 	refreshStatus(ctx: ExtensionContext): void;
 	updateHealth(ctx: ExtensionContext): Promise<boolean>;
 	ensureProxy(ctx: ExtensionContext): Promise<boolean>;
-	restorePonytailStatusCapture?: () => void;
-	setPonytailNativeVisibility?: (visible: boolean) => void;
-}
+};
 
 export interface HeadroomExtensionOptions {
 	initPaths?: HeadroomInitPaths;
-	displayConfigPath?: string;
+	configPath?: string;
+	glyphDirectory?: string;
+	env?: NodeJS.ProcessEnv;
+	legacySettingsPaths?: readonly string[];
+	legacyDisplayPath?: string;
 }
 
-export default function headroomExtension(pi: ExtensionAPI, options: HeadroomExtensionOptions = {}) {
-	const runtime = createRuntime(options.displayConfigPath);
-
-	pi.on("session_start", (_event, ctx) => {
-		const displayConfig = loadDisplayConfig(options.displayConfigPath);
-		runtime.state.displayVisible = isDisplayVisible(displayConfig);
-		runtime.state.ponytailDisplayVisible = isPonytailDisplayVisible(displayConfig);
-		runtime.state.ponytailNativeVisible = isPonytailNativeVisible(displayConfig);
-		if (ctx.hasUI) installPonytailStatusCapture(runtime, ctx, options.displayConfigPath);
-		if (isRemoteBlocked(runtime.config)) {
-			runtime.refreshStatus(ctx);
-			ctx.ui.notify(
-				`Headroom remote URL is blocked by default: ${runtime.config.baseUrl}\nSet PI_HEADROOM_ALLOW_REMOTE=1 only if you trust that proxy with full context.`,
-				"warning",
-			);
+type DialogResult = { action: "apply"; config: HeadroomConfig } | { action: "cancel" };
+export default function headroomExtension(pi: ExtensionAPI, options: HeadroomExtensionOptions = {}): void {
+	const configPath = options.configPath ?? HEADROOM_CONFIG_FILE;
+	let activeContext: ExtensionContext | undefined;
+	const warned = new Set<string>();
+	const pendingWarnings = new Set<string>();
+	const warn = (message: string): void => {
+		if (warned.has(message)) return;
+		warned.add(message);
+		if (activeContext?.hasUI) {
+			activeContext.ui.notify(message, "warning");
 			return;
 		}
-		runtime.refreshStatus(ctx);
-		if (!runtime.state.enabled) return;
-		void ensureProxyInBackground(runtime, ctx);
-	});
-	pi.on("session_shutdown", (_event, ctx) => {
-		runtime.restorePonytailStatusCapture?.();
-		runtime.restorePonytailStatusCapture = undefined;
-		if (ctx.hasUI) ctx.ui.setWidget(STATUS_KEY, undefined);
+		pendingWarnings.add(message);
+		const logger = (pi as unknown as { logger?: { warn?: (text: string) => void } }).logger;
+		logger?.warn?.(message);
+	};
+	const runtime = createRuntime({
+		...options,
+		configPath,
+		warn,
+		env: options.env ?? process.env,
 	});
 
+	const startSession = (_event: unknown, ctx: ExtensionContext): void => {
+		activeContext = ctx;
+		for (const message of pendingWarnings) {
+			if (ctx.hasUI) ctx.ui.notify(message, "warning");
+		}
+		pendingWarnings.clear();
+		resetSession(runtime, pi, ctx, { ...options, configPath, warn, env: options.env ?? process.env });
+	};
+	pi.on("session_start", startSession);
+	pi.on("session_switch", startSession);
+	pi.on("session_branch", startSession);
+	pi.on("session_shutdown", (_event, ctx) => {
+		activeContext = ctx;
+		disposePublisher(runtime);
+		activeContext = undefined;
+	});
 	pi.on("context", (event, ctx) => handleContextCompression(runtime, event, ctx));
 
 	pi.registerCommand("headroom", {
@@ -118,109 +127,44 @@ export default function headroomExtension(pi: ExtensionAPI, options: HeadroomExt
 			const normalized = argumentPrefix.toLowerCase();
 			const tokens = normalized.trim().split(/\s+/).filter(Boolean);
 			if (/\s/.test(normalized)) {
-				const command = tokens[0] ?? "";
-				if (command === "init" && tokens.length <= 2) {
-					const targetPrefix = tokens[1] ?? "";
-					return INIT_TARGETS.filter((target) => target.startsWith(targetPrefix)).map((target) => ({
-						value: target,
-						label: target,
-					}));
-				}
-				if (command === "display" && tokens.length <= 2) {
-					const actionPrefix = tokens[1] ?? "";
-					return DISPLAY_ACTIONS.filter((action) => action.startsWith(actionPrefix)).map((action) => ({
-						value: action,
-						label: action,
-					}));
+				if (tokens[0] === "init" && tokens.length <= 2) {
+					const prefix = tokens[1] ?? "";
+					return INIT_TARGETS.filter((target) => target.startsWith(prefix)).map((value) => ({ value, label: value }));
 				}
 				if (tokens.length > 1) return [];
-				return SUBCOMMANDS.filter((candidate) => candidate.startsWith(command)).map((candidate) => ({
-					value: candidate,
-					label: candidate,
-				}));
+				const prefix = tokens[0] ?? "";
+				return SUBCOMMANDS.filter((value) => value.startsWith(prefix)).map((value) => ({ value, label: value }));
 			}
 			const prefix = normalized.trim();
-			return SUBCOMMANDS.filter((command) => command.startsWith(prefix)).map((command) => ({
-				value: command,
-				label: command,
-			}));
+			return SUBCOMMANDS.filter((value) => value.startsWith(prefix)).map((value) => ({ value, label: value }));
 		},
-		handler: async (args, ctx) =>
-			handleCommand(runtime, parseCommand(args), ctx, options.initPaths, options.displayConfigPath),
-	});
-
-	pi.registerCommand("headroom-health", {
-		description: "Check Headroom proxy health",
-		handler: async (_args, ctx) => {
-			await handleCommand(runtime, { command: "health" }, ctx, options.initPaths, options.displayConfigPath);
-		},
-	});
-
-	pi.registerCommand("ponytail-display", {
-		description: "Configure the captured Ponytail status segment",
-		getArgumentCompletions(argumentPrefix) {
-			const prefix = argumentPrefix.trim().toLowerCase();
-			if (prefix.includes(" ")) return [];
-			return DISPLAY_ACTIONS.filter((action) => action.startsWith(prefix)).map((action) => ({
-				value: action,
-				label: action,
-			}));
-		},
-		handler: async (args, ctx) => {
-			await handleDisplayCommand(
-				runtime,
-				"ponytail",
-				parseDisplayAction(args),
-				ctx,
-				options.displayConfigPath,
-			);
-		},
-	});
-
-	pi.registerCommand("ponytail-native", {
-		description: "Show or hide Ponytail's original native status",
-		getArgumentCompletions(argumentPrefix) {
-			const prefix = argumentPrefix.trim().toLowerCase();
-			if (prefix.includes(" ")) return [];
-			return DISPLAY_ACTIONS.filter((action) => action.startsWith(prefix)).map((action) => ({
-				value: action,
-				label: action,
-			}));
-		},
-		handler: async (args, ctx) => {
-			await handlePonytailNativeCommand(
-				runtime,
-				parseDisplayAction(args),
-				ctx,
-				options.displayConfigPath,
-			);
-		},
+		handler: async (args, ctx) => handleCommand(runtime, parseCommand(args), ctx, options.initPaths),
 	});
 }
 
-function createRuntime(displayConfigPath = DISPLAY_CONFIG_PATH): HeadroomRuntime {
-	const config = loadHeadroomConfig();
-	const displayConfig = loadDisplayConfig(displayConfigPath);
+function createRuntime(options: HeadroomConfigLoadOptions & { glyphDirectory?: string }): HeadroomRuntime {
+	const config = loadRuntimeConfig(options);
 	const client = new HeadroomHttpClient({ baseUrl: config.baseUrl, timeoutMs: config.timeoutMs });
 	const state: HeadroomRuntimeState = {
 		enabled: config.enabled,
-		displayVisible: isDisplayVisible(displayConfig),
-		ponytailDisplayVisible: isPonytailDisplayVisible(displayConfig),
-		ponytailNativeVisible: isPonytailNativeVisible(displayConfig),
+		sessionEnabledOverride: undefined,
 		proxyOnline: null,
 		proxyStarting: false,
 		proxyStartAttempted: false,
 		remoteWarningShown: false,
 		offlineWarningShown: false,
-		stats: { attempts: 0, applied: 0, guardSkips: 0, tokensSaved: 0 },
+		stats: emptyStats(),
 	};
-
 	const runtime: HeadroomRuntime = {
 		config,
 		client,
 		state,
+		publisher: undefined,
+		configPath: options.configPath ?? HEADROOM_CONFIG_FILE,
+		glyphDirectoryOverride: options.glyphDirectory,
+		env: options.env ?? process.env,
 		refreshStatus(ctx) {
-			refreshStatus(ctx, runtime.config, runtime.state, displayConfigPath);
+			publishDisplay(runtime, ctx);
 		},
 		async updateHealth(ctx) {
 			const online = await updateHealthState(runtime);
@@ -234,37 +178,69 @@ function createRuntime(displayConfigPath = DISPLAY_CONFIG_PATH): HeadroomRuntime
 	return runtime;
 }
 
-function installPonytailStatusCapture(
+function resetSession(
 	runtime: HeadroomRuntime,
+	pi: ExtensionAPI,
 	ctx: ExtensionContext,
-	displayConfigPath = DISPLAY_CONFIG_PATH,
+	options: HeadroomExtensionOptions & HeadroomConfigLoadOptions,
 ): void {
-	runtime.restorePonytailStatusCapture?.();
-	runtime.restorePonytailStatusCapture = undefined;
+	disposePublisher(runtime);
+	const previousConfig = runtime.config;
+	const nextConfig = loadRuntimeConfig({
+		...options,
+		configPath: runtime.configPath,
+		env: runtime.env,
+	});
+	runtime.config = nextConfig;
+	runtime.glyphDirectoryOverride = options.glyphDirectory;
+	if (previousConfig.baseUrl !== nextConfig.baseUrl || previousConfig.timeoutMs !== nextConfig.timeoutMs) {
+		runtime.client = new HeadroomHttpClient({ baseUrl: nextConfig.baseUrl, timeoutMs: nextConfig.timeoutMs });
+	}
+	runtime.state.enabled = nextConfig.enabled;
+	runtime.state.sessionEnabledOverride = undefined;
+	runtime.state.proxyOnline = null;
+	runtime.state.proxyStarting = false;
+	runtime.state.proxyStartAttempted = false;
+	runtime.state.remoteWarningShown = false;
+	runtime.state.offlineWarningShown = false;
+	runtime.state.stats = emptyStats();
+	const events = (pi as unknown as { events?: unknown }).events;
+	runtime.publisher = connectSharedDisplay(isEventBus(events) ? events : undefined, "headroom");
+	runtime.refreshStatus(ctx);
+	if (isRemoteBlocked(runtime.config)) {
+		notify(ctx, `Headroom remote URL is blocked by default: ${runtime.config.baseUrl}\nSet PI_HEADROOM_ALLOW_REMOTE=1 only if you trust that proxy with full context.`, "warning");
+		return;
+	}
+	if (runtime.state.enabled) void ensureProxyInBackground(runtime, ctx);
+}
 
-	runtime.state.ponytailStatus = resolvePonytailSessionStatus(ctx.sessionManager.getBranch());
-	runtime.state.ponytailNativeText = undefined;
-	const previousSetStatus = ctx.ui.setStatus;
-	const capture = (key: string, text: string | undefined): void => {
-		if (key !== "ponytail") {
-			previousSetStatus.call(ctx.ui, key, text);
-			return;
-		}
-		runtime.state.ponytailNativeText = text;
-		runtime.state.ponytailStatus = parsePonytailStatus(text);
-		if (runtime.state.ponytailNativeVisible) previousSetStatus.call(ctx.ui, key, text);
-		runtime.refreshStatus(ctx);
+function loadRuntimeConfig(options: HeadroomConfigLoadOptions & { glyphDirectory?: string }): HeadroomConfig {
+	const config = loadHeadroomConfig({
+		env: options.env ?? process.env,
+		configPath: options.configPath ?? HEADROOM_CONFIG_FILE,
+		legacySettingsPaths: options.legacySettingsPaths,
+		legacyDisplayPath: options.legacyDisplayPath,
+		warn: options.warn,
+	});
+	if (!options.glyphDirectory) return config;
+	return {
+		...config,
+		display: { ...config.display, glyphDirectory: options.glyphDirectory },
 	};
-	ctx.ui.setStatus = capture;
-	runtime.setPonytailNativeVisibility = (visible) => {
-		previousSetStatus.call(ctx.ui, "ponytail", visible ? runtime.state.ponytailNativeText : undefined);
-	};
-	if (!runtime.state.ponytailNativeVisible) previousSetStatus.call(ctx.ui, "ponytail", undefined);
-	runtime.restorePonytailStatusCapture = () => {
-		previousSetStatus.call(ctx.ui, "ponytail", undefined);
-		runtime.setPonytailNativeVisibility = undefined;
-		if (ctx.ui.setStatus === capture) ctx.ui.setStatus = previousSetStatus;
-	};
+}
+
+function disposePublisher(runtime: HeadroomRuntime): void {
+	if (!runtime.publisher) return;
+	try {
+		runtime.publisher.publish(null);
+		runtime.publisher.dispose();
+	} finally {
+		runtime.publisher = undefined;
+	}
+}
+
+function isEventBus(value: unknown): value is { emit: (channel: string, data: unknown) => void; on: (channel: string, handler: (data: unknown) => void) => () => void } {
+	return typeof value === "object" && value !== null && typeof (value as { emit?: unknown }).emit === "function" && typeof (value as { on?: unknown }).on === "function";
 }
 
 async function updateHealthState(runtime: HeadroomRuntime, signal?: AbortSignal): Promise<boolean> {
@@ -333,7 +309,7 @@ function safeRefreshStatus(runtime: HeadroomRuntime, ctx: ExtensionContext | und
 	try {
 		runtime.refreshStatus(ctx);
 	} catch {
-		// The session may have been reloaded/replaced while background health was in flight.
+		// The session may have been replaced while background health was in flight.
 	}
 }
 
@@ -394,7 +370,7 @@ function shouldSkipBeforePayload(runtime: HeadroomRuntime, ctx: ExtensionContext
 	if (isRemoteBlocked(runtime.config)) {
 		if (!runtime.state.remoteWarningShown) {
 			runtime.state.remoteWarningShown = true;
-			ctx.ui.notify("Headroom compression skipped because remote proxy is blocked.", "warning");
+			notify(ctx, "Headroom compression skipped because remote proxy is blocked.", "warning");
 		}
 		runtime.refreshStatus(ctx);
 		return true;
@@ -426,7 +402,8 @@ function recordCompressionError(runtime: HeadroomRuntime, ctx: ExtensionContext,
 	runtime.state.proxyOnline = false;
 	if (!runtime.state.offlineWarningShown) {
 		runtime.state.offlineWarningShown = true;
-		ctx.ui.notify(
+		notify(
+			ctx,
 			`Headroom proxy unavailable. Compression disabled until /headroom health succeeds.\n${runtime.state.stats.lastError}`,
 			"warning",
 		);
@@ -442,13 +419,21 @@ function isAbortOrTimeoutError(error: unknown): boolean {
 	if (!error || typeof error !== "object") return false;
 	const candidate = error as { cause?: unknown; message?: unknown; name?: unknown };
 	if (candidate.name === "TimeoutError" || candidate.name === "AbortError") return true;
-	if (
-		typeof candidate.message === "string" &&
-		/aborted due to timeout|operation was aborted/i.test(candidate.message)
-	) {
-		return true;
-	}
+	if (typeof candidate.message === "string" && /aborted due to timeout|operation was aborted/i.test(candidate.message)) return true;
 	return candidate.cause !== undefined && candidate.cause !== error && isAbortOrTimeoutError(candidate.cause);
+}
+
+async function showProxyStats(ctx: ExtensionContext, client: HeadroomHttpClient, config: HeadroomConfig): Promise<void> {
+	if (isRemoteBlocked(config)) {
+		notify(ctx, `Headroom proxy stats blocked for remote URL: ${config.baseUrl}`, "warning");
+		return;
+	}
+	try {
+		const stats = await client.stats();
+		notify(ctx, `Headroom proxy stats:\n${JSON.stringify(stats, null, 2)}`, "info");
+	} catch (error) {
+		notify(ctx, `Headroom proxy stats unavailable: ${getErrorMessage(error)}`, "warning");
+	}
 }
 
 async function handleCommand(
@@ -456,134 +441,57 @@ async function handleCommand(
 	parsed: ParsedCommand,
 	ctx: ExtensionContext,
 	initPaths?: HeadroomInitPaths,
-	displayConfigPath = DISPLAY_CONFIG_PATH,
 ): Promise<void> {
-	const command = parsed.command;
-	if (command === "init") {
+	if (parsed.command === "invalid") {
+		notify(ctx, HEADROOM_USAGE, "warning");
+		return;
+	}
+	if (parsed.command === "config") {
+		await showConfigDialog(runtime, ctx, initPaths);
+		return;
+	}
+	if (parsed.command === "init") {
 		await handleInitCommand(ctx, parsed.initTarget, initPaths);
 		return;
 	}
-	if (command === "on") {
+	if (parsed.command === "on") {
+		runtime.state.sessionEnabledOverride = true;
 		runtime.state.enabled = true;
 		runtime.state.offlineWarningShown = false;
 		runtime.state.proxyStartAttempted = false;
 		const healthy = await runtime.ensureProxy(ctx);
-		ctx.ui.notify(
-			healthy
-				? "Headroom compression enabled. Proxy will keep running after Pi exits."
-				: proxyStartHint(runtime.config),
-			healthy ? "info" : "warning",
-		);
+		notify(ctx, healthy ? "Headroom compression enabled. Proxy will keep running after Pi exits." : proxyStartHint(runtime.config), healthy ? "info" : "warning");
 		return;
 	}
-	if (command === "off") {
+	if (parsed.command === "off") {
+		runtime.state.sessionEnabledOverride = false;
 		runtime.state.enabled = false;
 		runtime.refreshStatus(ctx);
-		ctx.ui.notify("Headroom compression disabled for this Pi session. The proxy process is left running.", "info");
+		notify(ctx, "Headroom compression disabled for this Pi session. The proxy process is left running.", "info");
 		return;
 	}
-	if (command === "display") {
-		await handleDisplayCommand(runtime, "headroom", parsed.displayAction, ctx, displayConfigPath);
-		return;
-	}
-	if (command === "health") {
+	if (parsed.command === "health") {
 		runtime.state.proxyStartAttempted = false;
 		const healthy = await runtime.ensureProxy(ctx);
-		ctx.ui.notify(
-			healthy ? `Headroom proxy online: ${runtime.config.baseUrl}` : proxyStartHint(runtime.config),
-			healthy ? "info" : "warning",
-		);
+		notify(ctx, healthy ? `Headroom proxy online: ${runtime.config.baseUrl}` : proxyStartHint(runtime.config), healthy ? "info" : "warning");
 		return;
 	}
-	if (command === "stats") {
+	if (parsed.command === "stats") {
 		await showProxyStats(ctx, runtime.client, runtime.config);
 		return;
 	}
-	ctx.ui.notify(renderStatus(runtime.config, runtime.state), "info");
-}
-
-async function handleDisplayCommand(
-	runtime: HeadroomRuntime,
-	segment: StatusSegmentName,
-	action: DisplayAction | undefined,
-	ctx: ExtensionContext,
-	displayConfigPath = DISPLAY_CONFIG_PATH,
-): Promise<void> {
-	const label = segment === "headroom" ? "Headroom" : "Ponytail";
-	const config = loadDisplayConfig(displayConfigPath);
-	const current =
-		segment === "headroom" ? isDisplayVisible(config) : isPonytailDisplayVisible(config);
-	if (action === undefined) {
-		ctx.ui.notify(segment === "headroom" ? HEADROOM_USAGE : PONYTAIL_DISPLAY_USAGE, "warning");
-		return;
-	}
-	if (action === "status") {
-		const inOrder = (config.order ?? []).includes(segment);
-		ctx.ui.notify(
-			`${label} display: ${current ? "shown" : "hidden"}${inOrder ? "" : " (not present in display order)"}.`,
-			"info",
-		);
-		return;
-	}
-
-	const visible = action === "on" ? true : action === "off" ? false : !current;
-	try {
-		writeDisplaySegmentVisibility(segment, visible, displayConfigPath);
-		if (segment === "headroom") runtime.state.displayVisible = visible;
-		else runtime.state.ponytailDisplayVisible = visible;
-		runtime.refreshStatus(ctx);
-		ctx.ui.notify(
-			`${label} display ${visible ? "shown" : "hidden"} and saved.${segment === "ponytail" ? " Ponytail remains active." : ""}`,
-			"info",
-		);
-	} catch (error) {
-		ctx.ui.notify(
-			`Failed to save ${label} display setting: ${error instanceof Error ? error.message : String(error)}`,
-			"error",
-		);
-	}
-}
-
-async function handlePonytailNativeCommand(
-	runtime: HeadroomRuntime,
-	action: DisplayAction | undefined,
-	ctx: ExtensionContext,
-	displayConfigPath = DISPLAY_CONFIG_PATH,
-): Promise<void> {
-	const current = isPonytailNativeVisible(loadDisplayConfig(displayConfigPath));
-	if (action === undefined) {
-		ctx.ui.notify(PONYTAIL_NATIVE_USAGE, "warning");
-		return;
-	}
-	if (action === "status") {
-		ctx.ui.notify(`Original Ponytail status: ${current ? "shown" : "hidden"}.`, "info");
-		return;
-	}
-
-	const visible = action === "on" ? true : action === "off" ? false : !current;
-	try {
-		writePonytailNativeVisibility(visible, displayConfigPath);
-		runtime.state.ponytailNativeVisible = visible;
-		runtime.setPonytailNativeVisibility?.(visible);
-		ctx.ui.notify(`Original Ponytail status ${visible ? "shown" : "hidden"} and saved.`, "info");
-	} catch (error) {
-		ctx.ui.notify(
-			`Failed to save original Ponytail status setting: ${error instanceof Error ? error.message : String(error)}`,
-			"error",
-		);
-	}
+	notify(ctx, renderStatus(runtime.config, runtime.state, runtime.configPath), "info");
 }
 
 async function handleInitCommand(ctx: ExtensionContext, target: HeadroomInitTarget | undefined, initPaths?: HeadroomInitPaths): Promise<void> {
 	if (!target) {
-		ctx.ui.notify(HEADROOM_USAGE, "warning");
+		notify(ctx, HEADROOM_USAGE, "warning");
 		return;
 	}
 	const files = buildHeadroomInitFiles(target, ctx.ui.theme, initPaths);
-	const result = await writeHeadroomInitFiles(files, async (file) =>
-		ctx.ui.confirm("Overwrite Headroom file?", `${file.path} already exists. Overwrite it?`),
-	);
-	ctx.ui.notify(
+	const result = await writeHeadroomInitFiles(files, async (file) => ctx.ui.confirm("Overwrite Headroom file?", `${file.path} already exists. Overwrite it?`));
+	notify(
+		ctx,
 		[
 			"Headroom initialization complete.",
 			formatInitSummary("Created", result.created),
@@ -595,168 +503,68 @@ async function handleInitCommand(ctx: ExtensionContext, target: HeadroomInitTarg
 	if (result.skipped.length > 0 || result.failed.length > 0) {
 		const issues = [
 			result.skipped.length > 0 ? formatInitSummary("Skipped", result.skipped) : "",
-			result.failed.length > 0
-				? [
-						`Failed (${result.failed.length}):`,
-						...result.failed.map((failure) => `  ${failure.path}: ${failure.message}`),
-					].join("\n")
-				: "",
+			result.failed.length > 0 ? [`Failed (${result.failed.length}):`, ...result.failed.map((failure) => `  ${failure.path}: ${failure.message}`)].join("\n") : "",
 		].filter(Boolean);
-		ctx.ui.notify(`Headroom initialization issues.\n${issues.join("\n")}`, result.failed.length > 0 ? "error" : "warning");
+		notify(ctx, `Headroom initialization issues.\n${issues.join("\n")}`, result.failed.length > 0 ? "error" : "warning");
 	}
 }
 
 function formatInitSummary(label: string, files: readonly string[]): string {
 	return files.length > 0 ? `${label} (${files.length}):\n${files.map((file) => `  ${file}`).join("\n")}` : `${label}: none`;
 }
-function refreshStatus(
-	ctx: ExtensionContext,
-	config: HeadroomConfig,
-	state: HeadroomRuntimeState,
-	displayConfigPath: string,
-): void {
-	if (!ctx.hasUI) return;
-	const displayConfig = loadDisplayConfig(displayConfigPath);
-	const ponytailStatus = state.ponytailStatus;
-	const showHeadroom = isStatusSegmentEnabled(displayConfig, "headroom");
-	const showPonytail =
-		ponytailStatus !== undefined &&
-		ponytailStatus.mode !== "off" &&
-		isStatusSegmentEnabled(displayConfig, "ponytail");
-	if (!showHeadroom && !showPonytail) {
-		ctx.ui.setWidget(STATUS_KEY, undefined);
+
+function publishDisplay(runtime: HeadroomRuntime, ctx: ExtensionContext): void {
+	if (!runtime.publisher) return;
+	if (!runtime.config.display.visible) {
+		runtime.publisher.publish(null);
 		return;
 	}
-
-	const compressed = Boolean(state.stats.last);
-	const displayState = widgetState(
-		state.enabled,
-		isRemoteBlocked(config),
-		state.proxyStarting,
-		state.proxyOnline,
-		compressed,
+	const state = widgetState(
+		runtime.state.enabled,
+		isRemoteBlocked(runtime.config),
+		runtime.state.proxyStarting,
+		runtime.state.proxyOnline,
+		Boolean(runtime.state.stats.last),
 	);
-	const glyphAsset = showHeadroom ? loadGlyphAsset(displayState, displayConfig) : undefined;
-	const ponytailGlyphAsset =
-		showPonytail && ponytailStatus !== undefined
-			? loadPonytailGlyphAsset(ponytailStatus, displayConfig)
-			: undefined;
-	const values = {
-		label: "Headroom",
-		compressionPercent: state.stats.last ? Math.round((1 - state.stats.last.compressionRatio) * 100) : 0,
-		tokensSaved: state.stats.last?.tokensSaved ?? 0,
-		tokensBefore: state.stats.last?.tokensBefore ?? 0,
-		tokensAfter: state.stats.last?.tokensAfter ?? 0,
-		proxyStatus:
-			state.proxyOnline === true
-				? "online"
-				: state.proxyStarting
-					? "starting"
-					: state.proxyOnline === false
-						? "offline"
-						: "unknown",
-		error: state.stats.lastError ?? "",
-	};
-	const fallbackGlyph = resolveThemeGlyph(ctx.ui.theme, displayState);
-	ctx.ui.setWidget(
-		STATUS_KEY,
-		(tui) => {
-			let frame = 0;
-			let ponytailFrame = 0;
-			let timer: Timer | undefined;
-			let ponytailTimer: Timer | undefined;
-			let disposed = false;
-			const component = {
-				dispose() {
-					if (disposed) return;
-					disposed = true;
-					if (timer) ctx.clearTimer(timer);
-					if (ponytailTimer) ctx.clearTimer(ponytailTimer);
-					timer = undefined;
-					ponytailTimer = undefined;
-				},
-				invalidate() {},
-				render(width: number): readonly string[] {
-					const headroom =
-						showHeadroom && glyphAsset
-							? renderDisplay(displayState, values, displayConfig, fallbackGlyph, frame, glyphAsset.frames)
-							: "";
-					const ponytail =
-						showPonytail && ponytailStatus
-							? renderPonytailDisplay(
-									ponytailStatus,
-									displayConfig,
-									ponytailFrame,
-									ponytailGlyphAsset?.frames,
-								)
-							: "";
-					const text = renderStatusSegments(headroom, ponytail, displayConfig);
-					const clipped = truncateToWidth(text, width, "", false);
-					return [" ".repeat(Math.max(0, width - visibleWidth(clipped))) + clipped];
-				},
-			};
-
-			if (glyphAsset?.fps !== undefined && glyphAsset.frames.length >= 2) {
-				const intervalMs = Math.max(1, Math.round(1000 / glyphAsset.fps));
-				timer = ctx.setInterval(() => {
-					if (disposed) return;
-					frame = (frame + 1) % glyphAsset.frames.length;
-					tui.requestComponentRender(component);
-				}, intervalMs);
-			}
-			if (
-				ponytailGlyphAsset?.fps !== undefined &&
-				ponytailGlyphAsset.frames.length >= 2
-			) {
-				const intervalMs = Math.max(1, Math.round(1000 / ponytailGlyphAsset.fps));
-				ponytailTimer = ctx.setInterval(() => {
-					if (disposed) return;
-					ponytailFrame = (ponytailFrame + 1) % ponytailGlyphAsset.frames.length;
-					tui.requestComponentRender(component);
-				}, intervalMs);
-			}
-			return component;
-		},
-		{ placement: "belowEditor" },
-	);
-}
-
-
-
-async function showProxyStats(
-	ctx: ExtensionContext,
-	client: HeadroomHttpClient,
-	config: HeadroomConfig,
-): Promise<void> {
-	if (isRemoteBlocked(config)) {
-		ctx.ui.notify(renderRemoteBlocked(config), "warning");
-		return;
-	}
+	const fallback = resolveThemeGlyph(ctx.ui.theme, state) || DEFAULT_GLYPHS[state];
 	try {
-		const stats = await client.stats();
-		ctx.ui.notify(
-			`Headroom proxy stats (${config.baseUrl}):\n${JSON.stringify(stats, null, 2).slice(0, 4000)}`,
-			"info",
-		);
-	} catch (error) {
-		const message = error instanceof Error ? error.message : String(error);
-		ctx.ui.notify(`Could not read Headroom stats: ${message}`, "warning");
+		const values = {
+			label: "Headroom",
+			compressionPercent: runtime.state.stats.last ? Math.round((1 - runtime.state.stats.last.compressionRatio) * 100) : 0,
+			tokensSaved: runtime.state.stats.last?.tokensSaved ?? 0,
+			tokensBefore: runtime.state.stats.last?.tokensBefore ?? 0,
+			tokensAfter: runtime.state.stats.last?.tokensAfter ?? 0,
+			proxyStatus:
+				runtime.state.proxyOnline === true
+					? "online"
+					: runtime.state.proxyStarting
+						? "starting"
+						: runtime.state.proxyOnline === false
+							? "offline"
+							: "unknown",
+			error: runtime.state.stats.lastError ?? "",
+		};
+		const asset = loadGlyphAsset(state, runtime.config.display, fallback);
+		runtime.publisher.publish(renderDisplayFrames(state, values, runtime.config.display, fallback, asset));
+	} catch {
+		// Keep Headroom visible with a safe one-row source when a custom asset fails.
+		runtime.publisher.publish({ frames: [[fallback]] });
 	}
 }
 
-function renderStatus(config: HeadroomConfig, state: HeadroomRuntimeState): string {
+function renderStatus(config: HeadroomConfig, state: HeadroomRuntimeState, configPath: string): string {
 	const stats = state.stats;
 	const lines = [
 		"Headroom token compression",
 		`  Enabled: ${state.enabled ? "yes" : "no"}`,
-		`  Headroom display: ${state.displayVisible ? "shown" : "hidden"}`,
-		`  Ponytail display: ${state.ponytailDisplayVisible ? "shown" : "hidden"}`,
-		`  Original Ponytail status: ${state.ponytailNativeVisible ? "shown" : "hidden"}`,
+		`  Persisted enabled: ${config.enabled ? "yes" : "no"}`,
+		`  Display: ${config.display.visible ? "shown" : "hidden"}`,
 		`  Proxy:   ${config.baseUrl} (${state.proxyOnline === true ? "online" : state.proxyStarting ? "starting" : state.proxyOnline === false ? "not running" : "unknown"})`,
 		`  Auto-start: ${config.autoStart ? `yes (${config.command})` : "no"}`,
-		`  Shutdown: proxy is left running after Pi exits`,
+		"  Shutdown: proxy is left running after Pi exits",
 		`  Remote:  ${isRemoteBlocked(config) ? "blocked" : config.allowRemote ? "allowed" : "local-only"}`,
 		`  Thresholds: context >= ${config.minContextTokens.toLocaleString()} tokens, toolResult >= ${config.minMessageChars.toLocaleString()} chars`,
+		`  Config: ${configPath}`,
 		"",
 		"Session stats:",
 		`  Attempts:     ${stats.attempts}`,
@@ -817,31 +625,227 @@ function renderRemoteBlocked(config: HeadroomConfig): string {
 	].join("\n");
 }
 
-function parseDisplayAction(args: string): DisplayAction | undefined {
+function parseCommand(args: string): ParsedCommand {
 	const tokens = args.trim().toLowerCase().split(/\s+/).filter(Boolean);
-	if (tokens.length === 0) return "status";
-	if (tokens.length === 1 && DISPLAY_ACTIONS.includes(tokens[0] as DisplayAction)) {
-		return tokens[0] as DisplayAction;
+	if (tokens.length === 0) return { command: "config" };
+	const command = tokens[0];
+	if (!SUBCOMMANDS.includes(command as Subcommand)) return { command: "invalid" };
+	if (command !== "init") return tokens.length === 1 ? { command: command as Subcommand } : { command: "invalid" };
+	if (tokens.length === 1) return { command: "init", initTarget: "all" };
+	return tokens.length === 2 && INIT_TARGETS.includes(tokens[1] as HeadroomInitTarget)
+		? { command: "init", initTarget: tokens[1] as HeadroomInitTarget }
+		: { command: "invalid" };
+}
+
+function emptyStats(): HeadroomStats {
+	return { attempts: 0, applied: 0, guardSkips: 0, tokensSaved: 0 };
+}
+
+function notify(ctx: ExtensionContext, message: string, type: "info" | "warning" | "error"): void {
+	ctx.ui.notify(message, type);
+}
+
+async function showConfigDialog(runtime: HeadroomRuntime, ctx: ExtensionContext, initPaths?: HeadroomInitPaths): Promise<void> {
+	if (!ctx.hasUI || typeof ctx.ui.custom !== "function") {
+		notify(ctx, renderStatus(runtime.config, runtime.state, runtime.configPath), "info");
+		return;
+	}
+	const persisted = loadHeadroomConfig({ env: {}, configPath: runtime.configPath });
+	const result = await ctx.ui.custom<DialogResult>(
+		(_tui, _theme, _keybindings, done) => new HeadroomConfigDialog(persisted, ctx, runtime.configPath, initPaths, done),
+		{ overlay: true },
+	);
+	if (result?.action !== "apply") return;
+	await applyConfig(runtime, ctx, result.config);
+}
+
+async function applyConfig(runtime: HeadroomRuntime, ctx: ExtensionContext, draft: HeadroomConfig): Promise<void> {
+	const before = loadHeadroomConfig({ env: {}, configPath: runtime.configPath });
+	try {
+		writeHeadroomConfig(draft, runtime.configPath);
+	} catch (error) {
+		notify(ctx, `Failed to save Headroom config: ${error instanceof Error ? error.message : String(error)}`, "error");
+		return;
+	}
+	const next = loadHeadroomConfig({ env: runtime.env, configPath: runtime.configPath });
+	if (before.enabled !== draft.enabled) runtime.state.sessionEnabledOverride = undefined;
+	runtime.config = next;
+	runtime.state.enabled = runtime.state.sessionEnabledOverride ?? next.enabled;
+	if (before.baseUrl !== next.baseUrl || before.timeoutMs !== next.timeoutMs) {
+		runtime.client = new HeadroomHttpClient({ baseUrl: next.baseUrl, timeoutMs: next.timeoutMs });
+		runtime.state.proxyOnline = null;
+		runtime.state.proxyStarting = false;
+		runtime.state.proxyStartAttempted = false;
+	}
+	runtime.refreshStatus(ctx);
+	notify(ctx, "Headroom configuration applied.", "info");
+}
+
+class HeadroomConfigDialog implements Component {
+	private draft: HeadroomConfig;
+	private list: SettingsList;
+	private error = "";
+
+	constructor(
+		config: HeadroomConfig,
+		private readonly ctx: ExtensionContext,
+		private readonly configPath: string,
+		private readonly initPaths: HeadroomInitPaths | undefined,
+		private readonly done: (result: DialogResult) => void,
+	) {
+		this.draft = cloneConfig(config);
+		this.list = this.buildList();
+	}
+
+	render(width: number): readonly string[] {
+		const rows = [...this.list.render(width)];
+		if (this.error) rows.push(...new Text(this.error, 0, 0).render(width));
+		return rows;
+	}
+
+	handleInput(data: string): void {
+		const selected = this.list.getSelectedItem();
+		if ((data === "\n" || data === "\r") && selected?.id.startsWith("action:")) {
+			void this.handleAction(selected.id.slice(7));
+			return;
+		}
+		this.list.handleInput(data);
+	}
+
+	private buildList(): SettingsList {
+		const items: SettingItem[] = [
+			{ id: "section:config", label: "Config", currentValue: "", heading: true },
+			this.booleanItem("enabled", "Enabled", this.draft.enabled),
+			this.stringItem("baseUrl", "Base URL", this.draft.baseUrl),
+			this.booleanItem("allowRemote", "Allow remote", this.draft.allowRemote),
+			this.booleanItem("autoStart", "Auto-start", this.draft.autoStart),
+			this.stringItem("command", "Command", this.draft.command),
+			this.numberItem("minContextTokens", "Minimum context tokens", this.draft.minContextTokens),
+			this.numberItem("minMessageChars", "Minimum message chars", this.draft.minMessageChars),
+			this.numberItem("timeoutMs", "Timeout (ms)", this.draft.timeoutMs),
+			{ id: "section:display", label: "Display", currentValue: "", heading: true },
+			this.booleanItem("display.visible", "Visible", this.draft.display.visible),
+			this.stringItem("display.glyphDirectory", "Glyph directory", this.draft.display.glyphDirectory),
+			this.stringItem("display.template", "Outer template", this.draft.display.template),
+			...(Object.keys(this.draft.display.status) as DisplayState[]).map((state) => this.stringItem(`display.status.${state}`, state, this.draft.display.status[state])),
+			{ id: "section:actions", label: "Actions", currentValue: "", heading: true },
+			{ id: "action:show-config", label: "Show config path", currentValue: this.configPath },
+			{ id: "action:show-glyphs", label: "Show glyph path", currentValue: this.draft.display.glyphDirectory },
+			{ id: "action:initialize-glyphs", label: "Initialize missing glyphs", currentValue: "Enter" },
+			{ id: "action:reload", label: "Reload from disk", currentValue: "Enter" },
+			{ id: "action:apply", label: "Apply changes", currentValue: "Enter" },
+			{ id: "action:cancel", label: "Cancel", currentValue: "Enter" },
+		];
+		return new SettingsList(items, Math.min(16, items.length), getSettingsListTheme(), (id, value) => this.onChange(id, value), () => this.done({ action: "cancel" }), { layout: "flat", typeToSearch: false, hint: "Enter edit/action · Esc cancel" });
+	}
+
+	private booleanItem(id: string, label: string, value: boolean): SettingItem {
+		return { id, label, currentValue: value ? "true" : "false", values: ["true", "false"] };
+	}
+
+	private stringItem(id: string, label: string, value: string): SettingItem {
+		return { id, label, currentValue: value, submenu: (current, done) => this.inputSubmenu(current, done) };
+	}
+
+	private numberItem(id: string, label: string, value: number): SettingItem {
+		return this.stringItem(id, label, String(value));
+	}
+
+	private inputSubmenu(current: string, done: (selected?: string) => void): Input {
+		const input = new Input();
+		input.setValue(current);
+		input.onSubmit = (value) => done(value);
+		input.onEscape = () => done(undefined);
+		return input;
+	}
+
+	private onChange(id: string, value: string): void {
+		if (id === "enabled" || id === "allowRemote" || id === "autoStart") {
+			(this.draft as unknown as Record<string, unknown>)[id] = value === "true";
+			return;
+		}
+		if (id === "baseUrl" || id === "command") {
+			(this.draft as unknown as Record<string, unknown>)[id] = value;
+			return;
+		}
+		if (id === "minContextTokens" || id === "minMessageChars" || id === "timeoutMs") {
+			(this.draft as unknown as Record<string, unknown>)[id] = Number(value);
+			return;
+		}
+		if (id === "display.visible") {
+			this.draft.display.visible = value === "true";
+			return;
+		}
+		if (id === "display.glyphDirectory") this.draft.display.glyphDirectory = value;
+		else if (id === "display.template") this.draft.display.template = value;
+		else if (id.startsWith("display.status.")) this.draft.display.status[id.slice(15) as DisplayState] = value;
+	}
+
+	private async handleAction(action: string): Promise<void> {
+		switch (action) {
+			case "show-config":
+				this.ctx.ui.notify(`Headroom config: ${this.configPath}`, "info");
+				return;
+			case "show-glyphs":
+				this.ctx.ui.notify(`Headroom glyphs: ${this.draft.display.glyphDirectory}`, "info");
+				return;
+			case "initialize-glyphs": {
+				const files = buildHeadroomInitFiles("glyphs", this.ctx.ui.theme, this.initPaths ?? { glyphs: this.draft.display.glyphDirectory });
+				await writeHeadroomInitFiles(files, async (file) => this.ctx.ui.confirm("Overwrite Headroom glyph?", `${file.path} already exists. Overwrite it?`));
+				return;
+			}
+			case "reload":
+				this.draft = loadHeadroomConfig({ env: {}, configPath: this.configPath });
+				this.list = this.buildList();
+				return;
+			case "apply": {
+				const error = validateDraft(this.draft);
+				if (error) {
+					this.error = error;
+					return;
+				}
+				this.done({ action: "apply", config: cloneConfig(this.draft) });
+				return;
+			}
+			case "cancel":
+				this.done({ action: "cancel" });
+				return;
+		}
+	}
+}
+
+function validateDraft(config: HeadroomConfig): string | undefined {
+	if (typeof config.enabled !== "boolean" || typeof config.allowRemote !== "boolean" || typeof config.autoStart !== "boolean") return "Boolean settings must be true or false.";
+	try {
+		const url = new URL(config.baseUrl);
+		if (!["http:", "https:"].includes(url.protocol) || !url.hostname) return "Base URL must be an HTTP(S) URL with a hostname.";
+	} catch {
+		return "Base URL must be an HTTP(S) URL with a hostname.";
+	}
+	if (!config.command.trim()) return "Command must not be empty.";
+	if (!Number.isSafeInteger(config.minContextTokens) || config.minContextTokens < 0) return "Minimum context tokens must be a non-negative integer.";
+	if (!Number.isSafeInteger(config.minMessageChars) || config.minMessageChars < 1) return "Minimum message chars must be an integer of at least 1.";
+	if (!Number.isSafeInteger(config.timeoutMs) || config.timeoutMs < 100) return "Timeout must be an integer of at least 100 ms.";
+	if (typeof config.display.glyphDirectory !== "string" || !config.display.glyphDirectory.trim()) return "Glyph directory must not be empty.";
+	if (typeof config.display.template !== "string" || /[\r\n]/.test(config.display.template)) return "Display template must be a single line.";
+	for (const state of Object.keys(config.display.status) as DisplayState[]) {
+		if (typeof config.display.status[state] !== "string" || /[\r\n]/.test(config.display.status[state])) return `${state} template must be a single line.`;
 	}
 	return undefined;
 }
 
-function parseCommand(args: string): ParsedCommand {
-	const tokens = args.trim().toLowerCase().split(/\s+/).filter(Boolean);
-	const command = tokens[0];
-	if (!command || !SUBCOMMANDS.includes(command as Subcommand)) return { command: "status" };
-	if (command === "display") {
-		return { command: "display", displayAction: parseDisplayAction(tokens.slice(1).join(" ")) };
-	}
-	if (command !== "init") return { command: command as Subcommand };
-	const target = tokens[1];
-	if (!target && tokens.length === 1) return { command: "init", initTarget: "all" };
-	if (tokens.length === 2 && INIT_TARGETS.includes(target as HeadroomInitTarget)) {
-		return { command: "init", initTarget: target as HeadroomInitTarget };
-	}
-	return { command: "init" };
+function cloneConfig(config: HeadroomConfig): HeadroomConfig {
+	return normalizeHeadroomConfig({
+		...config,
+		display: {
+			...config.display,
+			status: { ...config.display.status },
+		},
+	});
 }
 
 export const __test__ = {
 	isAbortOrTimeoutError,
+	parseCommand,
+	validateDraft,
 };

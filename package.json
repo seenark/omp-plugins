@@ -20,6 +20,16 @@
         "description": "Prompt editor border styles extension.",
         "default": true,
         "extensions": ["./packages/prompt-border-style/src/main.ts"]
+      },
+      "shared-display": {
+        "description": "Shared animated status display host.",
+        "default": false,
+        "extensions": ["./packages/shared-display/src/index.ts"]
+      },
+      "caveman": {
+        "description": "Canonical Caveman instruction mode.",
+        "default": false,
+        "extensions": ["./packages/caveman/src/index.ts"]
       }
     }
   },
@@ -30,9 +40,11 @@
     "test": "bun run --workspaces --if-present test",
     "pack:check": "bun run --workspaces --if-present pack:check",
     "verify": "bun run typecheck && bun run test && bun run check && bun run pack:check",
+    "publish:shared-display": "bun run verify && bun publish --cwd packages/shared-display --access public",
+    "publish:caveman": "bun run verify && bun publish --cwd packages/caveman --access public",
     "publish:headroom": "bun run verify && bun publish --cwd packages/headroom --access public",
     "publish:prompt-border-style": "bun run verify && bun publish --cwd packages/prompt-border-style --access public",
     "publish:theme-catppuccin": "bun run verify && bun publish --cwd packages/theme-catppuccin --access public",
-    "publish:all": "bun run verify && bun publish --cwd packages/headroom --access public && bun publish --cwd packages/prompt-border-style --access public && bun publish --cwd packages/theme-catppuccin --access public"
+    "publish:all": "bun run verify && bun publish --cwd packages/shared-display --access public && bun publish --cwd packages/caveman --access public && bun publish --cwd packages/headroom --access public && bun publish --cwd packages/prompt-border-style --access public && bun publish --cwd packages/theme-catppuccin --access public"
   }
 }

@@ -1,6 +1,6 @@
 {
     "name": "@codesook/omp-prompt-border-style",
-    "version": "1.0.2",
+    "version": "2.0.0",
     "type": "module",
     "description": "Prompt input border styles for oh-my-pi",
     "license": "MIT",
@@ -12,10 +12,11 @@
     ],
     "scripts": {
         "check": "bun --bun tsc --noEmit",
+        "check:types": "tsc -p tsconfig.json --noEmit",
         "test": "bun test src/context-rail.test.ts src/main.test.ts",
         "lint": "bun --bun tsc --noEmit",
         "build": "bun --bun tsc --noEmit",
-        "pack:check": "bun pm pack --dry-run --quiet"
+        "pack:check": "bun ../../scripts/check-package-files.ts"
     },
     "publishConfig": {
         "access": "public"

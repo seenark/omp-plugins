@@ -1,0 +1,42 @@
+{
+	"name": "@codesook/omp-caveman",
+	"version": "1.0.0",
+	"type": "module",
+	"description": "Canonical Caveman mode and Shared Display producer for oh-my-pi",
+	"license": "MIT",
+	"files": [
+		"src",
+		"skills",
+		"assets",
+		"README.md",
+		"THIRD-PARTY-NOTICES.txt"
+	],
+	"scripts": {
+		"check:types": "tsc -p tsconfig.json --noEmit",
+		"test": "bun test",
+		"pack:check": "bun ../../scripts/check-package-files.ts"
+	},
+	"exports": {
+		".": "./src/index.ts"
+	},
+	"dependencies": {
+		"@codesook/omp-shared-display": "^1.0.0"
+	},
+	"peerDependencies": {
+		"@oh-my-pi/pi-coding-agent": ">=18.1.16",
+		"@oh-my-pi/pi-tui": ">=18.1.16"
+	},
+	"devDependencies": {
+		"@codesook/omp-shared-display": "workspace:*",
+		"@oh-my-pi/pi-coding-agent": "18.1.16",
+		"@oh-my-pi/pi-tui": "18.1.16",
+		"bun-types": "latest",
+		"typescript": "latest"
+	},
+	"omp": {
+		"extensions": ["./src/index.ts"]
+	},
+	"publishConfig": {
+		"access": "public"
+	}
+}

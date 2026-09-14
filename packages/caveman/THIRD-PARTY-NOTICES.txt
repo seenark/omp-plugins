@@ -1,0 +1,69 @@
+Third-party notices for @codesook/omp-caveman
+
+======================================================================
+Canonical Caveman skill
+======================================================================
+
+Source: JuliusBrussee/caveman
+Pinned commit: 15581d14007fd01fb3f132016741962f34936ca2
+Source file: skills/caveman/SKILL.md
+URL: https://github.com/JuliusBrussee/caveman/tree/15581d14007fd01fb3f132016741962f34936ca2
+
+Scope note: the upstream MIT license covers the repository except Engine-linked
+directories listed in LICENSING.md (engine/, proxy/, rewriter/, browse/, mcp/,
+shrink/, cavemem Go core, shared/platform/), which are licensed under Business
+Source License 1.1. This package vendors only skills/caveman/SKILL.md, which is
+within the upstream MIT scope.
+
+MIT License
+
+Copyright (c) 2026 Julius Brussee
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+======================================================================
+Animation source
+======================================================================
+
+Source: jonjonrankin/pi-caveman
+Pinned commit: 8d326c4e562eeb0cdac41700348c6183efc05189
+Source file: extensions/caveman.ts (Braille fire animation)
+URL: https://github.com/jonjonrankin/pi-caveman/tree/8d326c4e562eeb0cdac41700348c6183efc05189
+
+MIT License
+
+Copyright (c) 2026
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.

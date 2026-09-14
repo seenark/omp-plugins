@@ -1,164 +1,119 @@
 # omp-plugins
 
-Standalone [oh-my-pi](https://github.com/can1357/oh-my-pi) plugins in one
-repository. The TypeScript extensions can be installed directly from GitHub;
-the Catppuccin theme package can be run with Bun and may be published later as
-an npm package.
+Standalone [oh-my-pi](https://github.com/can1357/oh-my-pi) extensions in one Bun workspace.
 
-## Included plugins
+## Packages and features
 
-```text
-packages/
-  headroom/             # context compression extension
-  prompt-border-style/  # prompt editor border styles
-  theme-catppuccin/     # Catppuccin theme installer
-```
+| Package | Feature | Default | Entry |
+| --- | --- | --- | --- |
+| `@codesook/omp-headroom` | `headroom` | yes | `packages/headroom/index.ts` |
+| `@codesook/omp-prompt-border-style` | `prompt-border-style` | yes | `packages/prompt-border-style/src/main.ts` |
+| `@codesook/omp-shared-display` | `shared-display` | no | `packages/shared-display/src/index.ts` |
+| `@codesook/omp-caveman` | `caveman` | no | `packages/caveman/src/index.ts` |
+| `@codesook/omp-theme-catppuccin` | theme package | — | `packages/theme-catppuccin/bin/install.js` |
 
-The root plugin uses OMP feature selection. A normal install enables both
-TypeScript extensions; a feature selector enables only the requested one.
+A normal root install enables only the two default features. Opt-in packages are intentionally side-effect free unless selected; importing `@codesook/omp-shared-display/client` never activates its extension entry.
 
 ## Requirements
 
-- Bun 1.4.0
-- OMP 18.0.1 or newer with plugin support
+- Bun 1.4.0 or newer
+- OMP 18.1.16 or newer
 
-Any Bun installation method is supported. Confirm the active version:
-
-```bash
+```sh
 bun --version
+omp --version
 ```
 
-This repository includes `mise.toml` for contributors who use mise, but mise
-is optional.
+## Install from GitHub
 
-## Install extensions from GitHub
-
-Install both current TypeScript extensions using the default feature set:
-
-```bash
+```sh
 omp plugin install github:seenark/omp-plugins
-```
-
-Select multiple extensions explicitly:
-
-```bash
 omp plugin install 'github:seenark/omp-plugins[headroom,prompt-border-style]'
-```
-
-Install every feature declared by the repository, including future features:
-
-```bash
+omp plugin install 'github:seenark/omp-plugins[shared-display,caveman]'
 omp plugin install 'github:seenark/omp-plugins[*]'
 ```
 
-Install only one extension:
+Feature selectors are package names, not directories. Keep selectors quoted because `[` and `]` are special in many shells.
 
-```bash
-omp plugin install 'github:seenark/omp-plugins[headroom]'
-omp plugin install 'github:seenark/omp-plugins[prompt-border-style]'
-```
+Install one package from a checkout:
 
-For a future feature named `new-package`, add it to the selector:
-
-```bash
-omp plugin install 'github:seenark/omp-plugins[headroom,prompt-border-style,new-package]'
-```
-
-Keep targets containing `[` and `]` quoted because those characters have
-special meaning in many shells. The bracketed names are OMP feature names, not
-GitHub subdirectories. Re-run the install command to change the selected
-features of an existing installation.
-
-Verify the installation:
-
-```bash
-omp plugin list
-omp plugin doctor
-```
-
-## Install one extension from a local checkout
-
-```bash
-git clone https://github.com/seenark/omp-plugins.git
-cd omp-plugins
+```sh
 bun install
-
-# Headroom only
 omp plugin install "$PWD/packages/headroom"
-
-# Prompt Border Style only
 omp plugin install "$PWD/packages/prompt-border-style"
+omp plugin install "$PWD/packages/shared-display"
+omp plugin install "$PWD/packages/caveman"
 ```
 
-## Install the Catppuccin themes
+Install Catppuccin themes:
 
-The current OMP runtime discovers custom themes from its theme directory, so
-the theme package copies its JSON files there instead of registering them as
-plugin extensions. From a checkout of this repository, run:
-
-```bash
+```sh
 bun packages/theme-catppuccin/bin/install.js
 ```
 
-For a non-destructive test, use a temporary OMP data directory:
+## Command tree
 
-```bash
-tmp="$(mktemp -d)"
-PI_CODING_AGENT_DIR="$tmp/agent" bun packages/theme-catppuccin/bin/install.js
-rm -rf "$tmp"
-```
+- `/headroom [config|status|on|off|health|stats|init [config|glyphs|all]]`
+- `/shared-display [config|status]`
+- `/caveman [config|status|off|lite|full|ultra|wenyan-lite|wenyan-full|wenyan-ultra]`
+- `/prompt-border [config|status|<style> [layout]|layout <layout>|reset|rail toggle|glyphs debug [frames|demo|on|off]]`
 
-Then open OMP, run `/settings`, and choose the Catppuccin light or dark theme.
+Bare package commands and `config` open the same staged Settings Dialog. Dialog edits are drafts: `Apply` validates and atomically replaces the package JSON; `Reload` discards the draft; `Cancel` leaves persisted and live state unchanged. Initialize actions create only missing assets after confirmation.
 
-## Workspace development
+## Configuration and migration
 
-Install dependencies:
+Each package owns one destination JSON file:
 
-```bash
+- Shared Display: `~/.config/codesook-omp/shared-display/config.json`
+- Caveman: `~/.config/codesook-omp/caveman/config.json`
+- Headroom: `~/.config/codesook-omp/headroom/config.json`
+- Prompt Border: `~/.config/codesook-omp/prompt-border/config.json`
+
+Migration is destination-gated and runs once. An existing destination wins, including an invalid destination (which falls back to runtime defaults without importing legacy values). A missing destination is created from independently normalized legacy sources without modifying legacy files. Legacy aliases and split command paths are not retained.
+
+## Implemented ownership
+
+- Shared Display owns the single `codesook-shared-display` widget, source composition, and animation clock.
+- Headroom remains a compression/proxy producer and continues working without Shared Display; it publishes no private widget or native status.
+- Caveman injects the pinned skill, recovers session levels from branch entries, and publishes custom/native status independently.
+- Prompt Border owns the prompt editor, Context Rail, attachment band, and spinner overrides; it does not publish Shared Display sources.
+
+Ponytail and Caveman producers publish complete frame sequences and never create producer-side animation timers or fallback widgets. Native status visibility is independent from custom Shared Display visibility.
+
+## Development
+
+```sh
 bun install
-```
-
-Run the available checks:
-
-```bash
-bun run list
-bun run check
 bun run typecheck
 bun run test
+bun run check
 bun run pack:check
 bun run verify
 ```
 
-- `bun run check` validates package names, versions, publication state, and
-  OMP entrypoint metadata.
-- `bun run typecheck` runs package-local TypeScript checks.
-- `bun run test` runs package-local Bun tests.
-- `bun run pack:check` checks each package's contents with Bun's pack dry run.
-- `bun run verify` runs all checks in order.
+Package publication is dependency ordered:
 
-## Local plugin development
-
-Link the TypeScript extensions directly from this checkout:
-
-```bash
-omp plugin link "$PWD/packages/headroom"
-omp plugin link "$PWD/packages/prompt-border-style"
-```
-
-Run the theme installer locally:
-
-```bash
-bun packages/theme-catppuccin/bin/install.js
-```
-
-## Optional npm publication
-
-Publishing is not required for GitHub installation. If these packages are
-published later, the root scripts use Bun:
-
-```bash
+```sh
+bun run publish:shared-display
+bun run publish:caveman
 bun run publish:headroom
 bun run publish:prompt-border-style
 bun run publish:theme-catppuccin
 bun run publish:all
 ```
+
+## Local OMP smoke loading
+
+Load extension entries directly from a disposable home/session tree:
+
+```sh
+HOME="$TMP_HOME" XDG_CONFIG_HOME="$TMP_XDG" \
+PI_CODING_AGENT_DIR="$TMP_AGENT" PI_CODING_AGENT_SESSION_DIR="$TMP_SESSIONS" \
+omp --cwd "$TMP_WORK" --session-dir "$TMP_SESSIONS" \
+  --extension "$PWD/packages/shared-display/src/index.ts" \
+  --extension "$PWD/packages/caveman/src/index.ts" \
+  --extension "$PWD/packages/headroom/index.ts" \
+  --extension "$PWD/packages/prompt-border-style/src/main.ts"
+```
+
+Use disposable homes only. The repository's focused tests use injected temporary paths for migration, staged Apply/Cancel, EventBus replay, and source lifecycle behavior.

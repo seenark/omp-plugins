@@ -1,29 +1,26 @@
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import {
-	DEFAULT_DISPLAY_CONFIG,
-	DISPLAY_CONFIG_PATH,
+	DEFAULT_HEADROOM_CONFIG,
+	HEADROOM_CONFIG_FILE,
+} from "./config.ts";
+import {
+	DEFAULT_GLYPHS,
 	DISPLAY_STATES,
 	GLYPH_DIR,
 	resolveThemeGlyph,
 	type DisplayState,
 } from "./display.ts";
-import {
-	DEFAULT_HEADROOM_SETTINGS,
-	HEADROOM_SETTINGS_FILE,
-} from "./config.ts";
 
-export type HeadroomInitTarget = "config" | "display" | "glyphs" | "all";
+export type HeadroomInitTarget = "config" | "glyphs" | "all";
 
 export interface HeadroomInitPaths {
 	config?: string;
-	display?: string;
 	glyphs?: string;
 }
 
 export const defaultPaths = {
-	config: HEADROOM_SETTINGS_FILE,
-	display: DISPLAY_CONFIG_PATH,
+	config: HEADROOM_CONFIG_FILE,
 	glyphs: GLYPH_DIR,
 } as const;
 
@@ -52,36 +49,26 @@ export function buildHeadroomInitFiles(
 	theme: unknown,
 	paths: HeadroomInitPaths = defaultPaths,
 ): HeadroomInitFile[] {
-	const resolvedPaths = {
-		config: paths.config ?? defaultPaths.config,
-		display: paths.display ?? defaultPaths.display,
-		glyphs: paths.glyphs ?? defaultPaths.glyphs,
-	};
+	const configPath = paths.config ?? defaultPaths.config;
+	const glyphDirectory = paths.glyphs ?? defaultPaths.glyphs;
 	const configFile: HeadroomInitFile = {
-		path: resolvedPaths.config,
-		label: "settings.json",
-		content: `${JSON.stringify(DEFAULT_HEADROOM_SETTINGS, null, 2)}\n`,
-	};
-	const displayFile: HeadroomInitFile = {
-		path: resolvedPaths.display,
-		label: "display-config.json",
-		content: `${JSON.stringify(DEFAULT_DISPLAY_CONFIG, null, 2)}\n`,
+		path: configPath,
+		label: "config.json",
+		content: `${JSON.stringify(DEFAULT_HEADROOM_CONFIG, null, 2)}\n`,
 	};
 	const glyphFiles = INIT_GLYPH_STATES.map((state) => ({
-		path: path.join(resolvedPaths.glyphs, `${state}.txt`),
+		path: path.join(glyphDirectory, `${state}.txt`),
 		label: `${state}.txt`,
-		content: `${resolveThemeGlyph(theme, state)}\n`,
+		content: `${resolveThemeGlyph(theme, state) || DEFAULT_GLYPHS[state]}\n`,
 	}));
 
 	switch (target) {
 		case "config":
 			return [configFile];
-		case "display":
-			return [displayFile];
 		case "glyphs":
 			return glyphFiles;
 		case "all":
-			return [configFile, displayFile, ...glyphFiles];
+			return [configFile, ...glyphFiles];
 	}
 }
 
@@ -116,3 +103,4 @@ export async function writeHeadroomInitFiles(
 
 	return result;
 }
+

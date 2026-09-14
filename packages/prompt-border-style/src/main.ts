@@ -1,31 +1,40 @@
 import { CustomEditor, type ExtensionAPI, type ExtensionUIContext, type SpinnerType, type Theme } from "@oh-my-pi/pi-coding-agent";
 import { AttachmentChipsBand } from "@oh-my-pi/pi-coding-agent/modes/components/attachment-chips";
+import { getSelectListTheme, getSettingsListTheme } from "@oh-my-pi/pi-coding-agent/modes/theme/theme";
 import { settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { computeCompactionBoundaries } from "@oh-my-pi/pi-coding-agent/modes/utils/context-usage";
-import { mkdir } from "node:fs/promises";
+import { mkdir, rename, unlink } from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
 import {
 	Box,
 	CURSOR_MARKER,
+	Input,
 	Loader,
-	sliceByColumn,
+	SelectList,
+	SettingsList,
+	Spacer,
 	Text,
+	sliceByColumn,
 	truncateToWidth,
 	visibleWidth,
 	type AutocompleteItem,
+	type Component,
 	type EditorBorderStyle,
 	type EditorTheme,
 	type EditorTopBorder,
+	type SelectItem,
+	type SettingItem,
 } from "@oh-my-pi/pi-tui";
 import {
 	CONTEXT_RAIL_ROLES,
 	DEFAULT_CONTEXT_RAIL_CONFIG,
 	parseContextRailGlyphAsset,
 	type ContextRailBoundaries,
+	type ContextRailGlyphAsset,
 	type ContextRailConfig,
 	type ContextRailConfigUpdate,
-	type ContextRailGlyphAsset,
+	type ContextRailMeaningPlacement,
 	type ContextRailLabels,
 	type ContextRailLabelPosition,
 	type ContextRailPalette,
@@ -33,10 +42,11 @@ import {
 	type ContextRailPointer,
 	type ContextRailRenderOptions,
 	type ContextRailRole,
+	type ContextRailMode,
 	type ContextRailUsage,
 	type ContextRailVisibility,
-	normalizeContextRailConfig,
 	renderContextRailRows,
+	normalizeContextRailConfig,
 } from "./context-rail";
 export { DEFAULT_CONTEXT_RAIL_CONFIG } from "./context-rail";
 export type BorderStyleName =
@@ -86,6 +96,17 @@ export type PromptBorderConfig = {
 export type PromptBorderConfigInput = Omit<PromptBorderConfig, "contextRail"> & {
 	contextRail?: ContextRailConfig;
 };
+export type PromptBorderConfigPathOptions = {
+	configPath?: string;
+	destinationPath?: string;
+	destination?: string;
+	legacyConfigPath?: string;
+	legacyPath?: string;
+	legacy?: string;
+	legacyAssetDirectory?: string;
+};
+
+type PromptBorderConfigPathInput = string | PromptBorderConfigPathOptions | undefined;
 
 type ContextRailRoleAssets = Record<ContextRailRole, ContextRailGlyphAsset>;
 type ContextRailRoleFrames = Record<ContextRailRole, number>;
@@ -413,58 +434,41 @@ export const borderStyles: Record<BorderStyleName, PromptBorderGlyphs> = {
 
 const STYLE_NAMES = Object.keys(borderStyles) as BorderStyleName[];
 const LAYOUT_NAMES = ["full", "bottom", "sides", "top-bottom", "default"] as const;
-const PRIMARY_COMMAND_OPTIONS = [...STYLE_NAMES, "layout", "reset"] as const;
+const PRIMARY_COMMAND_OPTIONS = [...STYLE_NAMES, "config", "status", "layout", "reset", "rail", "glyphs"] as const;
 const CONTEXT_RAIL_PLACEMENTS = ["inside", "above", "below"] as const satisfies readonly ContextRailPlacement[];
 const CONTEXT_RAIL_VISIBILITIES = ["always", "toggle", "collapse-while-typing"] as const satisfies readonly ContextRailVisibility[];
 const CONTEXT_RAIL_POINTERS = ["auto", "visible", "hidden"] as const satisfies readonly ContextRailPointer[];
 const CONTEXT_RAIL_LABELS = ["auto", "bar-only", "always"] as const satisfies readonly ContextRailLabels[];
 const CONTEXT_RAIL_POSITIONS = ["left", "center", "right"] as const satisfies readonly ContextRailLabelPosition[];
 const CONTEXT_RAIL_LABEL_GLYPH_VISIBILITIES = ["on", "off"] as const;
+const CONTEXT_RAIL_MODES = ["compact", "full", "custom"] as const;
+const CONTEXT_RAIL_MEANING_PLACEMENTS = ["top", "below", "beside"] as const;
+const GLYPH_TEXT_FILE_NAMES = {
+	left: "prompt-border-left-glyphs.txt",
+	right: "prompt-border-right-glyphs.txt",
+	status: "prompt-border-status-spinner-glyphs.txt",
+	activity: "prompt-border-activity-spinner-glyphs.txt",
+} as const;
+const CONTEXT_RAIL_LABEL_FILE_NAME = "label.txt";
+const CONTEXT_RAIL_POINTER_FILE_NAME = "pointer.txt";
 const CONTEXT_RAIL_USAGE =
 	"Usage: /context-rail [on|off|toggle|status|init [glyphs]] | placement <inside|above|below> | visibility <always|toggle|collapse-while-typing> | pointer <auto|visible|hidden> | labels <auto|bar-only|always> | label-glyph <on|off> | position <left|center|right>";
-const USAGE = `Usage: /prompt-border <${STYLE_NAMES.join("|")}> [full|bottom|sides|top-bottom|default] | /prompt-border layout <full|bottom|sides|top-bottom|default> | /prompt-border reset`;
-const PROMPT_LOADING_GLYPHS_USAGE = "Usage: /prompt-loading-glyphs debug <frames|demo|on|off>";
+const USAGE =
+	"Usage: /prompt-border [config|status|<style> [layout]|layout <layout>|reset|rail toggle|glyphs debug [frames|demo|on|off]]";
 const DEFAULT_GLYPH_FRAME_MS = 70;
 const DEFAULT_SPINNER_GLYPH_FRAME_MS = 80;
 const HOST_SPINNER_FRAME_MS = 80;
 const LOADING_GLYPH_DEBUG_ROOT_OPTIONS = ["debug"] as const;
 const LOADING_GLYPH_DEBUG_ACTIONS = ["frames", "demo", "on", "off"] as const;
 const SPINNER_GLYPH_SLOTS = ["status", "activity"] as const satisfies readonly SpinnerType[];
-const GLYPH_TEXT_FILE_NAMES: Record<PromptBorderGlyphSlot, string> = {
-	left: "prompt-border-left-glyphs.txt",
-	right: "prompt-border-right-glyphs.txt",
-	status: "prompt-border-status-spinner-glyphs.txt",
-	activity: "prompt-border-activity-spinner-glyphs.txt",
-};
-const CONTEXT_RAIL_LABEL_FILE_NAME = "label.txt";
-const CONTEXT_RAIL_POINTER_FILE_NAME = "pointer.txt";
-export const DEFAULT_LEFT_GLYPH_TEXT_PATH = path.join(
-	os.homedir(),
-	".config",
-	"codesook-omp",
-	GLYPH_TEXT_FILE_NAMES.left,
-);
-export const DEFAULT_RIGHT_GLYPH_TEXT_PATH = path.join(
-	os.homedir(),
-	".config",
-	"codesook-omp",
-	GLYPH_TEXT_FILE_NAMES.right,
-);
-export const DEFAULT_STATUS_SPINNER_GLYPH_TEXT_PATH = path.join(
-	os.homedir(),
-	".config",
-	"codesook-omp",
-	GLYPH_TEXT_FILE_NAMES.status,
-);
-export const DEFAULT_ACTIVITY_SPINNER_GLYPH_TEXT_PATH = path.join(
-	os.homedir(),
-	".config",
-	"codesook-omp",
-	GLYPH_TEXT_FILE_NAMES.activity,
-);
+const CONFIG_DIRECTORY = path.join(os.homedir(), ".config", "codesook-omp", "prompt-border");
+export const CONFIG_PATH = path.join(CONFIG_DIRECTORY, "config.json");
+export const LEGACY_CONFIG_PATH = path.join(os.homedir(), ".config", "codesook-omp", "config.json");
 
-export const CONFIG_PATH = path.join(os.homedir(), ".config", "codesook-omp", "config.json");
-
+export const DEFAULT_LEFT_GLYPH_TEXT_PATH = path.join(CONFIG_DIRECTORY, GLYPH_TEXT_FILE_NAMES.left);
+export const DEFAULT_RIGHT_GLYPH_TEXT_PATH = path.join(CONFIG_DIRECTORY, GLYPH_TEXT_FILE_NAMES.right);
+export const DEFAULT_STATUS_SPINNER_GLYPH_TEXT_PATH = path.join(CONFIG_DIRECTORY, GLYPH_TEXT_FILE_NAMES.status);
+export const DEFAULT_ACTIVITY_SPINNER_GLYPH_TEXT_PATH = path.join(CONFIG_DIRECTORY, GLYPH_TEXT_FILE_NAMES.activity);
 export const DEFAULT_LEFT_GLYPH_TEXT =
 	"􁦘􁦙  􁦚􁦛  􁦜􁦝  􁦞􁦟  􁦠􁦡  􁦢􁦣  􁦤􁦥  􁦦􁦧  􁦨􁦩  􁦪􁦫  􁦬􁦭  􁦮􁦯  􁦰􁦱  􁦲􁦳  􁦴􁦵  􁦶􁦷  􁦸􁦹  􁦺􁦻  􁦼􁦽  􁦾􁦿  􁧀􁧁  􁧂􁧃  􁧄􁧅  􁧆􁧇  􁧈􁧉  􁧊􁧋  􁧌􁧍  􁧎􁧏  􁧐􁧑  􁧒􁧓  􁧔􁧕  􁧖􁧗  􁧘􁧙  􁧚􁧛  􁧜􁧝  􁧞􁧟  􁧠􁧡  􁧢􁧣  􁧤􁧥  􁧦􁧧  􁧨􁧩  􁧪􁧫  􁧬􁧭  􁧮􁧯  􁧰􁧱  􁧲􁧳  􁧴􁧵  􁧶􁧷  􁧸􁧹  􁧺􁧻  􁧼􁧽  􁧾􁧿  􁨀􁨁  􁨂􁨃  􁨄􁨅  􁨆􁨇  􁨈􁨉  􁨊􁨋  􁨌􁨍  􁨎􁨏  􁨐􁨑  􁨒􁨓  􁨔􁨕  􁨖􁨗  􁨘􁨙  􁨚􁨛  􁨜􁨝  􁨞􁨟  􁨠􁨡  􁨢􁨣  􁨤􁨥  􁨦􁨧  􁨨􁨩";
 
@@ -598,22 +602,35 @@ export const EXAMPLE_PROMPT_BORDER_CONFIG: PromptBorderConfig = {
 };
 
 export type PromptBorderAction =
+	| { kind: "config" }
+	| { kind: "status" }
 	| { kind: "reset" }
 	| { kind: "apply"; state: PromptBorderState }
+	| { kind: "rail-toggle" }
+	| { kind: "glyph-debug"; action: (typeof LOADING_GLYPH_DEBUG_ACTIONS)[number] }
 	| { kind: "invalid" };
 
 let activeBorder: PromptBorderState = { style: "double", layout: "full" };
 let activeConfig: PromptBorderConfig = DEFAULT_PROMPT_BORDER_CONFIG;
 let activeContextRailRuntime: ContextRailRuntime | undefined;
 let activePromptBorderEditor: CustomEditor | undefined;
+let sessionStyleOverride: BorderStyleName | undefined;
+let sessionLayoutOverride: BorderLayoutName | undefined;
+let sessionRailEnabledOverride: boolean | undefined;
+let builtInEditorOverride = false;
 let didReadInvalidConfig = false;
+let didNotifyInvalidConfig = false;
+let lastInvalidConfigPath = CONFIG_PATH;
 const promptLoadingGlyphDebugEnabledSessions = new WeakSet<ExtensionUIContext["setWorkingMessage"]>();
 const promptLoadingGlyphDebugMountedSessions = new WeakSet<ExtensionUIContext["setWidget"]>();
-const CONFIG_PARSE_WARNING = `Prompt border config at ${CONFIG_PATH} is invalid JSON; using defaults without overwriting the file.`;
 
 function notifyInvalidConfig(ctx: { ui: { notify: (message: string, level?: "info" | "warning" | "error") => void } }): void {
-	if (!didReadInvalidConfig) return;
-	ctx.ui.notify(CONFIG_PARSE_WARNING, "warning");
+	if (!didReadInvalidConfig || didNotifyInvalidConfig) return;
+	didNotifyInvalidConfig = true;
+	ctx.ui.notify(
+		`Prompt border config at ${lastInvalidConfigPath} is invalid JSON; using defaults without overwriting the file.`,
+		"warning",
+	);
 }
 function buildPromptLoadingGlyphDebugMessage(config: PromptBorderConfig): string {
 	const statusReport = createSpinnerFrameDebugReport("status", config.spinnerGlyphs.status);
@@ -911,53 +928,78 @@ function toContextRailJson(config: ContextRailConfig): Record<string, unknown> {
 	};
 }
 
-function mergePromptBorderJson(raw: Record<string, unknown>): Record<string, unknown> {
-	const merged = { ...raw };
-	const promptBorder = isRecord(raw.promptBorder) ? { ...raw.promptBorder } : {};
-	const leftGlyph = isRecord(promptBorder.leftGlyph) ? { ...promptBorder.leftGlyph } : {};
-	const rightGlyph = isRecord(promptBorder.rightGlyph) ? { ...promptBorder.rightGlyph } : {};
-	const spinnerGlyphs = isRecord(promptBorder.spinnerGlyphs) ? { ...promptBorder.spinnerGlyphs } : {};
-	const examplePromptBorder = toPromptBorderJson(EXAMPLE_PROMPT_BORDER_CONFIG);
-	const exampleLeftGlyph = isRecord(examplePromptBorder.leftGlyph) ? examplePromptBorder.leftGlyph : {};
-	const exampleRightGlyph = isRecord(examplePromptBorder.rightGlyph) ? examplePromptBorder.rightGlyph : {};
-	const exampleSpinnerGlyphs = isRecord(examplePromptBorder.spinnerGlyphs) ? examplePromptBorder.spinnerGlyphs : {};
 
-	if (typeof promptBorder.style !== "string") promptBorder.style = examplePromptBorder.style;
-	if (typeof promptBorder.layout !== "string") promptBorder.layout = examplePromptBorder.layout;
-	if (typeof leftGlyph.frameMs !== "number") leftGlyph.frameMs = exampleLeftGlyph.frameMs;
-	if (typeof rightGlyph.frameMs !== "number") rightGlyph.frameMs = exampleRightGlyph.frameMs;
+type ResolvedPromptBorderConfigPaths = {
+	configPath: string;
+	legacyConfigPath?: string;
+	legacyAssetDirectory?: string;
+};
 
-	delete leftGlyph.glyphs;
-	delete leftGlyph.frames;
-	delete rightGlyph.glyphs;
-	delete rightGlyph.frames;
-
-	for (const slot of SPINNER_GLYPH_SLOTS) {
-		const spinnerGlyph = isRecord(spinnerGlyphs[slot]) ? { ...spinnerGlyphs[slot] } : {};
-		const exampleSpinnerGlyph = isRecord(exampleSpinnerGlyphs[slot]) ? exampleSpinnerGlyphs[slot] : {};
-		if (typeof spinnerGlyph.frameMs !== "number") spinnerGlyph.frameMs = exampleSpinnerGlyph.frameMs;
-		delete spinnerGlyph.glyphs;
-		delete spinnerGlyph.frames;
-		spinnerGlyphs[slot] = spinnerGlyph;
+function resolveConfigPaths(input: PromptBorderConfigPathInput = CONFIG_PATH): ResolvedPromptBorderConfigPaths {
+	if (typeof input === "string") {
+		const configPath = input;
+		const legacyConfigPath =
+			configPath === CONFIG_PATH
+				? LEGACY_CONFIG_PATH
+				: path.basename(path.dirname(configPath)) === "prompt-border"
+					? path.join(path.dirname(path.dirname(configPath)), "config.json")
+					: undefined;
+		return {
+			configPath,
+			legacyConfigPath,
+			legacyAssetDirectory: legacyConfigPath ? path.dirname(legacyConfigPath) : undefined,
+		};
 	}
-
-	delete promptBorder.loadingGlyph;
-	promptBorder.leftGlyph = leftGlyph;
-	promptBorder.rightGlyph = rightGlyph;
-	promptBorder.spinnerGlyphs = spinnerGlyphs;
-	merged.promptBorder = promptBorder;
-	merged.contextRail = toContextRailJson(
-		normalizeContextRailConfig(isRecord(raw.contextRail) ? raw.contextRail : undefined),
-	);
-	return merged;
+	const configPath = input?.destinationPath ?? input?.destination ?? input?.configPath ?? CONFIG_PATH;
+	const legacyConfigPath = input?.legacyConfigPath ?? input?.legacyPath ?? input?.legacy;
+	return {
+		configPath,
+		legacyConfigPath,
+		legacyAssetDirectory: input?.legacyAssetDirectory ?? (legacyConfigPath ? path.dirname(legacyConfigPath) : undefined),
+	};
 }
 
-function parsePromptBorderConfigJson(rawText: string): { json: unknown; invalid: boolean } {
+function persistedConfigJson(config: PromptBorderConfig): Record<string, unknown> {
+	return {
+		promptBorder: toPromptBorderJson(config),
+		contextRail: toContextRailJson(config.contextRail),
+	};
+}
+
+async function writeJsonAtomically(filePath: string, value: unknown): Promise<void> {
+	await mkdir(path.dirname(filePath), { recursive: true });
+	const temporaryPath = path.join(
+		path.dirname(filePath),
+		`.${path.basename(filePath)}.${crypto.randomUUID()}.tmp`,
+	);
 	try {
-		return { json: JSON.parse(rawText), invalid: false };
-	} catch {
-		return { json: null, invalid: true };
+		await Bun.write(temporaryPath, `${JSON.stringify(value, null, 2)}\n`);
+		await rename(temporaryPath, filePath);
+	} catch (error) {
+		await unlink(temporaryPath).catch(() => {});
+		throw error;
 	}
+}
+
+function legacyInlineGlyphSeed(
+	rawPromptBorder: Record<string, unknown>,
+	slot: PromptBorderGlyphSlot,
+	fallback: string,
+): string {
+	const key = slot === "left" || slot === "right" ? `${slot}Glyph` : "spinnerGlyphs";
+	const value = slot === "left" || slot === "right" ? rawPromptBorder[key] : isRecord(rawPromptBorder[key]) ? rawPromptBorder[key][slot] : undefined;
+	const glyphConfig = isRecord(value) ? value : {};
+	if (typeof glyphConfig.glyphs === "string" && glyphConfig.glyphs.trim().length > 0) return glyphConfig.glyphs;
+	if (
+		Array.isArray(glyphConfig.frames) &&
+		glyphConfig.frames.length > 0 &&
+		glyphConfig.frames.every(frame => typeof frame === "string")
+	) {
+		const frames = glyphConfig.frames as string[];
+		const joined = frames.join(" ");
+		if (joined.trim().length > 0) return joined;
+	}
+	return fallback;
 }
 
 async function readGlyphTextFile(configPath: string, slot: PromptBorderGlyphSlot): Promise<string | undefined> {
@@ -971,8 +1013,38 @@ async function ensureGlyphTextFile(configPath: string, slot: PromptBorderGlyphSl
 	await mkdir(path.dirname(glyphPath), { recursive: true });
 	const file = Bun.file(glyphPath);
 	if (await file.exists()) return await file.text();
-	await Bun.write(glyphPath, seedText.length > 0 && !seedText.endsWith("\n") ? `${seedText}\n` : seedText);
-	return seedText;
+	const contents = seedText.length > 0 && !seedText.endsWith("\n") ? `${seedText}\n` : seedText;
+	await Bun.write(glyphPath, contents);
+	return contents;
+}
+
+async function ensureMigratedGlyphTextFile(
+	paths: ResolvedPromptBorderConfigPaths,
+	slot: PromptBorderGlyphSlot,
+	seedText: string,
+): Promise<string> {
+	const destinationPath = getGlyphTextPath(paths.configPath, slot);
+	await mkdir(path.dirname(destinationPath), { recursive: true });
+	const destination = Bun.file(destinationPath);
+	if (await destination.exists()) return await destination.text();
+	if (paths.legacyAssetDirectory !== undefined) {
+		const legacyPath = path.join(paths.legacyAssetDirectory, GLYPH_TEXT_FILE_NAMES[slot]);
+		const legacy = Bun.file(legacyPath);
+		if (await legacy.exists()) {
+			const bytes = await legacy.arrayBuffer();
+			await Bun.write(destinationPath, bytes);
+			return await destination.text();
+		}
+	}
+	return ensureGlyphTextFile(paths.configPath, slot, seedText);
+}
+
+function parsePromptBorderConfigJson(rawText: string): { json: unknown; invalid: boolean } {
+	try {
+		return { json: JSON.parse(rawText), invalid: false };
+	} catch {
+		return { json: null, invalid: true };
+	}
 }
 
 export function normalizePromptBorderConfig(
@@ -1039,90 +1111,130 @@ export function normalizePromptBorderConfig(
 		contextRail: normalizeContextRailConfig(contextRail, contextRailGlyphAsset, contextRailPointerGlyphAsset),
 	};
 }
+
 type PersistedPromptBorderConfig = {
 	merged: Record<string, unknown>;
 	glyphTexts: Record<PromptBorderGlyphSlot, string>;
 	contextRailLabelText?: string;
 	contextRailPointerText?: string;
+	config: PromptBorderConfig;
 };
 
-async function ensurePersistedPromptBorderConfig(configPath: string): Promise<PersistedPromptBorderConfig | undefined> {
-	await mkdir(path.dirname(configPath), { recursive: true });
-	const file = Bun.file(configPath);
-	if (!(await file.exists())) {
-		const created = {
-			promptBorder: toPromptBorderJson(EXAMPLE_PROMPT_BORDER_CONFIG),
-			contextRail: toContextRailJson(EXAMPLE_PROMPT_BORDER_CONFIG.contextRail),
-		};
-		const leftText = await ensureGlyphTextFile(configPath, "left", DEFAULT_LEFT_GLYPH_TEXT);
-		const rightText = await ensureGlyphTextFile(configPath, "right", "");
-		const statusText = await ensureGlyphTextFile(configPath, "status", "");
-		const activityText = await ensureGlyphTextFile(configPath, "activity", "");
-		await Bun.write(configPath, `${JSON.stringify(created, null, 2)}\n`);
-		const defaultContextRail = normalizeContextRailConfig(created.contextRail);
-		const contextRailLabelText = await readContextRailLabelText(defaultContextRail);
-		const contextRailPointerText = await readContextRailPointerText(defaultContextRail);
-		return {
-			merged: created,
-			glyphTexts: { left: leftText, right: rightText, status: statusText, activity: activityText },
-			contextRailLabelText,
-			contextRailPointerText,
-		};
-	}
-	const parsed = parsePromptBorderConfigJson(await file.text());
-	if (parsed.invalid || !isRecord(parsed.json)) return undefined;
-	const promptBorder = isRecord(parsed.json.promptBorder) ? parsed.json.promptBorder : {};
-	const leftGlyph = isRecord(promptBorder.leftGlyph) ? promptBorder.leftGlyph : {};
-	const rightGlyph = isRecord(promptBorder.rightGlyph) ? promptBorder.rightGlyph : {};
-	const spinnerGlyphs = isRecord(promptBorder.spinnerGlyphs) ? promptBorder.spinnerGlyphs : {};
-	const statusGlyph = isRecord(spinnerGlyphs.status) ? spinnerGlyphs.status : {};
-	const activityGlyph = isRecord(spinnerGlyphs.activity) ? spinnerGlyphs.activity : {};
-	const leftSeed = typeof leftGlyph.glyphs === "string" && leftGlyph.glyphs.trim().length > 0 ? leftGlyph.glyphs : DEFAULT_LEFT_GLYPH_TEXT;
-	const rightSeed = typeof rightGlyph.glyphs === "string" && rightGlyph.glyphs.trim().length > 0 ? rightGlyph.glyphs : "";
-	const statusSeed = typeof statusGlyph.glyphs === "string" && statusGlyph.glyphs.trim().length > 0 ? statusGlyph.glyphs : "";
-	const activitySeed = typeof activityGlyph.glyphs === "string" && activityGlyph.glyphs.trim().length > 0 ? activityGlyph.glyphs : "";
-	const leftText = await ensureGlyphTextFile(configPath, "left", leftSeed);
-	const rightText = await ensureGlyphTextFile(configPath, "right", rightSeed);
-	const statusText = await ensureGlyphTextFile(configPath, "status", statusSeed);
-	const activityText = await ensureGlyphTextFile(configPath, "activity", activitySeed);
-	const merged = mergePromptBorderJson(parsed.json);
-	const normalizedContextRail = normalizeContextRailConfig(merged.contextRail);
-	const contextRailLabelText = await readContextRailLabelText(normalizedContextRail);
-	const contextRailPointerText = await readContextRailPointerText(normalizedContextRail);
-	await Bun.write(configPath, `${JSON.stringify(merged, null, 2)}\n`);
+async function buildPersistedPromptBorderConfig(
+	paths: ResolvedPromptBorderConfigPaths,
+	raw: unknown,
+	glyphTexts: Record<PromptBorderGlyphSlot, string>,
+): Promise<PersistedPromptBorderConfig> {
+	const contextRail = normalizeContextRailConfig(isRecord(raw) ? raw.contextRail : undefined);
+	const [contextRailLabelText, contextRailPointerText] = await Promise.all([
+		readContextRailLabelText(contextRail),
+		readContextRailPointerText(contextRail),
+	]);
+	const config = normalizePromptBorderConfig(
+		raw,
+		glyphTexts,
+		parseContextRailGlyphAsset(contextRailLabelText ?? ""),
+		parseContextRailGlyphAsset(contextRailPointerText ?? ""),
+	);
 	return {
-		merged,
-		glyphTexts: { left: leftText, right: rightText, status: statusText, activity: activityText },
+		merged: persistedConfigJson(config),
+		glyphTexts,
 		contextRailLabelText,
 		contextRailPointerText,
+		config,
 	};
 }
 
-export async function readPromptBorderConfig(configPath = CONFIG_PATH): Promise<PromptBorderConfig> {
-	const [leftText, rightText, statusText, activityText] = await Promise.all([
-		readGlyphTextFile(configPath, "left"),
-		readGlyphTextFile(configPath, "right"),
-		readGlyphTextFile(configPath, "status"),
-		readGlyphTextFile(configPath, "activity"),
-	]);
-	const file = Bun.file(configPath);
+async function ensurePersistedPromptBorderConfig(
+	input: PromptBorderConfigPathInput = CONFIG_PATH,
+): Promise<PersistedPromptBorderConfig | undefined> {
+	const paths = resolveConfigPaths(input);
+	await mkdir(path.dirname(paths.configPath), { recursive: true });
+	const file = Bun.file(paths.configPath);
+	if (await file.exists()) {
+		const parsed = parsePromptBorderConfigJson(await file.text());
+		if (parsed.invalid || !isRecord(parsed.json)) return undefined;
+		const promptBorder = isRecord(parsed.json.promptBorder) ? parsed.json.promptBorder : {};
+		const glyphTexts = {
+			left: await ensureGlyphTextFile(
+				paths.configPath,
+				"left",
+				legacyInlineGlyphSeed(promptBorder, "left", DEFAULT_LEFT_GLYPH_TEXT),
+			),
+			right: await ensureGlyphTextFile(paths.configPath, "right", legacyInlineGlyphSeed(promptBorder, "right", "")),
+			status: await ensureGlyphTextFile(paths.configPath, "status", legacyInlineGlyphSeed(promptBorder, "status", "")),
+			activity: await ensureGlyphTextFile(paths.configPath, "activity", legacyInlineGlyphSeed(promptBorder, "activity", "")),
+		};
+		const persisted = await buildPersistedPromptBorderConfig(paths, parsed.json, glyphTexts);
+		await writeJsonAtomically(paths.configPath, persisted.merged);
+		return persisted;
+	}
+
+	let legacyRaw: unknown = {};
+	if (paths.legacyConfigPath !== undefined) {
+		const legacyFile = Bun.file(paths.legacyConfigPath);
+		if (await legacyFile.exists()) {
+			const parsed = parsePromptBorderConfigJson(await legacyFile.text());
+			if (!parsed.invalid && isRecord(parsed.json)) legacyRaw = parsed.json;
+		}
+	}
+	const legacyPromptBorder = isRecord(legacyRaw) && isRecord(legacyRaw.promptBorder) ? legacyRaw.promptBorder : {};
+	const glyphTexts = {
+		left: await ensureMigratedGlyphTextFile(
+			paths,
+			"left",
+			legacyInlineGlyphSeed(legacyPromptBorder, "left", DEFAULT_LEFT_GLYPH_TEXT),
+		),
+		right: await ensureMigratedGlyphTextFile(
+			paths,
+			"right",
+			legacyInlineGlyphSeed(legacyPromptBorder, "right", ""),
+		),
+		status: await ensureMigratedGlyphTextFile(
+			paths,
+			"status",
+			legacyInlineGlyphSeed(legacyPromptBorder, "status", ""),
+		),
+		activity: await ensureMigratedGlyphTextFile(
+			paths,
+			"activity",
+			legacyInlineGlyphSeed(legacyPromptBorder, "activity", ""),
+		),
+	};
+	const persisted = await buildPersistedPromptBorderConfig(paths, legacyRaw, glyphTexts);
+	await writeJsonAtomically(paths.configPath, persisted.merged);
+	return persisted;
+}
+
+export async function readPromptBorderConfig(input: PromptBorderConfigPathInput = CONFIG_PATH): Promise<PromptBorderConfig> {
+	const paths = resolveConfigPaths(input);
+	const file = Bun.file(paths.configPath);
 	if (!(await file.exists())) {
 		didReadInvalidConfig = false;
 		return DEFAULT_PROMPT_BORDER_CONFIG;
 	}
 	const parsed = parsePromptBorderConfigJson(await file.text());
-	if (parsed.invalid) {
+	if (parsed.invalid || !isRecord(parsed.json)) {
 		didReadInvalidConfig = true;
+		lastInvalidConfigPath = paths.configPath;
 		return DEFAULT_PROMPT_BORDER_CONFIG;
 	}
+	const [leftText, rightText, statusText, activityText] = await Promise.all([
+		readGlyphTextFile(paths.configPath, "left"),
+		readGlyphTextFile(paths.configPath, "right"),
+		readGlyphTextFile(paths.configPath, "status"),
+		readGlyphTextFile(paths.configPath, "activity"),
+	]);
 	const glyphTexts: Partial<Record<PromptBorderGlyphSlot, string>> = {};
 	if (leftText !== undefined) glyphTexts.left = leftText;
 	if (rightText !== undefined) glyphTexts.right = rightText;
 	if (statusText !== undefined) glyphTexts.status = statusText;
 	if (activityText !== undefined) glyphTexts.activity = activityText;
-	const contextRail = normalizeContextRailConfig(isRecord(parsed.json) ? parsed.json.contextRail : undefined);
-	const contextRailLabelText = await readContextRailLabelText(contextRail);
-	const contextRailPointerText = await readContextRailPointerText(contextRail);
+	const contextRail = normalizeContextRailConfig(parsed.json.contextRail);
+	const [contextRailLabelText, contextRailPointerText] = await Promise.all([
+		readContextRailLabelText(contextRail),
+		readContextRailPointerText(contextRail),
+	]);
 	didReadInvalidConfig = false;
 	return normalizePromptBorderConfig(
 		parsed.json,
@@ -1132,41 +1244,53 @@ export async function readPromptBorderConfig(configPath = CONFIG_PATH): Promise<
 	);
 }
 
-export async function ensurePromptBorderConfigFile(configPath = CONFIG_PATH): Promise<PromptBorderConfig> {
-	const persisted = await ensurePersistedPromptBorderConfig(configPath);
+export async function ensurePromptBorderConfigFile(input: PromptBorderConfigPathInput = CONFIG_PATH): Promise<PromptBorderConfig> {
+	const persisted = await ensurePersistedPromptBorderConfig(input);
 	if (persisted === undefined) {
 		didReadInvalidConfig = true;
+		lastInvalidConfigPath = resolveConfigPaths(input).configPath;
 		return DEFAULT_PROMPT_BORDER_CONFIG;
 	}
 	didReadInvalidConfig = false;
-	return normalizePromptBorderConfig(
-		persisted.merged,
+	return readPromptBorderConfig(input);
+}
+
+export async function writePromptBorderConfig(
+	config: PromptBorderConfig,
+	input: PromptBorderConfigPathInput = CONFIG_PATH,
+): Promise<PromptBorderConfig> {
+	const persisted = await ensurePersistedPromptBorderConfig(input);
+	if (persisted === undefined) {
+		didReadInvalidConfig = true;
+		lastInvalidConfigPath = resolveConfigPaths(input).configPath;
+		return DEFAULT_PROMPT_BORDER_CONFIG;
+	}
+	const next = normalizePromptBorderConfig(
+		{
+			promptBorder: toPromptBorderJson(config),
+			contextRail: toContextRailJson(config.contextRail),
+		},
 		persisted.glyphTexts,
 		parseContextRailGlyphAsset(persisted.contextRailLabelText ?? ""),
 		parseContextRailGlyphAsset(persisted.contextRailPointerText ?? ""),
 	);
+	await writeJsonAtomically(resolveConfigPaths(input).configPath, persistedConfigJson(next));
+	didReadInvalidConfig = false;
+	return next;
 }
 
 export async function writePromptBorderConfigSelection(
 	state: PromptBorderState,
-	configPath = CONFIG_PATH,
+	input: PromptBorderConfigPathInput = CONFIG_PATH,
 ): Promise<PromptBorderConfig> {
-	const persisted = await ensurePersistedPromptBorderConfig(configPath);
-	if (persisted === undefined) {
-		didReadInvalidConfig = true;
-		return DEFAULT_PROMPT_BORDER_CONFIG;
-	}
-	const promptBorder = isRecord(persisted.merged.promptBorder) ? { ...persisted.merged.promptBorder } : {};
-	promptBorder.style = state.style;
-	promptBorder.layout = state.layout;
-	persisted.merged.promptBorder = promptBorder;
-	didReadInvalidConfig = false;
-	await Bun.write(configPath, `${JSON.stringify(persisted.merged, null, 2)}\n`);
-	return normalizePromptBorderConfig(
-		persisted.merged,
-		persisted.glyphTexts,
-		parseContextRailGlyphAsset(persisted.contextRailLabelText ?? ""),
-		parseContextRailGlyphAsset(persisted.contextRailPointerText ?? ""),
+	const current = await ensurePromptBorderConfigFile(input);
+	return writePromptBorderConfig(
+		{
+			...current,
+			style: state.style,
+			layout: state.layout,
+		},
+		input,
 	);
 }
 
@@ -1193,27 +1317,11 @@ function mergeContextRailConfigUpdate(
 
 export async function writeContextRailConfigSelection(
 	update: ContextRailConfigUpdate,
-	configPath = CONFIG_PATH,
+	input: PromptBorderConfigPathInput = CONFIG_PATH,
 ): Promise<PromptBorderConfig> {
-	const persisted = await ensurePersistedPromptBorderConfig(configPath);
-	if (persisted === undefined) {
-		didReadInvalidConfig = true;
-		return DEFAULT_PROMPT_BORDER_CONFIG;
-	}
-	const current = normalizeContextRailConfig(persisted.merged.contextRail);
-	const next = normalizeContextRailConfig(mergeContextRailConfigUpdate(current, update));
-	persisted.merged.contextRail = toContextRailJson(next);
-	didReadInvalidConfig = false;
-	await Bun.write(configPath, `${JSON.stringify(persisted.merged, null, 2)}\n`);
-	const normalizedContextRail = normalizeContextRailConfig(persisted.merged.contextRail);
-	persisted.contextRailLabelText = await readContextRailLabelText(normalizedContextRail);
-	persisted.contextRailPointerText = await readContextRailPointerText(normalizedContextRail);
-	return normalizePromptBorderConfig(
-		persisted.merged,
-		persisted.glyphTexts,
-		parseContextRailGlyphAsset(persisted.contextRailLabelText ?? ""),
-		parseContextRailGlyphAsset(persisted.contextRailPointerText ?? ""),
-	);
+	const current = await ensurePromptBorderConfigFile(input);
+	const nextContextRail = normalizeContextRailConfig(mergeContextRailConfigUpdate(current.contextRail, update));
+	return writePromptBorderConfig({ ...current, contextRail: nextContextRail }, input);
 }
 
 export type SpinnerGlyphFrameOverride = {
@@ -1296,28 +1404,45 @@ function applySpinnerGlyphFrames(
 
 export function getPromptBorderArgumentCompletions(argumentPrefix: string): AutocompleteItem[] | null {
 	const normalized = argumentPrefix.toLowerCase();
-	const hasTrailingSpace = /\s$/.test(normalized);
-	const parts = normalized.trim().split(/\s+/).filter(Boolean);
+	const hasTrailingSpace = /\s$/u.test(normalized);
+	const parts = normalized.trim().split(/\s+/u).filter(Boolean);
 	const tokenPrefix = hasTrailingSpace ? "" : (parts.at(-1) ?? "");
 	const complete = (value: string): AutocompleteItem => ({ value, label: value });
-	const completeLayoutSubcommand = (layout: BorderLayoutName): AutocompleteItem => ({ value: `layout ${layout}`, label: layout });
-	if (parts.length === 0) {
-		return PRIMARY_COMMAND_OPTIONS.map(complete);
-	}
-	const first = parts[0]!;
-	if (parts.length === 1 && first === "layout" && !hasTrailingSpace) {
-		return LAYOUT_NAMES.map(completeLayoutSubcommand);
-	}
+	if (parts.length === 0) return PRIMARY_COMMAND_OPTIONS.map(complete);
 	if (parts.length === 1 && !hasTrailingSpace) {
 		return PRIMARY_COMMAND_OPTIONS.filter(option => option.startsWith(tokenPrefix)).map(complete);
 	}
-	if (first === "layout" && (parts.length === 1 || (parts.length === 2 && !hasTrailingSpace))) {
-		return LAYOUT_NAMES.filter(layout => layout.startsWith(tokenPrefix)).map(completeLayoutSubcommand);
+	const first = parts[0]!;
+	if (first === "layout" && parts.length <= 2) {
+		return LAYOUT_NAMES.filter(layout => layout.startsWith(tokenPrefix)).map(layout => ({
+			value: `layout ${layout}`,
+			label: layout,
+		}));
 	}
-	if (isBorderStyleName(first) && (parts.length === 1 || (parts.length === 2 && !hasTrailingSpace))) {
+	if (isBorderStyleName(first) && parts.length <= 2) {
 		return LAYOUT_NAMES.filter(layout => layout.startsWith(tokenPrefix)).map(layout => ({
 			value: `${first} ${layout}`,
 			label: layout,
+		}));
+	}
+	if (first === "rail" && parts.length <= 2) {
+		return ["toggle"].filter(value => value.startsWith(tokenPrefix)).map(value => ({ value: `rail ${value}`, label: value }));
+	}
+	if (first === "glyphs" && parts.length <= 3) {
+		if (parts.length === 1) return [{ value: "glyphs debug", label: "debug" }];
+		if (parts.length === 2 && parts[1] !== "debug") {
+			if ("debug".startsWith(tokenPrefix)) return [{ value: "glyphs debug", label: "debug" }];
+			return [];
+		}
+		if (parts.length === 2) {
+			return LOADING_GLYPH_DEBUG_ACTIONS.map(action => ({
+				value: `glyphs debug ${action}`,
+				label: action,
+			}));
+		}
+		return LOADING_GLYPH_DEBUG_ACTIONS.filter(action => action.startsWith(tokenPrefix)).map(action => ({
+			value: `glyphs debug ${action}`,
+			label: action,
 		}));
 	}
 	return null;
@@ -1442,11 +1567,19 @@ export function parsePromptLoadingGlyphArgs(args: string): PromptLoadingGlyphDeb
 	if (parts.length === 2 && parts[0] === "debug" && parts[1] === "off") return { kind: "off" };
 	return { kind: "invalid" };
 }
-
 export function parsePromptBorderArgs(args: string, current: PromptBorderState): PromptBorderAction {
-	const parts = args.trim().toLowerCase().split(/\s+/).filter(Boolean);
-	if (parts.length === 0) return { kind: "invalid" };
+	const parts = args.trim().toLowerCase().split(/\s+/u).filter(Boolean);
+	if (parts.length === 0 || (parts.length === 1 && parts[0] === "config")) return { kind: "config" };
+	if (parts.length === 1 && parts[0] === "status") return { kind: "status" };
 	if (parts.length === 1 && parts[0] === "reset") return { kind: "reset" };
+	if (parts.length === 2 && parts[0] === "rail" && parts[1] === "toggle") return { kind: "rail-toggle" };
+	if (parts.length === 3 && parts[0] === "glyphs" && parts[1] === "debug") {
+		const action = parts[2];
+		if ((LOADING_GLYPH_DEBUG_ACTIONS as readonly string[]).includes(action!)) {
+			return { kind: "glyph-debug", action: action as (typeof LOADING_GLYPH_DEBUG_ACTIONS)[number] };
+		}
+		return { kind: "invalid" };
+	}
 	if (parts[0] === "layout") {
 		if (parts.length !== 2 || !isBorderLayoutName(parts[1]!)) return { kind: "invalid" };
 		return { kind: "apply", state: { ...current, layout: parts[1]! } };
@@ -2172,28 +2305,562 @@ async function persistContextRailUpdate(
 }
 
 
-export default function promptBorderStyle(pi: ExtensionAPI, configPath = CONFIG_PATH): void {
-	pi.setLabel("Prompt Border Style");
 
-	pi.on("session_start", async (_event, ctx) => {
-		if (!ctx.hasUI) return;
-		activeConfig = await ensurePromptBorderConfigFile(configPath);
-		applySpinnerGlyphFrames(ctx.ui.theme, activeConfig);
-		notifyInvalidConfig(ctx);
-		activeBorder = { style: activeConfig.style, layout: activeConfig.layout };
+async function initializeMissingPromptBorderAssets(input: PromptBorderConfigPathInput, ctx: { ui: ExtensionUIContext }): Promise<void> {
+	if (!(await ctx.ui.confirm("Initialize Prompt Border assets?", "Create only missing Prompt Border glyph files?"))) return;
+	const paths = resolveConfigPaths(input);
+	const seeds: Record<PromptBorderGlyphSlot, string> = {
+		left: DEFAULT_LEFT_GLYPH_TEXT,
+		right: "",
+		status: "",
+		activity: "",
+	};
+	const created: string[] = [];
+	for (const slot of ["left", "right", "status", "activity"] as const) {
+		const filePath = getGlyphTextPath(paths.configPath, slot);
+		await mkdir(path.dirname(filePath), { recursive: true });
+		if (await Bun.file(filePath).exists()) continue;
+		const seed = seeds[slot];
+		await Bun.write(filePath, seed.length > 0 && !seed.endsWith("\n") ? `${seed}\n` : seed);
+		created.push(filePath);
+	}
+	ctx.ui.notify(
+		created.length > 0 ? `Initialized missing Prompt Border assets:\n${created.join("\n")}` : "Prompt Border assets already exist",
+		"info",
+	);
+}
+
+async function initializeMissingContextRailAssets(
+	config: PromptBorderConfig,
+	ctx: { ui: ExtensionUIContext },
+): Promise<void> {
+	if (!(await ctx.ui.confirm("Initialize Context Rail assets?", "Create only missing Context Rail glyph files?"))) return;
+	const rail = config.contextRail;
+	const roleFallbacks = resolveContextRailRoleFallbacks(ctx.ui.theme);
+	const files: Array<{ path: string; content: string }> = [
+		{ path: getContextRailLabelPath(rail), content: `${resolveContextRailFallback(ctx.ui.theme)}\n` },
+		{ path: getContextRailPointerPath(rail), content: `${resolveContextRailPointerFallback(ctx.ui.theme)}\n` },
+		...CONTEXT_RAIL_ROLES.map(role => ({
+			path: getContextRailRolePath(rail, role),
+			content: `${roleFallbacks[role]}\n`,
+		})),
+	];
+	const created: string[] = [];
+	for (const file of files) {
+		await mkdir(path.dirname(file.path), { recursive: true });
+		if (await Bun.file(file.path).exists()) continue;
+		await Bun.write(file.path, file.content);
+		created.push(file.path);
+	}
+	ctx.ui.notify(
+		created.length > 0 ? `Initialized missing Context Rail assets:\n${created.join("\n")}` : "Context Rail assets already exist",
+		"info",
+	);
+}
+
+type PromptBorderDialogApplyResult = { config?: PromptBorderConfig; error?: string };
+type PromptBorderDialogCallbacks = {
+	apply: (draft: PromptBorderConfig) => Promise<PromptBorderDialogApplyResult>;
+	reload: () => Promise<PromptBorderConfig>;
+	showPaths: () => void;
+	initializePromptAssets: () => Promise<void>;
+	initializeContextRailAssets: (draft: PromptBorderConfig) => Promise<void>;
+};
+
+function validatePromptBorderDraft(config: PromptBorderConfig): string | undefined {
+	if (!isBorderStyleName(String(config.style))) return `Invalid border style: ${String(config.style)}`;
+	if (!isBorderLayoutName(String(config.layout))) return `Invalid border layout: ${String(config.layout)}`;
+	for (const [label, glyph] of [
+		["left glyph", config.leftGlyph],
+		["right glyph", config.rightGlyph],
+		["status spinner", config.spinnerGlyphs.status],
+		["activity spinner", config.spinnerGlyphs.activity],
+	] as const) {
+		if (!Number.isFinite(glyph.frameMs) || glyph.frameMs < 16 || glyph.frameMs > 1000) {
+			return `${label} frameMs must be between 16 and 1000`;
+		}
+	}
+	const rail = config.contextRail;
+	if (typeof rail.enabled !== "boolean") return "Context Rail enabled must be boolean";
+	if (!(CONTEXT_RAIL_PLACEMENTS as readonly string[]).includes(String(rail.placement))) return "Invalid Context Rail placement";
+	if (!(CONTEXT_RAIL_VISIBILITIES as readonly string[]).includes(String(rail.visibility))) return "Invalid Context Rail visibility";
+	if (!(CONTEXT_RAIL_MODES as readonly string[]).includes(String(rail.mode))) return "Invalid Context Rail mode";
+	if (!(CONTEXT_RAIL_POINTERS as readonly string[]).includes(String(rail.pointer.visibility))) {
+		return "Invalid Context Rail pointer visibility";
+	}
+	if (!(CONTEXT_RAIL_LABELS as readonly string[]).includes(String(rail.labels))) return "Invalid Context Rail labels";
+	if (!(CONTEXT_RAIL_POSITIONS as readonly string[]).includes(String(rail.labelPosition))) {
+		return "Invalid Context Rail label position";
+	}
+	if (typeof rail.showLabelGlyph !== "boolean") return "Context Rail showLabelGlyph must be boolean";
+	if (typeof rail.glyphDirectory !== "string" || rail.glyphDirectory.trim().length === 0) {
+		return "Context Rail glyphDirectory must be nonempty";
+	}
+	for (const role of CONTEXT_RAIL_ROLES) {
+		const roleConfig = rail[role];
+		if (typeof roleConfig.framesFile !== "string" || roleConfig.framesFile.trim().length === 0) {
+			return `Context Rail ${role} framesFile must be nonempty`;
+		}
+		if (typeof roleConfig.meaning !== "string" || roleConfig.meaning.trim().length === 0) {
+			return `Context Rail ${role} meaning must be nonempty`;
+		}
+		if (roleConfig.fps !== undefined && (!Number.isFinite(roleConfig.fps) || roleConfig.fps <= 0)) {
+			return `Context Rail ${role} fps must be positive`;
+		}
+	}
+	if (!(CONTEXT_RAIL_MEANING_PLACEMENTS as readonly string[]).includes(String(rail.custom.meaningPlacement))) {
+		return "Invalid Context Rail meaning placement";
+	}
+	if (rail.custom.items.length !== CONTEXT_RAIL_ROLES.length) return "Context Rail custom templates must include every role";
+	const customRoles = new Set<ContextRailRole>();
+	for (const item of rail.custom.items) {
+		if (customRoles.has(item.role)) return "Context Rail custom templates may include each role once";
+		customRoles.add(item.role);
+		if ((item.template.match(/\{frame\}/g) ?? []).length !== 1) {
+			return `Context Rail ${item.role} template must contain exactly one {frame}`;
+		}
+	}
+	return undefined;
+}
+
+function inputSetting(
+	id: string,
+	label: string,
+	currentValue: string,
+	onSubmit: (value: string) => void,
+	description?: string,
+): SettingItem {
+	return {
+		id,
+		label,
+		currentValue,
+		description,
+		submenu: (value, done) => {
+			const input = new Input();
+			input.setValue(value);
+			input.onSubmit = next => {
+				onSubmit(next);
+				done(next);
+			};
+			input.onEscape = () => done();
+			return {
+				render: width => input.render(width),
+				handleInput: data => input.handleInput(data),
+				invalidate: () => input.invalidate(),
+			};
+		},
+	};
+}
+
+function selectSetting(id: string, label: string, currentValue: string, values: readonly string[], description?: string): SettingItem {
+	return {
+		id,
+		label,
+		currentValue,
+		description,
+		submenu: (value, done) => {
+			const list = new SelectList(
+				values.map(option => ({ value: option, label: option })),
+				Math.min(Math.max(values.length, 1), 8),
+				getSelectListTheme(),
+			);
+			const selected = values.indexOf(value);
+			if (selected >= 0) list.setSelectedIndex(selected);
+			list.onSelect = item => done(item.value);
+			list.onCancel = () => done();
+			return list;
+		},
+	};
+}
+
+class PromptBorderSettingsDialog implements Component {
+	#draft: PromptBorderConfig;
+	#items: SettingItem[] = [];
+	#settingsList: SettingsList;
+	#error = "";
+	#done: () => void;
+	#tui: { requestRender: () => void };
+	#theme: Theme;
+	#callbacks: PromptBorderDialogCallbacks;
+
+	constructor(
+		tui: { requestRender: () => void },
+		theme: Theme,
+		initial: PromptBorderConfig,
+		done: () => void,
+		callbacks: PromptBorderDialogCallbacks,
+	) {
+		this.#tui = tui;
+		this.#theme = theme;
+		this.#draft = structuredClone(initial);
+		this.#done = done;
+		this.#callbacks = callbacks;
+		this.#settingsList = this.createSettingsList();
+	}
+
+	private createSettingsList(): SettingsList {
+		const items: SettingItem[] = [
+			{ id: "heading.config", label: "Config", currentValue: "", heading: true },
+			selectSetting("style", "Style", String(this.#draft.style), STYLE_NAMES),
+			selectSetting("layout", "Layout", String(this.#draft.layout), LAYOUT_NAMES),
+			inputSetting("left.frameMs", "Left glyph frameMs", String(this.#draft.leftGlyph.frameMs), value => {
+				this.#draft.leftGlyph.frameMs = Number(value);
+			}),
+			inputSetting("right.frameMs", "Right glyph frameMs", String(this.#draft.rightGlyph.frameMs), value => {
+				this.#draft.rightGlyph.frameMs = Number(value);
+			}),
+			inputSetting("spinner.status.frameMs", "Status spinner frameMs", String(this.#draft.spinnerGlyphs.status.frameMs), value => {
+				this.#draft.spinnerGlyphs.status.frameMs = Number(value);
+			}),
+			inputSetting(
+				"spinner.activity.frameMs",
+				"Activity spinner frameMs",
+				String(this.#draft.spinnerGlyphs.activity.frameMs),
+				value => {
+					this.#draft.spinnerGlyphs.activity.frameMs = Number(value);
+				},
+			),
+			{ id: "heading.display", label: "Context Rail", currentValue: "", heading: true },
+			{
+				id: "rail.enabled",
+				label: "Enabled",
+				currentValue: String(this.#draft.contextRail.enabled),
+				values: ["true", "false"],
+			},
+			selectSetting("rail.placement", "Placement", this.#draft.contextRail.placement, CONTEXT_RAIL_PLACEMENTS),
+			selectSetting("rail.visibility", "Visibility", this.#draft.contextRail.visibility, CONTEXT_RAIL_VISIBILITIES),
+			selectSetting("rail.mode", "Mode", this.#draft.contextRail.mode, CONTEXT_RAIL_MODES),
+			inputSetting("rail.glyphDirectory", "Glyph directory", this.#draft.contextRail.glyphDirectory, value => {
+				this.#draft.contextRail.glyphDirectory = value;
+			}),
+			selectSetting("rail.labels", "Labels", this.#draft.contextRail.labels, CONTEXT_RAIL_LABELS),
+			selectSetting("rail.labelPosition", "Label position", this.#draft.contextRail.labelPosition, CONTEXT_RAIL_POSITIONS),
+			{
+				id: "rail.showLabelGlyph",
+				label: "Show label glyph",
+				currentValue: String(this.#draft.contextRail.showLabelGlyph !== false),
+				values: ["true", "false"],
+			},
+			...CONTEXT_RAIL_ROLES.flatMap(role => {
+				const roleConfig = this.#draft.contextRail[role];
+				return [
+					{ id: `rail.${role}.heading`, label: role, currentValue: "", heading: true } satisfies SettingItem,
+					inputSetting(`rail.${role}.framesFile`, "Frames file", roleConfig.framesFile, value => {
+						roleConfig.framesFile = value;
+					}),
+					inputSetting(`rail.${role}.fps`, "FPS (blank = asset)", roleConfig.fps === undefined ? "" : String(roleConfig.fps), value => {
+						roleConfig.fps = value.trim().length === 0 ? undefined : Number(value);
+					}),
+					inputSetting(`rail.${role}.meaning`, "Meaning", roleConfig.meaning, value => {
+						roleConfig.meaning = value;
+					}),
+					...(role === "pointer"
+						? [
+								selectSetting(
+									"rail.pointer.visibility",
+									"Pointer visibility",
+									this.#draft.contextRail.pointer.visibility,
+									CONTEXT_RAIL_POINTERS,
+								),
+							]
+						: []),
+				];
+			}),
+			{ id: "heading.custom", label: "Custom", currentValue: "", heading: true },
+			selectSetting(
+				"rail.custom.meaningPlacement",
+				"Meaning placement",
+				this.#draft.contextRail.custom.meaningPlacement,
+				CONTEXT_RAIL_MEANING_PLACEMENTS,
+			),
+			...CONTEXT_RAIL_ROLES.map(role =>
+				inputSetting(`rail.custom.${role}`, `${role} template`, this.#draft.contextRail.custom.items.find(item => item.role === role)?.template ?? "", value => {
+					const item = this.#draft.contextRail.custom.items.find(candidate => candidate.role === role);
+					if (item) item.template = value;
+				}),
+			),
+			{ id: "heading.assets", label: "Assets", currentValue: "", heading: true },
+			{ id: "action.show-paths", label: "Show paths", currentValue: "Enter" },
+			{ id: "action.initialize-prompt-assets", label: "Initialize missing Prompt Border assets", currentValue: "Enter" },
+			{ id: "action.initialize-context-assets", label: "Initialize missing Context Rail assets", currentValue: "Enter" },
+			{ id: "action.reload", label: "Reload from disk", currentValue: "Enter" },
+			{ id: "heading.actions", label: "Actions", currentValue: "", heading: true },
+			{ id: "action.apply", label: "Apply changes", currentValue: "Enter" },
+			{ id: "action.cancel", label: "Cancel", currentValue: "Enter" },
+		];
+		this.#items = items;
+		return new SettingsList(
+			items,
+			Math.min(Math.max(items.length, 8), 22),
+			getSettingsListTheme(),
+			(id, value) => {
+				this.applySetting(id, value);
+				this.#settingsList.setItems(this.createSettingsListItems());
+			},
+			() => this.#done(),
+			{ layout: "flat", hint: "↑↓ navigate · Enter edit · Esc cancel" },
+		);
+	}
+
+	private createSettingsListItems(): SettingItem[] {
+		this.createSettingsList();
+		return this.#items;
+	}
+
+	private applySetting(id: string, value: string): void {
+		switch (id) {
+			case "style":
+				this.#draft.style = value as BorderStyleName;
+				break;
+			case "layout":
+				this.#draft.layout = value as BorderLayoutName;
+				break;
+			case "left.frameMs":
+				this.#draft.leftGlyph.frameMs = Number(value);
+				break;
+			case "right.frameMs":
+				this.#draft.rightGlyph.frameMs = Number(value);
+				break;
+			case "spinner.status.frameMs":
+				this.#draft.spinnerGlyphs.status.frameMs = Number(value);
+				break;
+			case "spinner.activity.frameMs":
+				this.#draft.spinnerGlyphs.activity.frameMs = Number(value);
+				break;
+			case "rail.enabled":
+				this.#draft.contextRail.enabled = value === "true";
+				break;
+			case "rail.placement":
+				this.#draft.contextRail.placement = value as ContextRailPlacement;
+				break;
+			case "rail.visibility":
+				this.#draft.contextRail.visibility = value as ContextRailVisibility;
+				break;
+			case "rail.mode":
+				this.#draft.contextRail.mode = value as ContextRailMode;
+				break;
+			case "rail.glyphDirectory":
+				this.#draft.contextRail.glyphDirectory = value;
+				break;
+			case "rail.labels":
+				this.#draft.contextRail.labels = value as ContextRailLabels;
+				break;
+			case "rail.labelPosition":
+				this.#draft.contextRail.labelPosition = value as ContextRailLabelPosition;
+				break;
+			case "rail.showLabelGlyph":
+				this.#draft.contextRail.showLabelGlyph = value === "true";
+				break;
+			case "rail.pointer.visibility":
+				this.#draft.contextRail.pointer.visibility = value as ContextRailPointer;
+				break;
+			case "rail.custom.meaningPlacement":
+				this.#draft.contextRail.custom.meaningPlacement = value as ContextRailMeaningPlacement;
+				break;
+			default:
+				if (id.startsWith("rail.") && id.endsWith(".framesFile")) {
+					const role = id.split(".")[1] as ContextRailRole;
+					this.#draft.contextRail[role].framesFile = value;
+				} else if (id.startsWith("rail.") && id.endsWith(".fps")) {
+					const role = id.split(".")[1] as ContextRailRole;
+					this.#draft.contextRail[role].fps = value.trim().length === 0 ? undefined : Number(value);
+				} else if (id.startsWith("rail.") && id.endsWith(".meaning")) {
+					const role = id.split(".")[1] as ContextRailRole;
+					this.#draft.contextRail[role].meaning = value;
+				} else if (id.startsWith("rail.custom.")) {
+					const role = id.slice("rail.custom.".length) as ContextRailRole;
+					const item = this.#draft.contextRail.custom.items.find(candidate => candidate.role === role);
+					if (item) item.template = value;
+				}
+		}
+	}
+
+	private runAction(id: string): void {
+		if (id === "action.show-paths") {
+			this.#callbacks.showPaths();
+		} else if (id === "action.initialize-prompt-assets") {
+			void this.#callbacks.initializePromptAssets().then(() => this.#tui.requestRender());
+		} else if (id === "action.initialize-context-assets") {
+			void this.#callbacks.initializeContextRailAssets(this.#draft).then(() => this.#tui.requestRender());
+		} else if (id === "action.reload") {
+			void this.#callbacks.reload().then(config => {
+				this.#draft = structuredClone(config);
+				this.#settingsList.setItems(this.createSettingsListItems());
+				this.#error = "";
+				this.#tui.requestRender();
+			});
+		} else if (id === "action.apply") {
+			void this.#callbacks.apply(this.#draft).then(result => {
+				if (result.error !== undefined) {
+					this.#error = result.error;
+					this.#tui.requestRender();
+					return;
+				}
+				this.#done();
+			});
+		} else if (id === "action.cancel") {
+			this.#done();
+		}
+	}
+
+	render(width: number): readonly string[] {
+		const header = this.#theme.fg("accent", this.#theme.bold("Prompt Border Configuration"));
+		const error = this.#error.length > 0 ? this.#theme.fg("error", `Error: ${this.#error}`) : "";
+		return [header, ...(error ? [truncateToWidth(error, width)] : []), ...this.#settingsList.render(width)];
+	}
+
+	handleInput(data: string): void {
+		if (data === "\n" || data === "\r") {
+			const selected = this.#settingsList.getSelectedItem();
+			if (selected?.id.startsWith("action.")) {
+				this.runAction(selected.id);
+				return;
+			}
+		}
+		this.#settingsList.handleInput(data);
+		this.#tui.requestRender();
+	}
+
+	invalidate(): void {
+		this.#settingsList.invalidate();
+	}
+}
+type PromptBorderLiveContext = {
+	hasUI: boolean;
+	ui: ExtensionUIContext;
+	getContextUsage?: () => { tokens: number; contextWindow: number; percent: number } | undefined;
+	model?: ContextRailModel | null;
+};
+
+function effectiveContextRailConfig(config: PromptBorderConfig): ContextRailConfig {
+	if (sessionRailEnabledOverride === undefined) return structuredClone(config.contextRail);
+	return { ...structuredClone(config.contextRail), enabled: sessionRailEnabledOverride };
+}
+
+async function rebuildPromptBorderRuntime(ctx: PromptBorderLiveContext, input: PromptBorderConfigPathInput): Promise<void> {
+	activeBorder = {
+		style: sessionStyleOverride ?? activeConfig.style,
+		layout: sessionLayoutOverride ?? activeConfig.layout,
+	};
+	applySpinnerGlyphFrames(ctx.ui.theme, activeConfig);
+	const railConfig = effectiveContextRailConfig(activeConfig);
+	const roleAssets = await loadContextRailRoleAssets(railConfig);
+	if (activeContextRailRuntime === undefined) {
 		activeContextRailRuntime = createContextRailRuntime(
-			activeConfig.contextRail,
+			railConfig,
 			horizontal => createContextRailPalette(ctx.ui.theme, horizontal),
 			resolveContextRailFallback(ctx.ui.theme),
 			resolveContextRailPointerFallback(ctx.ui.theme),
-			await loadContextRailRoleAssets(activeConfig.contextRail),
+			roleAssets,
 			resolveContextRailRoleFallbacks(ctx.ui.theme),
 		);
-		refreshContextRail(ctx);
-		mountPromptAttachmentWidget(ctx);
-		mountContextRailWidget(ctx);
+	} else {
+		replaceContextRailConfig(activeContextRailRuntime, railConfig, roleAssets);
+	}
+	refreshContextRail(ctx);
+	mountPromptAttachmentWidget(ctx);
+	mountContextRailWidget(ctx);
+	if (builtInEditorOverride) {
+		activePromptBorderEditor = undefined;
+		ctx.ui.setEditorComponent(undefined);
+	} else {
+		ctx.ui.setEditorComponent(undefined);
 		installPromptBorderEditor(ctx);
-	});
+	}
+}
+
+function tearDownPromptBorderRuntime(ctx: PromptBorderLiveContext): void {
+	activePromptBorderEditor = undefined;
+	if (ctx.hasUI) {
+		ctx.ui.setWidget?.(CONTEXT_RAIL_WIDGET_KEY, undefined);
+		ctx.ui.setWidget?.(PROMPT_ATTACHMENT_WIDGET_KEY, undefined);
+		ctx.ui.setEditorComponent(undefined);
+		clearPromptLoadingGlyphDebugUi(ctx);
+		restoreSpinnerGlyphFrames(ctx.ui.theme);
+	}
+	disposeContextRailRuntime();
+}
+
+async function activatePromptBorderSession(ctx: PromptBorderLiveContext, input: PromptBorderConfigPathInput): Promise<void> {
+	tearDownPromptBorderRuntime(ctx);
+	sessionStyleOverride = undefined;
+	sessionLayoutOverride = undefined;
+	sessionRailEnabledOverride = undefined;
+	builtInEditorOverride = false;
+	activeConfig = await ensurePromptBorderConfigFile(input);
+	notifyInvalidConfig(ctx);
+	if (!ctx.hasUI) return;
+	await rebuildPromptBorderRuntime(ctx, input);
+}
+
+function formatPromptBorderStatus(config: PromptBorderConfig, input: PromptBorderConfigPathInput): string {
+	const paths = resolveConfigPaths(input);
+	const rail = activeContextRailRuntime?.config ?? config.contextRail;
+	const assetPaths = (["left", "right", "status", "activity"] as const).map(slot => getGlyphTextPath(paths.configPath, slot));
+	const rolePaths = CONTEXT_RAIL_ROLES.map(role => getContextRailRolePath(rail, role));
+	return [
+		`Prompt Border: ${activeBorder.style} ${activeBorder.layout} (persisted ${config.style} ${config.layout})`,
+		`Session overrides: style=${sessionStyleOverride ?? "none"} layout=${sessionLayoutOverride ?? "none"} editor=${builtInEditorOverride ? "builtin" : "custom"}`,
+		`Context Rail: ${rail.enabled ? "enabled" : "disabled"} ${rail.placement}/${rail.visibility}/${rail.mode}`,
+		`Config: ${paths.configPath}`,
+		`Prompt Border assets: ${assetPaths.join(", ")}`,
+		`Context Rail assets: ${expandHome(rail.glyphDirectory)} (${rolePaths.join(", ")})`,
+	].join("\n");
+}
+
+async function applyPromptBorderDraft(
+	draft: PromptBorderConfig,
+	ctx: PromptBorderLiveContext,
+	input: PromptBorderConfigPathInput,
+): Promise<PromptBorderDialogApplyResult> {
+	const validationError = validatePromptBorderDraft(draft);
+	if (validationError !== undefined) return { error: validationError };
+	const previous = activeConfig;
+	try {
+		await writeJsonAtomically(resolveConfigPaths(input).configPath, persistedConfigJson(draft));
+	} catch (error) {
+		return { error: `Could not write Prompt Border config: ${error instanceof Error ? error.message : String(error)}` };
+	}
+	if (draft.style !== previous.style) {
+		sessionStyleOverride = undefined;
+		builtInEditorOverride = false;
+	}
+	if (draft.layout !== previous.layout) {
+		sessionLayoutOverride = undefined;
+		builtInEditorOverride = false;
+	}
+	if (draft.contextRail.enabled !== previous.contextRail.enabled) sessionRailEnabledOverride = undefined;
+	if (draft.contextRail.visibility !== previous.contextRail.visibility && activeContextRailRuntime !== undefined) {
+		activeContextRailRuntime.toggledVisible = true;
+	}
+	activeConfig = draft;
+	if (ctx.hasUI) await rebuildPromptBorderRuntime(ctx, input);
+	return { config: draft };
+}
+
+function openPromptBorderDialog(ctx: PromptBorderLiveContext, input: PromptBorderConfigPathInput): Promise<void> {
+	return ctx.ui.custom((_tui, _theme, _keybindings, done) => {
+		const tui = _tui as { requestRender: () => void };
+		const theme = _theme as Theme;
+		return new PromptBorderSettingsDialog(tui, theme, structuredClone(activeConfig), () => done(undefined), {
+			apply: draft => applyPromptBorderDraft(draft, ctx, input),
+			reload: () => readPromptBorderConfig(input),
+			showPaths: () => ctx.ui.notify(formatPromptBorderStatus(activeConfig, input), "info"),
+			initializePromptAssets: () => initializeMissingPromptBorderAssets(input, ctx),
+			initializeContextRailAssets: draft => initializeMissingContextRailAssets(draft, ctx),
+		});
+	}).then(() => undefined);
+}
+
+export default function promptBorderStyle(pi: ExtensionAPI, configPath: PromptBorderConfigPathInput = CONFIG_PATH): void {
+	pi.setLabel("Prompt Border Style");
+
+	const resetSession = async (_event: unknown, ctx: PromptBorderLiveContext): Promise<void> => {
+		await activatePromptBorderSession(ctx, configPath);
+	};
+	pi.on("session_start", resetSession);
+	pi.on("session_switch", resetSession);
+	pi.on("session_branch", resetSession);
 
 	pi.on("context", (_event, ctx) => refreshContextRail(ctx));
 	pi.on("message_update", (_event, ctx) => refreshContextRail(ctx));
@@ -2202,60 +2869,49 @@ export default function promptBorderStyle(pi: ExtensionAPI, configPath = CONFIG_
 	pi.on("auto_compaction_start", (_event, ctx) => refreshContextRail(ctx));
 	pi.on("auto_compaction_end", (_event, ctx) => refreshContextRail(ctx));
 
-	pi.on("session_shutdown", (_event, ctx) => {
-		activePromptBorderEditor = undefined;
-		if (!ctx.hasUI) {
-			disposeContextRailRuntime();
-			return;
-		}
-		ctx.ui.setWidget?.(CONTEXT_RAIL_WIDGET_KEY, undefined);
-		ctx.ui.setWidget?.(PROMPT_ATTACHMENT_WIDGET_KEY, undefined);
-		ctx.ui.setEditorComponent(undefined);
-		clearPromptLoadingGlyphDebugUi(ctx);
-		restoreSpinnerGlyphFrames(ctx.ui.theme);
-		disposeContextRailRuntime();
+	pi.on("session_shutdown", (_event, ctx: PromptBorderLiveContext) => {
+		tearDownPromptBorderRuntime(ctx);
+		sessionStyleOverride = undefined;
+		sessionLayoutOverride = undefined;
+		sessionRailEnabledOverride = undefined;
+		builtInEditorOverride = false;
 	});
 
-	pi.registerCommand("context-rail", {
-		description: "Configure the plugin-owned context rail",
-		getArgumentCompletions: getContextRailArgumentCompletions,
+	pi.registerCommand("prompt-border", {
+		description: "Configure the prompt border and context rail",
+		getArgumentCompletions: getPromptBorderArgumentCompletions,
 		handler: async (args, ctx) => {
-			activeConfig = await ensurePromptBorderConfigFile(configPath);
-			if (activeContextRailRuntime !== undefined) {
-				replaceContextRailConfig(
-					activeContextRailRuntime,
-					activeConfig.contextRail,
-					await loadContextRailRoleAssets(activeConfig.contextRail),
-				);
-			}
-			refreshContextRail(ctx);
-			const action = parseContextRailArgs(args);
-			if (action.kind === "invalid") {
-				ctx.ui.notify(CONTEXT_RAIL_USAGE, "warning");
-				return;
-			}
-			if (action.kind === "init") {
-				await initializeContextRailGlyphs(ctx, configPath);
+			if (!ctx.hasUI) return;
+			const action = parsePromptBorderArgs(args, activeBorder);
+			if (action.kind === "config") {
+				activeConfig = await ensurePromptBorderConfigFile(configPath);
+				notifyInvalidConfig(ctx);
+				await openPromptBorderDialog(ctx, configPath);
 				return;
 			}
 			if (action.kind === "status") {
-				ctx.ui.notify(
-					formatContextRailStatus(
-						activeContextRailRuntime ??
-							createContextRailRuntime(
-								activeConfig.contextRail,
-								() => createContextRailPalette(ctx.ui.theme, "─"),
-								resolveContextRailFallback(ctx.ui.theme),
-								resolveContextRailPointerFallback(ctx.ui.theme),
-								undefined,
-								resolveContextRailRoleFallbacks(ctx.ui.theme),
-							),
-					),
-					"info",
-				);
+				const persisted = await readPromptBorderConfig(configPath);
+				notifyInvalidConfig(ctx);
+				ctx.ui.notify(formatPromptBorderStatus(persisted, configPath), "info");
 				return;
 			}
-			if (action.kind === "toggle") {
+			activeConfig = await readPromptBorderConfig(configPath);
+			notifyInvalidConfig(ctx);
+			if (action.kind === "invalid") {
+				ctx.ui.notify(USAGE, "warning");
+				return;
+			}
+			if (action.kind === "reset") {
+				sessionStyleOverride = undefined;
+				sessionLayoutOverride = undefined;
+				builtInEditorOverride = true;
+				activePromptBorderEditor = undefined;
+				ctx.ui.setEditorComponent(undefined);
+				activeBorder = { style: activeConfig.style, layout: activeConfig.layout };
+				ctx.ui.notify("Prompt border reset for this session", "info");
+				return;
+			}
+			if (action.kind === "rail-toggle") {
 				const runtime = activeContextRailRuntime;
 				if (runtime !== undefined && runtime.config.enabled && runtime.config.visibility === "toggle") {
 					runtime.toggledVisible = !runtime.toggledVisible;
@@ -2264,95 +2920,36 @@ export default function promptBorderStyle(pi: ExtensionAPI, configPath = CONFIG_
 					ctx.ui.notify(`Context Rail: ${runtime.toggledVisible ? "shown" : "hidden"}`, "info");
 					return;
 				}
-				await persistContextRailUpdate(ctx, { enabled: !activeConfig.contextRail.enabled }, configPath);
-				ctx.ui.notify(formatContextRailStatus(activeContextRailRuntime!), "info");
+				sessionRailEnabledOverride = !(runtime?.config.enabled ?? activeConfig.contextRail.enabled);
+				await rebuildPromptBorderRuntime(ctx, configPath);
+				ctx.ui.notify(`Context Rail: ${sessionRailEnabledOverride ? "enabled" : "disabled"} for this session`, "info");
 				return;
 			}
-			await persistContextRailUpdate(ctx, action.update, configPath);
-			ctx.ui.notify(formatContextRailStatus(activeContextRailRuntime!), "info");
-		},
-	});
-
-	pi.registerCommand("prompt-loading-glyphs", {
-		description: "Debug prompt loading glyph adaptation",
-		getArgumentCompletions: getPromptLoadingGlyphArgumentCompletions,
-		handler: async (args, ctx) => {
-			if (!ctx.hasUI) return;
-			activeConfig = await ensurePromptBorderConfigFile(configPath);
-			if (activeContextRailRuntime !== undefined) {
-				replaceContextRailConfig(
-					activeContextRailRuntime,
-					activeConfig.contextRail,
-					await loadContextRailRoleAssets(activeConfig.contextRail),
-				);
-			}
-			applySpinnerGlyphFrames(ctx.ui.theme, activeConfig);
-			notifyInvalidConfig(ctx);
-			const action = parsePromptLoadingGlyphArgs(args);
-			if (action.kind === "invalid") {
-				ctx.ui.notify(PROMPT_LOADING_GLYPHS_USAGE, "warning");
+			if (action.kind === "glyph-debug") {
+				if (action.action === "frames") {
+					ctx.ui.notify(formatAllSpinnerFrameDebugReports(activeConfig), "info");
+				} else if (action.action === "demo") {
+					mountPromptLoadingGlyphDebugWidget(ctx, activeConfig);
+					ctx.ui.notify("Prompt loading glyph demo enabled for this session", "info");
+				} else if (action.action === "on") {
+					promptLoadingGlyphDebugEnabledSessions.add(ctx.ui.setWorkingMessage);
+					ctx.ui.setWorkingMessage(buildPromptLoadingGlyphDebugMessage(activeConfig));
+					ctx.ui.notify("Prompt loading glyph debug enabled for this session", "info");
+				} else {
+					clearPromptLoadingGlyphDebugUi(ctx);
+					ctx.ui.notify("Prompt loading glyph debug disabled", "info");
+				}
 				return;
 			}
-			if (action.kind === "frames") {
-				ctx.ui.notify(formatAllSpinnerFrameDebugReports(activeConfig), "info");
-				return;
-			}
-			if (action.kind === "demo") {
-				mountPromptLoadingGlyphDebugWidget(ctx, activeConfig);
-				ctx.ui.notify("Prompt loading glyph demo enabled", "info");
-				return;
-			}
-			if (action.kind === "on") {
-				promptLoadingGlyphDebugEnabledSessions.add(ctx.ui.setWorkingMessage);
-				ctx.ui.setWorkingMessage(buildPromptLoadingGlyphDebugMessage(activeConfig));
-				ctx.ui.notify("Prompt loading glyph debug enabled", "info");
-				return;
-			}
-			clearPromptLoadingGlyphDebugUi(ctx);
-			ctx.ui.notify("Prompt loading glyph debug disabled", "info");
-		},
-	});
-	pi.registerCommand("prompt-border", {
-		description: "Change the prompt input border style",
-		getArgumentCompletions: getPromptBorderArgumentCompletions,
-		handler: async (args, ctx) => {
-			if (!ctx.hasUI) return;
-			activeConfig = await ensurePromptBorderConfigFile(configPath);
-			if (activeContextRailRuntime !== undefined) {
-				replaceContextRailConfig(
-					activeContextRailRuntime,
-					activeConfig.contextRail,
-					await loadContextRailRoleAssets(activeConfig.contextRail),
-				);
-			}
-			applySpinnerGlyphFrames(ctx.ui.theme, activeConfig);
-			notifyInvalidConfig(ctx);
-			const action = parsePromptBorderArgs(args, activeBorder);
-			if (action.kind === "reset") {
-				activeBorder = { style: "double", layout: "full" };
-				activePromptBorderEditor = undefined;
-				ctx.ui.setEditorComponent(undefined);
-				ctx.ui.notify("Prompt border reset", "info");
-				return;
-			}
-			if (action.kind === "invalid") {
-				ctx.ui.notify(USAGE, "warning");
-				return;
-			}
-			activeBorder = action.state;
-			activeConfig = await writePromptBorderConfigSelection(activeBorder, configPath);
-			if (activeContextRailRuntime !== undefined) {
-				replaceContextRailConfig(
-					activeContextRailRuntime,
-					activeConfig.contextRail,
-					await loadContextRailRoleAssets(activeConfig.contextRail),
-				);
-			}
-			applySpinnerGlyphFrames(ctx.ui.theme, activeConfig);
-			notifyInvalidConfig(ctx);
-			mountContextRailWidget(ctx);
-			installPromptBorderEditor(ctx);
-			ctx.ui.notify(`Prompt border: ${activeBorder.style} ${activeBorder.layout}`, "info");
+			if (action.state.style !== activeBorder.style) sessionStyleOverride = action.state.style;
+			if (action.state.layout !== activeBorder.layout) sessionLayoutOverride = action.state.layout;
+			builtInEditorOverride = false;
+			activeBorder = {
+				style: sessionStyleOverride ?? activeConfig.style,
+				layout: sessionLayoutOverride ?? activeConfig.layout,
+			};
+			await rebuildPromptBorderRuntime(ctx, configPath);
+			ctx.ui.notify(`Prompt border: ${activeBorder.style} ${activeBorder.layout} for this session`, "info");
 		},
 	});
 }

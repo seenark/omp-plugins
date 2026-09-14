@@ -1,6 +1,6 @@
-# OMP Context Rail
+# OMP Display and Context Rail
 
-This context defines the plugin-owned context usage rail that complements OMP's native context display without changing OMP core.
+This context defines the plugin-owned Context Rail and Shared Display surfaces that complement OMP's native context display without changing OMP core.
 
 ## Language
 
@@ -12,6 +12,29 @@ _Avoid_: Native rail, core rail
 The plugin-owned visual row that communicates current context usage inside, above, or below the prompt box.
 _Avoid_: Reactive line, plugin gauge
 
+**Shared Display**:
+The combined status surface that presents ordered Status Segments from multiple plugin features as one display.
+_Avoid_: Combined widget, status strip
+
+**Display Host**:
+The single owner of a Shared Display's source composition, animation, and widget lifecycle.
+_Avoid_: Widget owner, display renderer
+
+**Display Producer**:
+A feature that supplies one Status Segment to a Display Host while remaining independent of the surface's composition and animation.
+_Avoid_: Widget producer, status renderer
+
+**Status Segment**:
+One named feature's current visual contribution to Shared Display, represented by a Frame Sequence or an intentional absence.
+_Avoid_: Status line, widget
+
+**Session Override**:
+A session-only setting that takes precedence over persisted configuration until the session boundary resets it.
+_Avoid_: Runtime default, temporary configuration
+
+**Widget Placement**:
+The OMP location of a widget relative to the editor: `aboveEditor` or `belowEditor`.
+_Avoid_: Placement, rail placement
 
 **Glyph Tile**:
 One complete visual marker for a rail role. It may occupy multiple terminal columns; the agreed default custom tile is two columns, and its characters are not animated independently.
