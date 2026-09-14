@@ -311,6 +311,70 @@ Do not set `PONYTAIL_HIDE_STATUS=1` or Ponytail `hideStatus: true`: Headroom
 needs those status writes to observe live mode changes and cannot restore output
 that Ponytail never emits.
 
+### Ponytail files to create
+
+For this integration there is no separate Ponytail settings file. The only
+configuration file used by this plugin is the shared display file:
+
+```text
+~/.config/codesook-omp/headroom/display-config.json
+```
+
+You do not need to create any files when using the defaults. Create or edit
+`display-config.json` only when changing segment order, templates, visibility,
+or native-status forwarding. `/headroom init display` creates this shared file.
+`segments.ponytail.nativeVisible` defaults to `false`.
+
+Ponytail glyph files are optional. Create only the modes you want to customize
+under:
+
+```text
+~/.config/codesook-omp/ponytail/
+```
+
+Supported optional files:
+
+```text
+off.txt
+lite.txt
+full.txt
+ultra.txt
+review.txt
+```
+
+If a mode file is missing or empty, the custom Ponytail segment falls back to
+`🐴`. These files do not affect Ponytail's rules or active mode.
+
+Minimal custom setup:
+
+```bash
+mkdir -p "$HOME/.config/codesook-omp/ponytail"
+cat > "$HOME/.config/codesook-omp/headroom/display-config.json" <<'JSON'
+{
+  "order": ["ponytail", "headroom"],
+  "separator": "  ",
+  "segments": {
+    "ponytail": {
+      "visible": true,
+      "nativeVisible": false,
+      "glyphDirectory": "~/.config/codesook-omp/ponytail",
+      "template": "{activity} {glyph} ponytail: {modeIcon}{mode}"
+    }
+  }
+}
+JSON
+
+cat > "$HOME/.config/codesook-omp/ponytail/full.txt" <<'EOF'
+fps=12
+🐴
+
+🦄
+EOF
+```
+
+Use `/ponytail-display on|off|toggle|status` for the custom segment and
+`/ponytail-native on|off|toggle|status` for Ponytail's original native status.
+
 Ponytail segment placeholders:
 
 ```text
