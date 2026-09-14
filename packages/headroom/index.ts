@@ -6,12 +6,24 @@ import { isRemoteBlocked, loadHeadroomConfig } from "./config.ts";
 import {
 	DISPLAY_CONFIG_PATH,
 	isDisplayVisible,
+	isPonytailDisplayVisible,
+	isPonytailNativeVisible,
+	isStatusSegmentEnabled,
 	loadDisplayConfig,
 	loadGlyphAsset,
+	loadPonytailGlyphAsset,
+	parsePonytailStatus,
 	renderDisplay,
+	renderPonytailDisplay,
+	renderStatusSegments,
+	resolvePonytailSessionStatus,
 	resolveThemeGlyph,
 	widgetState,
+	writeDisplaySegmentVisibility,
+	writePonytailNativeVisibility,
 	type DisplayState,
+	type PonytailStatus,
+	type StatusSegmentName,
 } from "./display.ts";
 import {
 	buildHeadroomInitFiles,
@@ -24,25 +36,35 @@ import type { AgentMessage, CompressResult, HeadroomConfig, HeadroomStats } from
 
 const STATUS_KEY = "headroom";
 const SUBCOMMANDS = ["status", "on", "off", "display", "health", "stats", "init"] as const;
+const DISPLAY_ACTIONS = ["on", "off", "toggle", "status"] as const;
 const INIT_TARGETS = ["config", "display", "glyphs", "all"] as const;
-const HEADROOM_USAGE = "Usage: /headroom [on|off|status|display|health|stats|init [config|display|glyphs|all]]";
+const HEADROOM_USAGE =
+	"Usage: /headroom [on|off|status|display [on|off|toggle|status]|health|stats|init [config|display|glyphs|all]]";
+const PONYTAIL_DISPLAY_USAGE = "Usage: /ponytail-display [on|off|toggle|status]";
+const PONYTAIL_NATIVE_USAGE = "Usage: /ponytail-native [on|off|toggle|status]";
 
 type Subcommand = (typeof SUBCOMMANDS)[number];
+type DisplayAction = (typeof DISPLAY_ACTIONS)[number];
 
 interface ParsedCommand {
 	command: Subcommand;
 	initTarget?: HeadroomInitTarget;
+	displayAction?: DisplayAction;
 }
 
 interface HeadroomRuntimeState {
 	enabled: boolean;
 	displayVisible: boolean;
+	ponytailDisplayVisible: boolean;
+	ponytailNativeVisible: boolean;
+	ponytailNativeText?: string;
 	proxyOnline: boolean | null;
 	proxyStarting: boolean;
 	proxyStartAttempted: boolean;
 	remoteWarningShown: boolean;
 	offlineWarningShown: boolean;
 	stats: HeadroomStats;
+	ponytailStatus?: PonytailStatus;
 }
 
 interface HeadroomRuntime {
@@ -52,6 +74,8 @@ interface HeadroomRuntime {
 	refreshStatus(ctx: ExtensionContext): void;
 	updateHealth(ctx: ExtensionContext): Promise<boolean>;
 	ensureProxy(ctx: ExtensionContext): Promise<boolean>;
+	restorePonytailStatusCapture?: () => void;
+	setPonytailNativeVisibility?: (visible: boolean) => void;
 }
 
 export interface HeadroomExtensionOptions {
@@ -63,6 +87,11 @@ export default function headroomExtension(pi: ExtensionAPI, options: HeadroomExt
 	const runtime = createRuntime(options.displayConfigPath);
 
 	pi.on("session_start", (_event, ctx) => {
+		const displayConfig = loadDisplayConfig(options.displayConfigPath);
+		runtime.state.displayVisible = isDisplayVisible(displayConfig);
+		runtime.state.ponytailDisplayVisible = isPonytailDisplayVisible(displayConfig);
+		runtime.state.ponytailNativeVisible = isPonytailNativeVisible(displayConfig);
+		if (ctx.hasUI) installPonytailStatusCapture(runtime, ctx, options.displayConfigPath);
 		if (isRemoteBlocked(runtime.config)) {
 			runtime.refreshStatus(ctx);
 			ctx.ui.notify(
@@ -76,6 +105,8 @@ export default function headroomExtension(pi: ExtensionAPI, options: HeadroomExt
 		void ensureProxyInBackground(runtime, ctx);
 	});
 	pi.on("session_shutdown", (_event, ctx) => {
+		runtime.restorePonytailStatusCapture?.();
+		runtime.restorePonytailStatusCapture = undefined;
 		if (ctx.hasUI) ctx.ui.setWidget(STATUS_KEY, undefined);
 	});
 
@@ -95,6 +126,13 @@ export default function headroomExtension(pi: ExtensionAPI, options: HeadroomExt
 						label: target,
 					}));
 				}
+				if (command === "display" && tokens.length <= 2) {
+					const actionPrefix = tokens[1] ?? "";
+					return DISPLAY_ACTIONS.filter((action) => action.startsWith(actionPrefix)).map((action) => ({
+						value: action,
+						label: action,
+					}));
+				}
 				if (tokens.length > 1) return [];
 				return SUBCOMMANDS.filter((candidate) => candidate.startsWith(command)).map((candidate) => ({
 					value: candidate,
@@ -107,23 +145,68 @@ export default function headroomExtension(pi: ExtensionAPI, options: HeadroomExt
 				label: command,
 			}));
 		},
-		handler: async (args, ctx) => handleCommand(runtime, parseCommand(args), ctx, options.initPaths),
+		handler: async (args, ctx) =>
+			handleCommand(runtime, parseCommand(args), ctx, options.initPaths, options.displayConfigPath),
 	});
 
 	pi.registerCommand("headroom-health", {
 		description: "Check Headroom proxy health",
 		handler: async (_args, ctx) => {
-			await handleCommand(runtime, { command: "health" }, ctx, options.initPaths);
+			await handleCommand(runtime, { command: "health" }, ctx, options.initPaths, options.displayConfigPath);
+		},
+	});
+
+	pi.registerCommand("ponytail-display", {
+		description: "Configure the captured Ponytail status segment",
+		getArgumentCompletions(argumentPrefix) {
+			const prefix = argumentPrefix.trim().toLowerCase();
+			if (prefix.includes(" ")) return [];
+			return DISPLAY_ACTIONS.filter((action) => action.startsWith(prefix)).map((action) => ({
+				value: action,
+				label: action,
+			}));
+		},
+		handler: async (args, ctx) => {
+			await handleDisplayCommand(
+				runtime,
+				"ponytail",
+				parseDisplayAction(args),
+				ctx,
+				options.displayConfigPath,
+			);
+		},
+	});
+
+	pi.registerCommand("ponytail-native", {
+		description: "Show or hide Ponytail's original native status",
+		getArgumentCompletions(argumentPrefix) {
+			const prefix = argumentPrefix.trim().toLowerCase();
+			if (prefix.includes(" ")) return [];
+			return DISPLAY_ACTIONS.filter((action) => action.startsWith(prefix)).map((action) => ({
+				value: action,
+				label: action,
+			}));
+		},
+		handler: async (args, ctx) => {
+			await handlePonytailNativeCommand(
+				runtime,
+				parseDisplayAction(args),
+				ctx,
+				options.displayConfigPath,
+			);
 		},
 	});
 }
 
 function createRuntime(displayConfigPath = DISPLAY_CONFIG_PATH): HeadroomRuntime {
 	const config = loadHeadroomConfig();
+	const displayConfig = loadDisplayConfig(displayConfigPath);
 	const client = new HeadroomHttpClient({ baseUrl: config.baseUrl, timeoutMs: config.timeoutMs });
 	const state: HeadroomRuntimeState = {
 		enabled: config.enabled,
-		displayVisible: isDisplayVisible(loadDisplayConfig(displayConfigPath)),
+		displayVisible: isDisplayVisible(displayConfig),
+		ponytailDisplayVisible: isPonytailDisplayVisible(displayConfig),
+		ponytailNativeVisible: isPonytailNativeVisible(displayConfig),
 		proxyOnline: null,
 		proxyStarting: false,
 		proxyStartAttempted: false,
@@ -149,6 +232,39 @@ function createRuntime(displayConfigPath = DISPLAY_CONFIG_PATH): HeadroomRuntime
 		},
 	};
 	return runtime;
+}
+
+function installPonytailStatusCapture(
+	runtime: HeadroomRuntime,
+	ctx: ExtensionContext,
+	displayConfigPath = DISPLAY_CONFIG_PATH,
+): void {
+	runtime.restorePonytailStatusCapture?.();
+	runtime.restorePonytailStatusCapture = undefined;
+
+	runtime.state.ponytailStatus = resolvePonytailSessionStatus(ctx.sessionManager.getBranch());
+	runtime.state.ponytailNativeText = undefined;
+	const previousSetStatus = ctx.ui.setStatus;
+	const capture = (key: string, text: string | undefined): void => {
+		if (key !== "ponytail") {
+			previousSetStatus.call(ctx.ui, key, text);
+			return;
+		}
+		runtime.state.ponytailNativeText = text;
+		runtime.state.ponytailStatus = parsePonytailStatus(text);
+		if (runtime.state.ponytailNativeVisible) previousSetStatus.call(ctx.ui, key, text);
+		runtime.refreshStatus(ctx);
+	};
+	ctx.ui.setStatus = capture;
+	runtime.setPonytailNativeVisibility = (visible) => {
+		previousSetStatus.call(ctx.ui, "ponytail", visible ? runtime.state.ponytailNativeText : undefined);
+	};
+	if (!runtime.state.ponytailNativeVisible) previousSetStatus.call(ctx.ui, "ponytail", undefined);
+	runtime.restorePonytailStatusCapture = () => {
+		previousSetStatus.call(ctx.ui, "ponytail", undefined);
+		runtime.setPonytailNativeVisibility = undefined;
+		if (ctx.ui.setStatus === capture) ctx.ui.setStatus = previousSetStatus;
+	};
 }
 
 async function updateHealthState(runtime: HeadroomRuntime, signal?: AbortSignal): Promise<boolean> {
@@ -335,7 +451,13 @@ function isAbortOrTimeoutError(error: unknown): boolean {
 	return candidate.cause !== undefined && candidate.cause !== error && isAbortOrTimeoutError(candidate.cause);
 }
 
-async function handleCommand(runtime: HeadroomRuntime, parsed: ParsedCommand, ctx: ExtensionContext, initPaths?: HeadroomInitPaths): Promise<void> {
+async function handleCommand(
+	runtime: HeadroomRuntime,
+	parsed: ParsedCommand,
+	ctx: ExtensionContext,
+	initPaths?: HeadroomInitPaths,
+	displayConfigPath = DISPLAY_CONFIG_PATH,
+): Promise<void> {
 	const command = parsed.command;
 	if (command === "init") {
 		await handleInitCommand(ctx, parsed.initTarget, initPaths);
@@ -361,14 +483,7 @@ async function handleCommand(runtime: HeadroomRuntime, parsed: ParsedCommand, ct
 		return;
 	}
 	if (command === "display") {
-		runtime.state.displayVisible = !runtime.state.displayVisible;
-		runtime.refreshStatus(ctx);
-		ctx.ui.notify(
-			runtime.state.displayVisible
-				? "Headroom display shown for this Pi session."
-				: "Headroom display hidden for this Pi session.",
-			"info",
-		);
+		await handleDisplayCommand(runtime, "headroom", parsed.displayAction, ctx, displayConfigPath);
 		return;
 	}
 	if (command === "health") {
@@ -385,6 +500,78 @@ async function handleCommand(runtime: HeadroomRuntime, parsed: ParsedCommand, ct
 		return;
 	}
 	ctx.ui.notify(renderStatus(runtime.config, runtime.state), "info");
+}
+
+async function handleDisplayCommand(
+	runtime: HeadroomRuntime,
+	segment: StatusSegmentName,
+	action: DisplayAction | undefined,
+	ctx: ExtensionContext,
+	displayConfigPath = DISPLAY_CONFIG_PATH,
+): Promise<void> {
+	const label = segment === "headroom" ? "Headroom" : "Ponytail";
+	const config = loadDisplayConfig(displayConfigPath);
+	const current =
+		segment === "headroom" ? isDisplayVisible(config) : isPonytailDisplayVisible(config);
+	if (action === undefined) {
+		ctx.ui.notify(segment === "headroom" ? HEADROOM_USAGE : PONYTAIL_DISPLAY_USAGE, "warning");
+		return;
+	}
+	if (action === "status") {
+		const inOrder = (config.order ?? []).includes(segment);
+		ctx.ui.notify(
+			`${label} display: ${current ? "shown" : "hidden"}${inOrder ? "" : " (not present in display order)"}.`,
+			"info",
+		);
+		return;
+	}
+
+	const visible = action === "on" ? true : action === "off" ? false : !current;
+	try {
+		writeDisplaySegmentVisibility(segment, visible, displayConfigPath);
+		if (segment === "headroom") runtime.state.displayVisible = visible;
+		else runtime.state.ponytailDisplayVisible = visible;
+		runtime.refreshStatus(ctx);
+		ctx.ui.notify(
+			`${label} display ${visible ? "shown" : "hidden"} and saved.${segment === "ponytail" ? " Ponytail remains active." : ""}`,
+			"info",
+		);
+	} catch (error) {
+		ctx.ui.notify(
+			`Failed to save ${label} display setting: ${error instanceof Error ? error.message : String(error)}`,
+			"error",
+		);
+	}
+}
+
+async function handlePonytailNativeCommand(
+	runtime: HeadroomRuntime,
+	action: DisplayAction | undefined,
+	ctx: ExtensionContext,
+	displayConfigPath = DISPLAY_CONFIG_PATH,
+): Promise<void> {
+	const current = isPonytailNativeVisible(loadDisplayConfig(displayConfigPath));
+	if (action === undefined) {
+		ctx.ui.notify(PONYTAIL_NATIVE_USAGE, "warning");
+		return;
+	}
+	if (action === "status") {
+		ctx.ui.notify(`Original Ponytail status: ${current ? "shown" : "hidden"}.`, "info");
+		return;
+	}
+
+	const visible = action === "on" ? true : action === "off" ? false : !current;
+	try {
+		writePonytailNativeVisibility(visible, displayConfigPath);
+		runtime.state.ponytailNativeVisible = visible;
+		runtime.setPonytailNativeVisibility?.(visible);
+		ctx.ui.notify(`Original Ponytail status ${visible ? "shown" : "hidden"} and saved.`, "info");
+	} catch (error) {
+		ctx.ui.notify(
+			`Failed to save original Ponytail status setting: ${error instanceof Error ? error.message : String(error)}`,
+			"error",
+		);
+	}
 }
 
 async function handleInitCommand(ctx: ExtensionContext, target: HeadroomInitTarget | undefined, initPaths?: HeadroomInitPaths): Promise<void> {
@@ -429,7 +616,14 @@ function refreshStatus(
 	displayConfigPath: string,
 ): void {
 	if (!ctx.hasUI) return;
-	if (!state.displayVisible) {
+	const displayConfig = loadDisplayConfig(displayConfigPath);
+	const ponytailStatus = state.ponytailStatus;
+	const showHeadroom = isStatusSegmentEnabled(displayConfig, "headroom");
+	const showPonytail =
+		ponytailStatus !== undefined &&
+		ponytailStatus.mode !== "off" &&
+		isStatusSegmentEnabled(displayConfig, "ponytail");
+	if (!showHeadroom && !showPonytail) {
 		ctx.ui.setWidget(STATUS_KEY, undefined);
 		return;
 	}
@@ -442,15 +636,25 @@ function refreshStatus(
 		state.proxyOnline,
 		compressed,
 	);
-	const displayConfig = loadDisplayConfig(displayConfigPath);
-	const glyphAsset = loadGlyphAsset(displayState, displayConfig);
+	const glyphAsset = showHeadroom ? loadGlyphAsset(displayState, displayConfig) : undefined;
+	const ponytailGlyphAsset =
+		showPonytail && ponytailStatus !== undefined
+			? loadPonytailGlyphAsset(ponytailStatus, displayConfig)
+			: undefined;
 	const values = {
 		label: "Headroom",
 		compressionPercent: state.stats.last ? Math.round((1 - state.stats.last.compressionRatio) * 100) : 0,
 		tokensSaved: state.stats.last?.tokensSaved ?? 0,
 		tokensBefore: state.stats.last?.tokensBefore ?? 0,
 		tokensAfter: state.stats.last?.tokensAfter ?? 0,
-		proxyStatus: state.proxyOnline === true ? "online" : state.proxyStarting ? "starting" : state.proxyOnline === false ? "offline" : "unknown",
+		proxyStatus:
+			state.proxyOnline === true
+				? "online"
+				: state.proxyStarting
+					? "starting"
+					: state.proxyOnline === false
+						? "offline"
+						: "unknown",
 		error: state.stats.lastError ?? "",
 	};
 	const fallbackGlyph = resolveThemeGlyph(ctx.ui.theme, displayState);
@@ -458,30 +662,56 @@ function refreshStatus(
 		STATUS_KEY,
 		(tui) => {
 			let frame = 0;
+			let ponytailFrame = 0;
 			let timer: Timer | undefined;
+			let ponytailTimer: Timer | undefined;
 			let disposed = false;
 			const component = {
 				dispose() {
 					if (disposed) return;
 					disposed = true;
-					if (timer) {
-						ctx.clearTimer(timer);
-						timer = undefined;
-					}
+					if (timer) ctx.clearTimer(timer);
+					if (ponytailTimer) ctx.clearTimer(ponytailTimer);
+					timer = undefined;
+					ponytailTimer = undefined;
 				},
 				invalidate() {},
 				render(width: number): readonly string[] {
-					const text = renderDisplay(displayState, values, displayConfig, fallbackGlyph, frame, glyphAsset.frames);
+					const headroom =
+						showHeadroom && glyphAsset
+							? renderDisplay(displayState, values, displayConfig, fallbackGlyph, frame, glyphAsset.frames)
+							: "";
+					const ponytail =
+						showPonytail && ponytailStatus
+							? renderPonytailDisplay(
+									ponytailStatus,
+									displayConfig,
+									ponytailFrame,
+									ponytailGlyphAsset?.frames,
+								)
+							: "";
+					const text = renderStatusSegments(headroom, ponytail, displayConfig);
 					const clipped = truncateToWidth(text, width, "", false);
 					return [" ".repeat(Math.max(0, width - visibleWidth(clipped))) + clipped];
 				},
 			};
 
-			if (glyphAsset.fps !== undefined && glyphAsset.frames.length >= 2) {
+			if (glyphAsset?.fps !== undefined && glyphAsset.frames.length >= 2) {
 				const intervalMs = Math.max(1, Math.round(1000 / glyphAsset.fps));
 				timer = ctx.setInterval(() => {
 					if (disposed) return;
 					frame = (frame + 1) % glyphAsset.frames.length;
+					tui.requestComponentRender(component);
+				}, intervalMs);
+			}
+			if (
+				ponytailGlyphAsset?.fps !== undefined &&
+				ponytailGlyphAsset.frames.length >= 2
+			) {
+				const intervalMs = Math.max(1, Math.round(1000 / ponytailGlyphAsset.fps));
+				ponytailTimer = ctx.setInterval(() => {
+					if (disposed) return;
+					ponytailFrame = (ponytailFrame + 1) % ponytailGlyphAsset.frames.length;
 					tui.requestComponentRender(component);
 				}, intervalMs);
 			}
@@ -519,7 +749,9 @@ function renderStatus(config: HeadroomConfig, state: HeadroomRuntimeState): stri
 	const lines = [
 		"Headroom token compression",
 		`  Enabled: ${state.enabled ? "yes" : "no"}`,
-		`  Display: ${state.displayVisible ? "shown" : "hidden"}`,
+		`  Headroom display: ${state.displayVisible ? "shown" : "hidden"}`,
+		`  Ponytail display: ${state.ponytailDisplayVisible ? "shown" : "hidden"}`,
+		`  Original Ponytail status: ${state.ponytailNativeVisible ? "shown" : "hidden"}`,
 		`  Proxy:   ${config.baseUrl} (${state.proxyOnline === true ? "online" : state.proxyStarting ? "starting" : state.proxyOnline === false ? "not running" : "unknown"})`,
 		`  Auto-start: ${config.autoStart ? `yes (${config.command})` : "no"}`,
 		`  Shutdown: proxy is left running after Pi exits`,
@@ -585,10 +817,22 @@ function renderRemoteBlocked(config: HeadroomConfig): string {
 	].join("\n");
 }
 
+function parseDisplayAction(args: string): DisplayAction | undefined {
+	const tokens = args.trim().toLowerCase().split(/\s+/).filter(Boolean);
+	if (tokens.length === 0) return "status";
+	if (tokens.length === 1 && DISPLAY_ACTIONS.includes(tokens[0] as DisplayAction)) {
+		return tokens[0] as DisplayAction;
+	}
+	return undefined;
+}
+
 function parseCommand(args: string): ParsedCommand {
 	const tokens = args.trim().toLowerCase().split(/\s+/).filter(Boolean);
 	const command = tokens[0];
 	if (!command || !SUBCOMMANDS.includes(command as Subcommand)) return { command: "status" };
+	if (command === "display") {
+		return { command: "display", displayAction: parseDisplayAction(tokens.slice(1).join(" ")) };
+	}
 	if (command !== "init") return { command: command as Subcommand };
 	const target = tokens[1];
 	if (!target && tokens.length === 1) return { command: "init", initTarget: "all" };

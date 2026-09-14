@@ -27,7 +27,9 @@ type MockContext = {
 			content: RegisteredWidget["content"] | undefined,
 			options?: { placement?: string },
 		): void;
+		setStatus?(key: string, text: string | undefined): void;
 	};
+	sessionManager?: { getBranch(): unknown[] };
 	getContextUsage(): undefined;
 	model: undefined;
 	setInterval(callback: (...args: unknown[]) => void, ms?: number): ManagedTimer;
@@ -49,7 +51,7 @@ interface RegisteredWidget {
 
 
 describe("OMP Headroom extension", () => {
-	it("registers replacement commands and renders a right-aligned widget", async () => {
+	it("registers commands and independently renders merged and native Ponytail status", async () => {
 		const previousEnabled = process.env.PI_HEADROOM_ENABLED;
 		const displayRoot = fs.mkdtempSync(path.join(os.tmpdir(), "omp-headroom-index-widget-"));
 		const displayConfigPath = path.join(displayRoot, "display-config.json");
@@ -63,6 +65,7 @@ describe("OMP Headroom extension", () => {
 			let widget: RegisteredWidget | undefined;
 			const cleared: string[] = [];
 			const timers: ManagedTimer[] = [];
+			const nativeStatusWrites: Array<{ key: string; text: string | undefined }> = [];
 			const extensionApi = {
 				on(event: string, handler: ExtensionHandler) {
 					handlers.set(event, handler);
@@ -73,7 +76,7 @@ describe("OMP Headroom extension", () => {
 			};
 			headroomExtension(extensionApi as unknown as ExtensionAPI, { displayConfigPath });
 
-			expect([...commands.keys()]).toEqual(["headroom", "headroom-health"]);
+			expect([...commands.keys()]).toEqual(["headroom", "headroom-health", "ponytail-display", "ponytail-native"]);
 			expect(handlers.has("context")).toBe(true);
 			expect(handlers.has("session_start")).toBe(true);
 			expect(handlers.has("session_shutdown")).toBe(true);
@@ -84,11 +87,15 @@ describe("OMP Headroom extension", () => {
 					theme: { symbol: (key: string) => (key === "status.disabled" ? "D" : "?") },
 					notify() {},
 					confirm: async () => false,
+					setStatus(key, text) {
+						nativeStatusWrites.push({ key, text });
+					},
 					setWidget(key, content, options) {
 						if (content) widget = { key, content, placement: options?.placement };
 						else cleared.push(key);
 					},
 				},
+				sessionManager: { getBranch: () => [] },
 				getContextUsage() {
 					return undefined;
 				},
@@ -112,6 +119,33 @@ describe("OMP Headroom extension", () => {
 			expect(rendered).toHaveLength(40);
 			expect(rendered.endsWith("D Headroom off")).toBe(true);
 
+			context.ui.setStatus?.("ponytail", "○ 🐴 ponytail: ⚡ FULL");
+			const combined = widget?.content({}, context.ui.theme).render(80)[0] ?? "";
+			expect(combined.endsWith("○ 🐴 ponytail: ⚡ FULL  D Headroom off")).toBe(true);
+			expect(nativeStatusWrites).toEqual([{ key: "ponytail", text: undefined }]);
+
+			const nativeCommand = commands.get("ponytail-native");
+			expect(nativeCommand?.getArgumentCompletions?.("t")?.map((item) => item.value)).toEqual(["toggle"]);
+			await nativeCommand?.handler("on", context);
+			expect(nativeStatusWrites).toEqual([
+				{ key: "ponytail", text: undefined },
+				{ key: "ponytail", text: "○ 🐴 ponytail: ⚡ FULL" },
+			]);
+
+			await commands.get("ponytail-display")?.handler("off", context);
+			const headroomOnly = widget?.content({}, context.ui.theme).render(80)[0] ?? "";
+			expect(headroomOnly.endsWith("D Headroom off")).toBe(true);
+			expect(headroomOnly).not.toContain("ponytail:");
+			expect(JSON.parse(fs.readFileSync(displayConfigPath, "utf8"))).toMatchObject({
+				segments: { ponytail: { visible: false, nativeVisible: true } },
+			});
+			context.ui.setStatus?.("ponytail", "● 🐴 ponytail: 🔥 ULTRA");
+			expect(nativeStatusWrites.at(-1)).toEqual({ key: "ponytail", text: "● 🐴 ponytail: 🔥 ULTRA" });
+			await nativeCommand?.handler("off", context);
+			expect(nativeStatusWrites.at(-1)).toEqual({ key: "ponytail", text: undefined });
+			context.ui.setStatus?.("ponytail", "○ 🐴 ponytail: ⚡ FULL");
+			expect(nativeStatusWrites.at(-1)).toEqual({ key: "ponytail", text: undefined });
+
 			await handlers.get("session_shutdown")?.({}, context);
 			expect(cleared).toEqual(["headroom"]);
 		} finally {
@@ -120,7 +154,7 @@ describe("OMP Headroom extension", () => {
 			else process.env.PI_HEADROOM_ENABLED = previousEnabled;
 		}
 	});
-	it("toggles display visibility for the session without changing compression", async () => {
+	it("persists independent display visibility without changing compression", async () => {
 		const root = fs.mkdtempSync(path.join(os.tmpdir(), "omp-headroom-index-display-"));
 		const previousEnabled = process.env.PI_HEADROOM_ENABLED;
 		process.env.PI_HEADROOM_ENABLED = "0";
@@ -158,7 +192,9 @@ describe("OMP Headroom extension", () => {
 							cleared.push(key);
 						}
 					},
+					setStatus() {},
 				},
+				sessionManager: { getBranch: () => [] },
 				getContextUsage() {
 					return undefined;
 				},
@@ -175,31 +211,39 @@ describe("OMP Headroom extension", () => {
 			expect(widget).toBeUndefined();
 			expect(cleared).toEqual(["headroom"]);
 			expect(command?.getArgumentCompletions?.("d")?.map((item) => item.value)).toEqual(["display"]);
+			expect(command?.getArgumentCompletions?.("display ")?.map((item) => item.value)).toEqual([
+				"on",
+				"off",
+				"toggle",
+				"status",
+			]);
 
-			await command?.handler("display", context);
+			await command?.handler("display on", context);
 			expect(widget?.key).toBe("headroom");
 			expect(notifications[0]).toEqual({
-				message: "Headroom display shown for this Pi session.",
+				message: "Headroom display shown and saved.",
 				type: "info",
 			});
 
 			await command?.handler("status", context);
 			expect(notifications[1]?.message).toContain("Enabled: no");
-			expect(notifications[1]?.message).toContain("Display: shown");
+			expect(notifications[1]?.message).toContain("Headroom display: shown");
 
-			await command?.handler("display", context);
+			await command?.handler("display off", context);
 			expect(widget).toBeUndefined();
 			expect(notifications[2]).toEqual({
-				message: "Headroom display hidden for this Pi session.",
+				message: "Headroom display hidden and saved.",
 				type: "info",
 			});
 
 			await command?.handler("status", context);
-			expect(notifications[3]?.message).toContain("Enabled: no");
-			expect(notifications[3]?.message).toContain("Display: hidden");
-			expect(JSON.parse(fs.readFileSync(displayConfigPath, "utf8"))).toEqual({
-				visible: false,
-				glyphDirectory: root,
+			expect(notifications[3]?.message).toContain("Headroom display: hidden");
+			expect(JSON.parse(fs.readFileSync(displayConfigPath, "utf8"))).toMatchObject({
+				order: ["ponytail", "headroom"],
+				segments: {
+					headroom: { visible: false, glyphDirectory: root },
+					ponytail: { visible: true },
+				},
 			});
 		} finally {
 			if (previousEnabled === undefined) delete process.env.PI_HEADROOM_ENABLED;
@@ -214,8 +258,16 @@ describe("OMP Headroom extension", () => {
 		process.env.PI_HEADROOM_ENABLED = "0";
 		try {
 			const displayConfigPath = path.join(root, "display-config.json");
-			fs.writeFileSync(displayConfigPath, JSON.stringify({ visible: true, glyphDirectory: root }));
+			fs.writeFileSync(
+				displayConfigPath,
+				JSON.stringify({
+					visible: true,
+					glyphDirectory: root,
+					ponytail: { glyphDirectory: root },
+				}),
+			);
 			fs.writeFileSync(path.join(root, "off.txt"), "fps=16\nA\n\nB");
+			fs.writeFileSync(path.join(root, "full.txt"), "fps=8\nC\n\nD");
 			const { default: headroomExtension } = await import(`./index.ts?animation=${Date.now()}`);
 			const handlers = new Map<string, ExtensionHandler>();
 			const commands = new Map<string, CommandRegistration>();
@@ -239,6 +291,7 @@ describe("OMP Headroom extension", () => {
 					theme: { symbol: () => "D" },
 					notify() {},
 					confirm: async () => false,
+					setStatus() {},
 					setWidget(key, content, options) {
 						activeComponent?.dispose?.();
 						activeComponent = undefined;
@@ -249,6 +302,7 @@ describe("OMP Headroom extension", () => {
 						}
 					},
 				},
+				sessionManager: { getBranch: () => [] },
 				getContextUsage() {
 					return undefined;
 				},
@@ -264,6 +318,7 @@ describe("OMP Headroom extension", () => {
 			};
 
 			await handlers.get("session_start")?.({}, context);
+			context.ui.setStatus?.("ponytail", "○ 🐴 ponytail: ⚡ FULL");
 			const component = widget?.content(
 				{
 					requestComponentRender(requestedComponent: unknown) {
@@ -274,18 +329,20 @@ describe("OMP Headroom extension", () => {
 			);
 			if (!component) throw new Error("Headroom widget component was not created");
 			activeComponent = component;
-			expect(component.render(40)[0]?.endsWith("A Headroom off")).toBe(true);
-			expect(timers).toHaveLength(1);
-			expect(timers[0]?.ms).toBe(63);
+			expect(component.render(80)[0]?.endsWith("○ C ponytail: ⚡ FULL  A Headroom off")).toBe(true);
+			expect(timers).toHaveLength(2);
+			expect(timers.map((timer) => timer.ms)).toEqual([63, 125]);
 
 			timers[0]?.callback();
-			expect(renderRequests).toEqual([component]);
-			expect(component.render(40)[0]?.endsWith("B Headroom off")).toBe(true);
+			timers[1]?.callback();
+			expect(renderRequests).toEqual([component, component]);
+			expect(component.render(80)[0]?.endsWith("○ D ponytail: ⚡ FULL  B Headroom off")).toBe(true);
 
 			await commands.get("headroom")?.handler("off", context);
-			expect(timers[0]?.cleared).toBe(true);
+			expect(timers.every((timer) => timer.cleared)).toBe(true);
 			timers[0]?.callback();
-			expect(renderRequests).toHaveLength(1);
+			timers[1]?.callback();
+			expect(renderRequests).toHaveLength(2);
 
 			await handlers.get("session_shutdown")?.({}, context);
 			expect(cleared).toEqual(["headroom"]);
@@ -354,7 +411,7 @@ describe("OMP Headroom extension", () => {
 			]);
 			await command?.handler("init invalid", context);
 			expect(notifications[0]).toEqual({
-				message: "Usage: /headroom [on|off|status|display|health|stats|init [config|display|glyphs|all]]",
+				message: "Usage: /headroom [on|off|status|display [on|off|toggle|status]|health|stats|init [config|display|glyphs|all]]",
 				type: "warning",
 			});
 

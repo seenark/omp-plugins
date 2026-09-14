@@ -8,8 +8,10 @@ This plugin replaces the existing Pi Headroom extension behavior in OMP:
 - Preserves user messages, assistant messages, tool-call metadata, and images.
 - Starts and health-checks a persistent local Headroom proxy.
 - Keeps the existing `/headroom` and `/headroom-health` commands.
-- Shows a custom one-line status widget aligned to the bottom-right below the prompt box.
-- Supports per-state status templates and per-state glyph files.
+- Renders one configurable, right-aligned `belowEditor` widget from ordered Headroom and Ponytail segments.
+- Captures Ponytail's status without modifying the Ponytail extension.
+- Hides Ponytail's original native status by default, with a separate slash command to show it again.
+- Supports per-state status templates and animated per-state glyph files.
 
 Quota/subscription usage is intentionally not included.
 
@@ -113,9 +115,12 @@ omp plugin uninstall @codesook/omp-headroom
 
 With the default settings, compression is enabled at session start and the
 plugin tries to start a persistent local proxy at
-`http://127.0.0.1:8788`. `/headroom health` checks the proxy immediately;
-`/headroom on` and `/headroom off` change compression for the current session
-only. The proxy is intentionally left running when OMP exits.
+`http://127.0.0.1:8788`. The custom widget defaults to Ponytail first, then
+Headroom. Ponytail's original native status is hidden by default; the custom
+segment remains independent from Ponytail's mode and rules. `/headroom health`
+checks the proxy immediately; `/headroom on` and `/headroom off` change
+compression for the current session only. The proxy is intentionally left
+running when OMP exits.
 
 To create the configuration, display file, and seven glyph files interactively:
 
@@ -148,7 +153,7 @@ By default, remote proxy URLs are blocked because conversation context is sent t
 /headroom status
 /headroom on
 /headroom off
-/headroom display
+/headroom display [on|off|toggle|status]
 /headroom health
 /headroom stats
 /headroom init
@@ -157,14 +162,17 @@ By default, remote proxy URLs are blocked because conversation context is sent t
 /headroom init glyphs
 /headroom init all
 /headroom-health
+/ponytail-display [on|off|toggle|status]
+/ponytail-native [on|off|toggle|status]
 ```
 
 | Command | Behavior |
-| --- | --- |
-| `/headroom` or `/headroom status` | Shows current configuration and session statistics, including whether the widget is shown. |
+| `/headroom` or `/headroom status` | Shows compression state, session statistics, and all display visibility settings. |
 | `/headroom on` | Enables compression for the current session and ensures the proxy is running. |
 | `/headroom off` | Disables compression for the current session; leaves the proxy running. |
-| `/headroom display` | Toggles only the status widget for the current OMP session; does not change compression or persist a file. |
+| `/headroom display on\|off\|toggle\|status` | Controls only the Headroom segment and persists `segments.headroom.visible`; no argument reports status. |
+| `/ponytail-display on\|off\|toggle\|status` | Controls only the captured Ponytail segment and persists `segments.ponytail.visible`; no argument reports status and Ponytail itself remains active. |
+| `/ponytail-native on\|off\|toggle\|status` | Shows or hides Ponytail's original native status and persists `segments.ponytail.nativeVisible`; no argument reports status and the default is hidden. |
 | `/headroom health` | Checks the proxy and attempts auto-start when configured. |
 | `/headroom stats` | Displays the proxy's `/stats` response. |
 | `/headroom init` or `/headroom init all` | Creates or individually confirms replacement of all nine OMP Headroom defaults. |
@@ -173,7 +181,7 @@ By default, remote proxy URLs are blocked because conversation context is sent t
 | `/headroom init glyphs` | Initializes the seven per-state glyph files in `~/.config/codesook-omp/headroom/`. |
 | `/headroom-health` | Shortcut for `/headroom health`. |
 
-Initialization creates parent directories as needed. Existing files are confirmed independently; declining a prompt preserves that file and reports it as skipped. The generated display file is direct JSON with `visible: true`, and generated glyphs are static one-frame `.txt` files using the active OMP theme symbols with Unicode fallbacks.
+Initialization creates parent directories as needed. Existing files are confirmed independently; declining a prompt preserves that file and reports it as skipped. The generated display file contains the default `ponytail`, then `headroom`, segment order. Generated glyphs are static one-frame `.txt` files using the active OMP theme symbols with Unicode fallbacks.
 
 ## Operational configuration
 
@@ -235,13 +243,17 @@ If both files are valid, only the OMP-specific file is used; settings are not me
 
 OMP does not currently expose an extension API for adding a custom ID to the native `statusLine.leftSegments` or `statusLine.rightSegments` arrays. This plugin therefore does not modify OMP core or the prompt-border editor.
 
-The plugin renders one line through the supported `belowEditor` widget surface:
+The plugin renders one custom line through the supported `belowEditor` widget surface:
 
 ```text
-                         ✓ Headroom -32% (1,234 saved)
+              ○ 🐴 ponytail: ⚡ FULL  ✓ Headroom -32% (1,234 saved)
 ```
 
-The widget is right-aligned directly below the prompt box. It is not a native status-line segment and cannot be reordered with built-in segments such as `model`, `path`, or `context_pct`.
+The widget is right-aligned directly below the prompt box. It is not a native
+status-line segment and cannot be reordered with built-in segments such as
+`model`, `path`, or `context_pct`. `/ponytail-native on` independently restores
+Ponytail's original native status, so both Ponytail outputs may be visible at
+once; `/ponytail-native off` hides only that original output.
 
 ## Display configuration
 
@@ -251,29 +263,68 @@ Display settings use a dedicated file:
 ~/.config/codesook-omp/headroom/display-config.json
 ```
 
-The file contains the display configuration directly:
+The file contains an ordered set of independently configurable segments:
 
 ```json
 {
-  "visible": true,
-  "glyphDirectory": "~/.config/codesook-omp/headroom",
-  "status": {
-    "off": "{icon} HR disabled",
-    "online": "{icon} Headroom ready",
-    "compressed": "{icon} saved {tokensSaved} tokens ({compressionPercent}%)",
-    "offline": "{icon} proxy offline"
+  "order": ["ponytail", "headroom"],
+  "separator": "  ",
+  "segments": {
+    "ponytail": {
+      "visible": true,
+      "nativeVisible": false,
+      "glyphDirectory": "~/.config/codesook-omp/ponytail",
+      "template": "{activity} {glyph} ponytail: {modeIcon}{mode}"
+    },
+    "headroom": {
+      "visible": true,
+      "glyphDirectory": "~/.config/codesook-omp/headroom",
+      "template": "{status}",
+      "status": {
+        "off": "{glyph} HR disabled",
+        "online": "{glyph} Headroom ready",
+        "compressed": "{glyph} saved {tokensSaved} tokens ({compressionPercent}%)",
+        "offline": "{glyph} proxy offline"
+      }
+    }
   }
 }
 ```
 
-`visible` controls the widget's startup state only. Set `"visible": false` to start a session with the widget hidden; omitting `visible` keeps it shown. `/headroom display` changes this setting only for the current OMP session and never writes the display configuration file.
+`order` controls placement. Omitting the field uses `["ponytail", "headroom"]`. Omitting a segment from
+`order` hides only that custom display segment; it does not disable Headroom compression or Ponytail rules.
+Unknown future segment names are ignored until the plugin implements them. `separator` joins the rendered segments.
 
-`templates` is also accepted as an alias for `status`.
+`segments.headroom.visible` and `segments.ponytail.visible` control the custom
+segments independently. A custom segment must be both visible and present in
+`order` to render. `segments.ponytail.nativeVisible` is separate: it controls
+whether the captured `setStatus("ponytail", ...)` text is forwarded to OMP's
+original native status surface. It does not depend on `order` or custom segment
+visibility. `/headroom display ...` controls Headroom; `/ponytail-display ...`
+controls the merged Ponytail segment; `/ponytail-native ...` controls the
+original native status. Enabling both Ponytail outputs intentionally shows both.
 
-Supported placeholders:
+Ponytail's original `setStatus("ponytail", ...)` output is captured while this
+extension is active. It is suppressed by default, and `/ponytail-native on`
+forwards the latest captured text without changing Ponytail source files.
+Do not set `PONYTAIL_HIDE_STATUS=1` or Ponytail `hideStatus: true`: Headroom
+needs those status writes to observe live mode changes and cannot restore output
+that Ponytail never emits.
+
+Ponytail segment placeholders:
 
 ```text
-{icon}
+{activity}
+{glyph}
+{modeIcon}
+{mode}
+```
+
+Headroom segment placeholders:
+
+```text
+{status}
+{glyph}
 {state}
 {label}
 {compressionPercent}
@@ -283,6 +334,12 @@ Supported placeholders:
 {proxyStatus}
 {error}
 ```
+
+`{status}` is the rendered per-state entry from `segments.headroom.status`; the other placeholders provide flat
+values for fully custom Headroom templates. Legacy direct display files with root-level Headroom fields are
+accepted and normalized in memory, including the older `status`/`templates`, `visible`, `glyphDirectory`, and
+Ponytail settings. The first display or native-status command that persists a visibility change rewrites them into
+the segment shape above.
 
 Default status text remains compatible with the Pi extension:
 
@@ -334,7 +391,32 @@ fps=16
 
 Blank-line-separated blocks are frames, and each block is rendered as one glyph frame. A malformed, zero, negative, or otherwise invalid `fps=` value is removed and disables animation; the actual glyph frames still load and the widget uses the first one. Missing or empty files fall back to the active OMP theme symbol. The current `off.txt` style can remain static as-is; add `fps=16` before its first frame when animation is wanted.
 
-A custom `glyphDirectory` may be set in the `headroom` display configuration. Paths beginning with `~/` are expanded against the current user's home directory.
+A custom Headroom glyph directory may be set at `segments.headroom.glyphDirectory`. Paths beginning with `~/` are expanded against the current user's home directory.
+
+### Per-mode Ponytail glyph files
+
+Ponytail glyphs use the same file format and optional `fps=` animation directive. Put them in
+`segments.ponytail.glyphDirectory`:
+
+```text
+off.txt
+lite.txt
+full.txt
+ultra.txt
+review.txt
+```
+
+For example, `full.txt` can contain:
+
+```text
+fps=16
+􁩱􁩲
+
+􁩳􁩴
+```
+
+The active file follows Ponytail's captured mode. Missing files fall back to `🐴`. `off` hides only the custom
+Ponytail portion while keeping the Headroom row; `/ponytail-native` controls the original native status separately.
 
 ## Privacy and remote proxies
 
@@ -400,6 +482,13 @@ PI_HEADROOM_ALLOW_REMOTE=1 omp
 ```
 
 This sends conversation context to that remote service.
+
+### Duplicate Ponytail status
+
+If both the custom Ponytail segment and the original native status are visible,
+use `/ponytail-display off` to hide the custom segment or `/ponytail-native off`
+to hide the original status. These commands do not change Ponytail's active mode,
+rules, or session behavior.
 
 
 ## Development

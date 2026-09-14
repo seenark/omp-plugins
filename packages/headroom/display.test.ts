@@ -5,20 +5,32 @@ import * as path from "node:path";
 import {
 	DEFAULT_DISPLAY_CONFIG,
 	DEFAULT_GLYPHS,
+	DEFAULT_HEADROOM_SEGMENT_TEMPLATE,
+	DEFAULT_PONYTAIL_GLYPH_DIRECTORY,
+	DEFAULT_PONYTAIL_TEMPLATE,
 	DEFAULT_TEMPLATES,
 	isDisplayVisible,
+	isPonytailNativeVisible,
 	loadDisplayConfig,
 	loadGlyph,
 	loadGlyphAsset,
 	loadGlyphFrames,
+	loadPonytailGlyphAsset,
+	normalizeDisplayConfig,
+	parsePonytailStatus,
 	renderDisplay,
+	renderPonytailDisplay,
+	renderStatusSegments,
+	resolvePonytailSessionStatus,
 	resolveThemeGlyph,
 	widgetState,
+	writeDisplaySegmentVisibility,
+	writePonytailNativeVisibility,
 	type DisplayValues,
 } from "./display.ts";
 import { buildHeadroomInitFiles } from "./init.ts";
 
-const values: Omit<DisplayValues, "icon" | "state"> = {
+const values: Omit<DisplayValues, "glyph" | "state"> = {
 	label: "Headroom",
 	compressionPercent: 32,
 	tokensSaved: 1234,
@@ -31,13 +43,13 @@ const values: Omit<DisplayValues, "icon" | "state"> = {
 describe("Headroom display", () => {
 	it("exports the complete direct display defaults", () => {
 		expect(DEFAULT_TEMPLATES).toEqual({
-			off: "{icon} Headroom off",
-			"remote-blocked": "{icon} Headroom remote blocked",
-			starting: "{icon} Headroom starting",
-			offline: "{icon} Headroom not running",
-			idle: "{icon} Headroom idle",
-			online: "{icon} Headroom",
-			compressed: "{icon} Headroom -{compressionPercent}% ({tokensSaved} saved)",
+			off: "{glyph} Headroom off",
+			"remote-blocked": "{glyph} Headroom remote blocked",
+			starting: "{glyph} Headroom starting",
+			offline: "{glyph} Headroom not running",
+			idle: "{glyph} Headroom idle",
+			online: "{glyph} Headroom",
+			compressed: "{glyph} Headroom -{compressionPercent}% ({tokensSaved} saved)",
 		});
 		expect(DEFAULT_GLYPHS).toEqual({
 			off: "○",
@@ -49,13 +61,30 @@ describe("Headroom display", () => {
 			compressed: "✓",
 		});
 		expect(DEFAULT_DISPLAY_CONFIG).toEqual({
-			visible: true,
-			glyphDirectory: "~/.config/codesook-omp/headroom",
-			status: DEFAULT_TEMPLATES,
+			order: ["ponytail", "headroom"],
+			separator: "  ",
+			segments: {
+				ponytail: {
+					visible: true,
+					nativeVisible: false,
+					glyphDirectory: DEFAULT_PONYTAIL_GLYPH_DIRECTORY,
+					template: DEFAULT_PONYTAIL_TEMPLATE,
+				},
+				headroom: {
+					visible: true,
+					glyphDirectory: "~/.config/codesook-omp/headroom",
+					template: DEFAULT_HEADROOM_SEGMENT_TEMPLATE,
+					status: DEFAULT_TEMPLATES,
+				},
+			},
 		});
 		expect(isDisplayVisible({})).toBe(true);
-		expect(isDisplayVisible({ visible: false })).toBe(false);
-		expect(isDisplayVisible({ visible: "false" as unknown as boolean })).toBe(true);
+		expect(isDisplayVisible({ segments: { headroom: { visible: false } } })).toBe(false);
+		expect(
+			isDisplayVisible({ segments: { headroom: { visible: "false" as unknown as boolean } } }),
+		).toBe(true);
+		expect(isPonytailNativeVisible({})).toBe(false);
+		expect(isPonytailNativeVisible({ segments: { ponytail: { nativeVisible: true } } })).toBe(true);
 	});
 
 	it("uses theme symbols for generated glyph defaults and falls back when empty", () => {
@@ -74,10 +103,14 @@ describe("Headroom display", () => {
 		const directory = fs.mkdtempSync(path.join(os.tmpdir(), "omp-headroom-glyphs-"));
 		try {
 			fs.writeFileSync(path.join(directory, "compressed.txt"), "A B");
-			const config = {
-				glyphDirectory: directory,
-				status: { compressed: "{icon} {label} -{compressionPercent}% {tokensSaved}" },
-			};
+			const config = normalizeDisplayConfig({
+				segments: {
+					headroom: {
+						glyphDirectory: directory,
+						status: { compressed: "{glyph} {label} -{compressionPercent}% {tokensSaved}" },
+					},
+				},
+			});
 
 			expect(loadGlyphFrames("compressed", config)).toEqual(["A", "B"]);
 			expect(loadGlyph("compressed", config, "fallback", 1)).toBe("B");
@@ -88,7 +121,7 @@ describe("Headroom display", () => {
 	});
 	it("parses legacy, multi-character, and opt-in animated glyph assets", () => {
 		const directory = fs.mkdtempSync(path.join(os.tmpdir(), "omp-headroom-glyph-assets-"));
-		const config = { glyphDirectory: directory };
+		const config = normalizeDisplayConfig({ segments: { headroom: { glyphDirectory: directory } } });
 		try {
 			fs.writeFileSync(path.join(directory, "off.txt"), "\n  fps=16  \nAB\n\nCD\n");
 			expect(loadGlyphAsset("off", config)).toEqual({ frames: ["AB", "CD"], fps: 16 });
@@ -110,11 +143,58 @@ describe("Headroom display", () => {
 		}
 	});
 
+	it("renders captured Ponytail mode with its own animated glyph on the Headroom line", () => {
+		const directory = fs.mkdtempSync(path.join(os.tmpdir(), "omp-ponytail-glyph-assets-"));
+		const config = normalizeDisplayConfig({
+			separator: " | ",
+			segments: {
+				ponytail: {
+					glyphDirectory: directory,
+					template: "{activity} {glyph} ponytail: {modeIcon}{mode}",
+				},
+			},
+		});
+		try {
+			fs.writeFileSync(path.join(directory, "full.txt"), "fps=8\nA\n\nB");
+			const status = parsePonytailStatus("\u001b[2m●\u001b[0m 🐴 ponytail: ⚡ FULL");
+			expect(status).toEqual({ active: true, mode: "full" });
+			if (!status) throw new Error("Ponytail status did not parse");
+			expect(loadPonytailGlyphAsset(status, config)).toEqual({ frames: ["A", "B"], fps: 8 });
+			const ponytail = renderPonytailDisplay(status, config, 1, ["A", "B"]);
+			expect(ponytail).toBe("● B ponytail: ⚡ FULL");
+			expect(renderStatusSegments("✓ Headroom", ponytail, config)).toBe(
+				"● B ponytail: ⚡ FULL | ✓ Headroom",
+			);
+			config.order = ["headroom", "ponytail"];
+			expect(renderStatusSegments("✓ Headroom", ponytail, config)).toBe(
+				"✓ Headroom | ● B ponytail: ⚡ FULL",
+			);
+			config.order = ["headroom"];
+			expect(renderStatusSegments("✓ Headroom", ponytail, config)).toBe("✓ Headroom");
+			expect(parsePonytailStatus("")).toEqual({ active: false, mode: "off" });
+			expect(renderPonytailDisplay({ active: false, mode: "off" }, config)).toBe("");
+			expect(
+				resolvePonytailSessionStatus([
+					{ type: "custom", customType: "ponytail-mode", data: { mode: "lite" } },
+					{ type: "custom", customType: "ponytail-mode", data: { mode: "ultra" } },
+				]),
+			).toEqual({ active: false, mode: "ultra" });
+		} finally {
+			fs.rmSync(directory, { recursive: true, force: true });
+		}
+	});
+
 	it("renders preloaded glyph frames without rereading the asset", () => {
-		const config = {
-			glyphDirectory: "/path/that/does/not/exist",
-			status: { compressed: "{icon} {label} -{compressionPercent}% {tokensSaved} {state} {proxyStatus}" },
-		};
+		const config = normalizeDisplayConfig({
+			segments: {
+				headroom: {
+					glyphDirectory: "/path/that/does/not/exist",
+					status: {
+						compressed: "{glyph} {label} -{compressionPercent}% {tokensSaved} {state} {proxyStatus}",
+					},
+				},
+			},
+		});
 
 		expect(renderDisplay("compressed", values, config, "fallback", 1, ["A", "B"])).toBe(
 			"B Headroom -32% 1,234 compressed online",
@@ -122,9 +202,10 @@ describe("Headroom display", () => {
 	});
 
 	it("uses the OMP symbol fallback when a state file is absent", () => {
-		expect(renderDisplay("online", values, { glyphDirectory: "/path/that/does/not/exist" }, "●")).toBe(
-			"● Headroom",
-		);
+		const config = normalizeDisplayConfig({
+			segments: { headroom: { glyphDirectory: "/path/that/does/not/exist" } },
+		});
+		expect(renderDisplay("online", values, config, "●")).toBe("● Headroom");
 	});
 
 	it("reads the dedicated display-config.json shape", () => {
@@ -139,9 +220,29 @@ describe("Headroom display", () => {
 				}),
 			);
 
-			expect(loadDisplayConfig(configPath)).toEqual({
-				status: { idle: "{icon} waiting" },
-				glyphDirectory: "~/.config/codesook-omp/headroom",
+			expect(loadDisplayConfig(configPath)).toMatchObject({
+				order: ["ponytail", "headroom"],
+				segments: {
+					headroom: {
+						glyphDirectory: "~/.config/codesook-omp/headroom",
+						status: { idle: "{glyph} waiting" },
+					},
+				},
+			});
+			writeDisplaySegmentVisibility("ponytail", false, configPath);
+			expect(JSON.parse(fs.readFileSync(configPath, "utf8"))).toMatchObject({
+				order: ["ponytail", "headroom"],
+				segments: {
+					ponytail: { visible: false },
+					headroom: {
+						visible: true,
+						status: { idle: "{glyph} waiting" },
+					},
+				},
+			});
+			writePonytailNativeVisibility(true, configPath);
+			expect(JSON.parse(fs.readFileSync(configPath, "utf8"))).toMatchObject({
+				segments: { ponytail: { visible: false, nativeVisible: true } },
 			});
 		} finally {
 			fs.rmSync(directory, { recursive: true, force: true });
