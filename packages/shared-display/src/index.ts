@@ -804,6 +804,8 @@ function sharedDisplaySettingsItems(
 			currentValue: String(draft.enabled),
 			values: ["true", "false"],
 			changed: draft.enabled !== DEFAULT_SHARED_DISPLAY_CONFIG.enabled,
+			description:
+				"Enable the Shared Display host and composed status widget. False removes the widget and stops host-controlled Ponytail routing until re-enabled.",
 		},
 		{
 			id: "layout",
@@ -811,6 +813,8 @@ function sharedDisplaySettingsItems(
 			currentValue: draft.layout,
 			values: ["horizontal", "vertical"],
 			changed: draft.layout !== DEFAULT_SHARED_DISPLAY_CONFIG.layout,
+			description:
+				"Arrange configured sources side by side (horizontal) or in stacked rows (vertical).",
 		},
 		{
 			id: "order",
@@ -818,6 +822,8 @@ function sharedDisplaySettingsItems(
 			currentValue: draft.order.join(", "),
 			submenu: (current, done) => inputSubmenu(current, done),
 			changed: draft.order.join(",") !== DEFAULT_SHARED_DISPLAY_CONFIG.order.join(","),
+			description:
+				"Comma-separated source order: ponytail, caveman, headroom. Unknown names and duplicates are discarded; blank shows no sources.",
 		},
 		{
 			id: "widgetPlacement",
@@ -825,18 +831,23 @@ function sharedDisplaySettingsItems(
 			currentValue: draft.widgetPlacement,
 			values: ["aboveEditor", "belowEditor"],
 			changed: draft.widgetPlacement !== DEFAULT_SHARED_DISPLAY_CONFIG.widgetPlacement,
+			description: "Mount the shared widget above or below the prompt editor.",
 		},
 		{
 			id: "horizontalSeparator",
 			label: "Horizontal separator",
 			currentValue: draft.horizontalSeparator,
 			submenu: (current, done) => inputSubmenu(current, done),
+			description:
+				"Text inserted between sources in horizontal layout. Must be one line; an empty string is allowed.",
 		},
 		{
 			id: "verticalGapRows",
 			label: "Vertical gap rows",
 			currentValue: String(draft.verticalGapRows),
 			submenu: (current, done) => inputSubmenu(current, done),
+			description:
+				"Blank rows inserted between sources in vertical layout. Enter an integer from 0 through 10.",
 		},
 		{ id: "ponytail", label: "Ponytail", currentValue: "", heading: true },
 		{
@@ -844,31 +855,68 @@ function sharedDisplaySettingsItems(
 			label: "Visible",
 			currentValue: String(draft.ponytail.visible),
 			values: ["true", "false"],
+			description:
+				"Include Ponytail frames in Shared Display. This does not control Ponytail's native footer status.",
 		},
 		{
 			id: "ponytail.nativeVisible",
 			label: "Native status",
 			currentValue: String(draft.ponytail.nativeVisible),
 			values: ["true", "false"],
+			description:
+				"Show captured Ponytail status in OMP's native footer while Shared Display is enabled. Independent of the Ponytail widget row.",
 		},
 		{
 			id: "ponytail.template",
 			label: "Template",
 			currentValue: draft.ponytail.template,
 			submenu: (current, done) => inputSubmenu(current, done),
+			description:
+				"Ponytail format. Tokens: {activity}=●/○, {glyph}=current frame, {mode}=uppercase mode, {modeIcon}=mode icon; other text stays literal.",
 		},
 		{
 			id: "ponytail.glyphDirectory",
 			label: "Glyph directory",
 			currentValue: draft.ponytail.glyphDirectory,
 			submenu: (current, done) => inputSubmenu(current, done),
+			description:
+				"Directory for off.txt, lite.txt, full.txt, ultra.txt, review.txt (off renders nothing). Optional positive fps=N; whitespace frames or blank-line blocks. Invalid/missing files use packaged assets; ~ means home.",
 		},
 		{ id: "actions", label: "Actions", currentValue: "", heading: true },
-		{ id: "show-paths", label: "Show paths", currentValue: "Enter" },
-		{ id: "initialize-assets", label: "Initialize missing assets", currentValue: "Enter" },
-		{ id: "reload", label: "Reload from disk", currentValue: "Enter" },
-		{ id: "apply", label: "Apply changes", currentValue: "Enter" },
-		{ id: "cancel", label: "Cancel", currentValue: "Enter" },
+		{
+			id: "show-paths",
+			label: "Show paths",
+			currentValue: "Enter",
+			description: "Show the active config.json path and draft Ponytail Glyph directory.",
+		},
+		{
+			id: "initialize-assets",
+			label: "Initialize missing assets",
+			currentValue: "Enter",
+			description:
+				"Create only missing off.txt, lite.txt, full.txt, ultra.txt, and review.txt in the draft directory; existing files stay untouched and created files remain after Cancel.",
+		},
+		{
+			id: "reload",
+			label: "Reload from disk",
+			currentValue: "Enter",
+			description:
+				"Discard draft edits and reread config.json; live settings stay unchanged until Apply.",
+		},
+		{
+			id: "apply",
+			label: "Apply changes",
+			currentValue: "Enter",
+			description:
+				"Validate every field, atomically save config.json, and activate this draft.",
+		},
+		{
+			id: "cancel",
+			label: "Cancel",
+			currentValue: "Enter",
+			description:
+				"Close without saving draft edits or changing live settings; initialized asset files remain on disk.",
+		},
 	];
 }
 

@@ -443,6 +443,12 @@ const CONTEXT_RAIL_POSITIONS = ["left", "center", "right"] as const satisfies re
 const CONTEXT_RAIL_LABEL_GLYPH_VISIBILITIES = ["on", "off"] as const;
 const CONTEXT_RAIL_MODES = ["compact", "full", "custom"] as const;
 const CONTEXT_RAIL_MEANING_PLACEMENTS = ["top", "below", "beside"] as const;
+const CONTEXT_RAIL_ROLE_PURPOSES = {
+	speculation: "speculative-compaction boundary",
+	pointer: "current-context usage",
+	compaction: "automatic-compaction threshold",
+	maximum: "100% context-window edge",
+} satisfies Record<ContextRailRole, string>;
 const GLYPH_TEXT_FILE_NAMES = {
 	left: "prompt-border-left-glyphs.txt",
 	right: "prompt-border-right-glyphs.txt",
@@ -2428,7 +2434,7 @@ function inputSetting(
 	label: string,
 	currentValue: string,
 	onSubmit: (value: string) => void,
-	description?: string,
+	description: string,
 ): SettingItem {
 	return {
 		id,
@@ -2452,7 +2458,7 @@ function inputSetting(
 	};
 }
 
-function selectSetting(id: string, label: string, currentValue: string, values: readonly string[], description?: string): SettingItem {
+function selectSetting(id: string, label: string, currentValue: string, values: readonly string[], description: string): SettingItem {
 	return {
 		id,
 		label,
@@ -2501,17 +2507,17 @@ class PromptBorderSettingsDialog implements Component {
 	private createSettingsList(): SettingsList {
 		const items: SettingItem[] = [
 			{ id: "heading.config", label: "Config", currentValue: "", heading: true },
-			selectSetting("style", "Style", String(this.#draft.style), STYLE_NAMES),
-			selectSetting("layout", "Layout", String(this.#draft.layout), LAYOUT_NAMES),
+			selectSetting("style", "Style", String(this.#draft.style), STYLE_NAMES, "Glyph set used to draw the prompt editor border; choose from the listed built-in styles."),
+			selectSetting("layout", "Layout", String(this.#draft.layout), LAYOUT_NAMES, "Edges to draw: full=all, bottom=sides+bottom, sides=sides only, top-bottom=no sides, default=OMP's native box layout."),
 			inputSetting("left.frameMs", "Left glyph frameMs", String(this.#draft.leftGlyph.frameMs), value => {
 				this.#draft.leftGlyph.frameMs = Number(value);
-			}),
+			}, "Milliseconds between frames from prompt-border-left-glyphs.txt beside config.json. Range 16-1000 ms; whitespace separates frames. Missing/blank files use theme frames."),
 			inputSetting("right.frameMs", "Right glyph frameMs", String(this.#draft.rightGlyph.frameMs), value => {
 				this.#draft.rightGlyph.frameMs = Number(value);
-			}),
+			}, "Milliseconds between frames from prompt-border-right-glyphs.txt beside config.json. Range 16-1000 ms; whitespace separates frames. Missing/blank files use theme frames."),
 			inputSetting("spinner.status.frameMs", "Status spinner frameMs", String(this.#draft.spinnerGlyphs.status.frameMs), value => {
 				this.#draft.spinnerGlyphs.status.frameMs = Number(value);
-			}),
+			}, "Frame time for prompt-border-status-spinner-glyphs.txt beside config.json. Range 16-1000 ms; OMP's 80 ms tick may repeat/skip. Missing/blank files use theme frames."),
 			inputSetting(
 				"spinner.activity.frameMs",
 				"Activity spinner frameMs",
@@ -2519,6 +2525,7 @@ class PromptBorderSettingsDialog implements Component {
 				value => {
 					this.#draft.spinnerGlyphs.activity.frameMs = Number(value);
 				},
+				"Frame time for prompt-border-activity-spinner-glyphs.txt beside config.json. Range 16-1000 ms; OMP's 80 ms tick may repeat/skip. Missing/blank files use theme frames.",
 			),
 			{ id: "heading.display", label: "Context Rail", currentValue: "", heading: true },
 			{
@@ -2526,20 +2533,22 @@ class PromptBorderSettingsDialog implements Component {
 				label: "Enabled",
 				currentValue: String(this.#draft.contextRail.enabled),
 				values: ["true", "false"],
+				description: "Persistently enable Context Rail rendering. /prompt-border rail toggle changes only the current session.",
 			},
-			selectSetting("rail.placement", "Placement", this.#draft.contextRail.placement, CONTEXT_RAIL_PLACEMENTS),
-			selectSetting("rail.visibility", "Visibility", this.#draft.contextRail.visibility, CONTEXT_RAIL_VISIBILITIES),
-			selectSetting("rail.mode", "Mode", this.#draft.contextRail.mode, CONTEXT_RAIL_MODES),
+			selectSetting("rail.placement", "Placement", this.#draft.contextRail.placement, CONTEXT_RAIL_PLACEMENTS, "Place the rail inside the prompt editor or in a separate widget above or below it."),
+			selectSetting("rail.visibility", "Visibility", this.#draft.contextRail.visibility, CONTEXT_RAIL_VISIBILITIES, "always keeps the rail shown; toggle follows the session toggle; collapse-while-typing currently looks the same as toggle in marker rendering."),
+			selectSetting("rail.mode", "Mode", this.#draft.contextRail.mode, CONTEXT_RAIL_MODES, "Marker detail: compact shows tiles plus percent; full also shows context window and meanings; custom uses one template per role."),
 			inputSetting("rail.glyphDirectory", "Glyph directory", this.#draft.contextRail.glyphDirectory, value => {
 				this.#draft.contextRail.glyphDirectory = value;
-			}),
-			selectSetting("rail.labels", "Labels", this.#draft.contextRail.labels, CONTEXT_RAIL_LABELS),
-			selectSetting("rail.labelPosition", "Label position", this.#draft.contextRail.labelPosition, CONTEXT_RAIL_POSITIONS),
+			}, "Directory for label.txt, speculation.txt, pointer.txt, compaction.txt, and maximum.txt unless a Frames file changes. Supports fps=N, size=WxH, whitespace frames or blank-line blocks; ~ means home."),
+			selectSetting("rail.labels", "Labels", this.#draft.contextRail.labels, CONTEXT_RAIL_LABELS, "Legacy continuous-gauge percentage-label policy. Current compact/full/custom marker rendering ignores this setting."),
+			selectSetting("rail.labelPosition", "Label position", this.#draft.contextRail.labelPosition, CONTEXT_RAIL_POSITIONS, "Legacy percentage-label/art alignment. Current compact/full/custom marker rendering ignores this setting."),
 			{
 				id: "rail.showLabelGlyph",
 				label: "Show label glyph",
 				currentValue: String(this.#draft.contextRail.showLabelGlyph !== false),
 				values: ["true", "false"],
+				description: "Legacy label.txt art switch. Current compact/full/custom marker rendering ignores this setting.",
 			},
 			...CONTEXT_RAIL_ROLES.flatMap(role => {
 				const roleConfig = this.#draft.contextRail[role];
@@ -2547,13 +2556,13 @@ class PromptBorderSettingsDialog implements Component {
 					{ id: `rail.${role}.heading`, label: role, currentValue: "", heading: true } satisfies SettingItem,
 					inputSetting(`rail.${role}.framesFile`, "Frames file", roleConfig.framesFile, value => {
 						roleConfig.framesFile = value;
-					}),
+					}, `File joined to Glyph directory for the ${CONTEXT_RAIL_ROLE_PURPOSES[role]} marker. Default: ${DEFAULT_CONTEXT_RAIL_CONFIG[role].framesFile}. Missing/unreadable files use the theme fallback.`),
 					inputSetting(`rail.${role}.fps`, "FPS (blank = asset)", roleConfig.fps === undefined ? "" : String(roleConfig.fps), value => {
 						roleConfig.fps = value.trim().length === 0 ? undefined : Number(value);
-					}),
+					}, `Positive FPS override for the ${CONTEXT_RAIL_ROLE_PURPOSES[role]} marker. Blank uses the asset fps= header; without either, multiple frames stay static.`),
 					inputSetting(`rail.${role}.meaning`, "Meaning", roleConfig.meaning, value => {
 						roleConfig.meaning = value;
-					}),
+					}, `Nonempty label for the ${CONTEXT_RAIL_ROLE_PURPOSES[role]} marker. Full mode and custom {text-meaning} use it; placement may omit it when space is unavailable.`),
 					...(role === "pointer"
 						? [
 								selectSetting(
@@ -2561,6 +2570,7 @@ class PromptBorderSettingsDialog implements Component {
 									"Pointer visibility",
 									this.#draft.contextRail.pointer.visibility,
 									CONTEXT_RAIL_POINTERS,
+									"Current-usage marker: hidden suppresses it; auto and visible both request it in marker modes, subject to collisions and available width.",
 								),
 							]
 						: []),
@@ -2572,21 +2582,22 @@ class PromptBorderSettingsDialog implements Component {
 				"Meaning placement",
 				this.#draft.contextRail.custom.meaningPlacement,
 				CONTEXT_RAIL_MEANING_PLACEMENTS,
+				"In custom mode, place expanded annotation text beside the marker or on a row above/below it; ignored in compact and full modes.",
 			),
 			...CONTEXT_RAIL_ROLES.map(role =>
 				inputSetting(`rail.custom.${role}`, `${role} template`, this.#draft.contextRail.custom.items.find(item => item.role === role)?.template ?? "", value => {
 					const item = this.#draft.contextRail.custom.items.find(candidate => candidate.role === role);
 					if (item) item.template = value;
-				}),
+				}, `Custom-mode template for the ${CONTEXT_RAIL_ROLE_PURPOSES[role]} marker. Must contain {frame} exactly once. Tokens: {frame}, {text-meaning}, {percent}, {tokens}, {window}, {role}.`),
 			),
 			{ id: "heading.assets", label: "Assets", currentValue: "", heading: true },
-			{ id: "action.show-paths", label: "Show paths", currentValue: "Enter" },
-			{ id: "action.initialize-prompt-assets", label: "Initialize missing Prompt Border assets", currentValue: "Enter" },
-			{ id: "action.initialize-context-assets", label: "Initialize missing Context Rail assets", currentValue: "Enter" },
-			{ id: "action.reload", label: "Reload from disk", currentValue: "Enter" },
+			{ id: "action.show-paths", label: "Show paths", currentValue: "Enter", description: "Show the active config.json and resolved Prompt Border and Context Rail asset paths." },
+			{ id: "action.initialize-prompt-assets", label: "Initialize missing Prompt Border assets", currentValue: "Enter", description: "Create only the four Prompt Border glyph files named by the frame settings beside config.json; existing files stay untouched and created files remain after Cancel." },
+			{ id: "action.initialize-context-assets", label: "Initialize missing Context Rail assets", currentValue: "Enter", description: "Create only missing label.txt, pointer.txt, and configured role Frames files in the draft Glyph directory; existing files stay untouched and created files remain after Cancel." },
+			{ id: "action.reload", label: "Reload from disk", currentValue: "Enter", description: "Discard draft edits and reread config.json; live settings stay unchanged until Apply." },
 			{ id: "heading.actions", label: "Actions", currentValue: "", heading: true },
-			{ id: "action.apply", label: "Apply changes", currentValue: "Enter" },
-			{ id: "action.cancel", label: "Cancel", currentValue: "Enter" },
+			{ id: "action.apply", label: "Apply changes", currentValue: "Enter", description: "Validate every field, atomically save config.json, and rebuild the live prompt border and Context Rail." },
+			{ id: "action.cancel", label: "Cancel", currentValue: "Enter", description: "Close without saving draft edits or changing live settings; initialized asset files remain on disk." },
 		];
 		this.#items = items;
 		return new SettingsList(

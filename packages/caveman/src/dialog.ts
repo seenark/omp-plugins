@@ -61,14 +61,14 @@ export async function openCavemanDialog(options: CavemanDialogOptions): Promise<
 			{
 				id: "defaultLevel",
 				label: "Default level",
-				description: "Level selected for a new session.",
+				description: "Level used when a session has no saved Caveman level. Applying a changed value also selects it now; off disables Caveman instructions and status.",
 				currentValue: draft.defaultLevel,
 				values: [...CAVEMAN_LEVELS],
 			},
 			{
 				id: "nativeVisible",
 				label: "Native status",
-				description: "Show static caveman status in the OMP footer.",
+				description: "Show Caveman in OMP's native footer with a static glyph. Independent of Shared Display; hidden when the active level is off.",
 				currentValue: draft.nativeVisible ? "on" : "off",
 				values: ["on", "off"],
 			},
@@ -76,21 +76,21 @@ export async function openCavemanDialog(options: CavemanDialogOptions): Promise<
 			{
 				id: "display.visible",
 				label: "Shared display",
-				description: "Publish Caveman frames to Shared Display.",
+				description: "Publish Caveman frames to Shared Display. Independent of native status; disabled or level off publishes no Caveman source.",
 				currentValue: draft.display.visible ? "on" : "off",
 				values: ["on", "off"],
 			},
 			{
 				id: "display.template",
 				label: "Status template",
-				description: "Use {activity}, {glyph}, and {level} tokens.",
+				description: "Single-line status format. Tokens: {activity}=●/○, {glyph}=current frame, {level}=level label; other text stays literal.",
 				currentValue: draft.display.template,
 				submenu: inputSubmenu,
 			},
 			{
 				id: "display.glyphDirectory",
 				label: "Glyph directory",
-				description: "User assets override packaged assets.",
+				description: "Files: lite.txt, full.txt, ultra.txt, wenyan-lite.txt, wenyan-full.txt, wenyan-ultra.txt; no off.txt. Optional positive fps=N; whitespace frames or blank-line blocks. Invalid/missing files use packaged assets; ~ means home.",
 				currentValue: draft.display.glyphDirectory,
 				submenu: inputSubmenu,
 			},
@@ -98,29 +98,29 @@ export async function openCavemanDialog(options: CavemanDialogOptions): Promise<
 			{
 				id: "showPaths",
 				label: "Show paths",
-				description: "Show config, skill, and glyph paths.",
+				description: "Show the active config.json, vendored skill, and Glyph directory paths.",
 				currentValue: "run",
 			},
 			{
 				id: "initialize",
 				label: "Initialize missing glyphs",
-				description: "Copy packaged assets only when destination files are missing.",
+				description: "Create only missing Caveman glyph files from packaged assets. Optional positive fps=N sets speed; whitespace frames or blank-line blocks. Created files remain after Cancel.",
 				currentValue: "run",
 			},
 			{ id: "heading-actions", label: "Actions", currentValue: "", heading: true },
 			{
 				id: "reload",
 				label: "Reload from disk",
-				description: "Discard draft changes and reread config.json.",
+				description: "Discard draft edits and reread config.json; live settings stay unchanged until Apply.",
 				currentValue: "run",
 			},
 			{
 				id: "apply",
 				label: "Apply changes",
-				description: "Validate and atomically save this draft.",
+				description: "Validate every field, atomically save config.json, and activate this draft.",
 				currentValue: "run",
 			},
-			{ id: "cancel", label: "Cancel", currentValue: "run" },
+			{ id: "cancel", label: "Cancel", description: "Close without saving draft edits or changing live settings; initialized asset files remain on disk.", currentValue: "run" },
 		];
 
 		const onChange = (id: string, value: string): void => {

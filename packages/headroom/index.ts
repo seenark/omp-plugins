@@ -42,6 +42,15 @@ import type { AgentMessage, CompressResult, HeadroomStats } from "./types.ts";
 const SUBCOMMANDS = ["config", "status", "on", "off", "health", "stats", "init"] as const;
 const INIT_TARGETS = ["config", "glyphs", "all"] as const;
 const HEADROOM_USAGE = "Usage: /headroom [config|status|on|off|health|stats|init [config|glyphs|all]]";
+const HEADROOM_STATUS_PURPOSES = {
+	off: "Used while effective compression is disabled.",
+	"remote-blocked": "Used when Base URL is non-local and Allow remote is false.",
+	starting: "Used while Headroom is starting a local proxy.",
+	offline: "Used after the proxy is confirmed unavailable.",
+	idle: "Used while enabled before proxy health is known.",
+	online: "Used while the proxy is healthy and no compression result exists.",
+	compressed: "Used after a compression has saved tokens in this session.",
+} satisfies Record<DisplayState, string>;
 
 type Subcommand = (typeof SUBCOMMANDS)[number];
 type ParsedCommand = { command: Subcommand | "invalid"; initTarget?: HeadroomInitTarget };
@@ -715,40 +724,40 @@ class HeadroomConfigDialog implements Component {
 	private buildList(): SettingsList {
 		const items: SettingItem[] = [
 			{ id: "section:config", label: "Config", currentValue: "", heading: true },
-			this.booleanItem("enabled", "Enabled", this.draft.enabled),
-			this.stringItem("baseUrl", "Base URL", this.draft.baseUrl),
-			this.booleanItem("allowRemote", "Allow remote", this.draft.allowRemote),
-			this.booleanItem("autoStart", "Auto-start", this.draft.autoStart),
-			this.stringItem("command", "Command", this.draft.command),
-			this.numberItem("minContextTokens", "Minimum context tokens", this.draft.minContextTokens),
-			this.numberItem("minMessageChars", "Minimum message chars", this.draft.minMessageChars),
-			this.numberItem("timeoutMs", "Timeout (ms)", this.draft.timeoutMs),
+			this.booleanItem("enabled", "Enabled", this.draft.enabled, "Default compression state for new sessions; /headroom on/off override only this session. PI_HEADROOM_*/HEADROOM_* may override saved operational values at runtime."),
+			this.stringItem("baseUrl", "Base URL", this.draft.baseUrl, "HTTP(S) Headroom proxy URL. Non-local hosts are blocked unless Allow remote is true; compression sends conversation context to this endpoint."),
+			this.booleanItem("allowRemote", "Allow remote", this.draft.allowRemote, "Allow non-local proxy hosts. Enable only for an endpoint trusted with full conversation context; localhost, 127.0.0.1, and ::1 never need it."),
+			this.booleanItem("autoStart", "Auto-start", this.draft.autoStart, "After a failed health check, start a detached local proxy with Command. Remote URLs are never auto-started; the proxy remains running after OMP exits."),
+			this.stringItem("command", "Command", this.draft.command, "Executable used only to auto-start the proxy. It must be available to OMP; disable Auto-start if you run the proxy yourself."),
+			this.numberItem("minContextTokens", "Minimum context tokens", this.draft.minContextTokens, "Minimum known context-token count before compression is attempted. Equality qualifies; 0 disables this threshold."),
+			this.numberItem("minMessageChars", "Minimum message chars", this.draft.minMessageChars, "Minimum extracted character count for each toolResult compression candidate. Equality qualifies; enter an integer of at least 1."),
+			this.numberItem("timeoutMs", "Timeout (ms)", this.draft.timeoutMs, "Timeout in milliseconds for proxy health, stats, and compression requests. Minimum 100; timeout keeps the original conversation unchanged."),
 			{ id: "section:display", label: "Display", currentValue: "", heading: true },
-			this.booleanItem("display.visible", "Visible", this.draft.display.visible),
-			this.stringItem("display.glyphDirectory", "Glyph directory", this.draft.display.glyphDirectory),
-			this.stringItem("display.template", "Outer template", this.draft.display.template),
-			...(Object.keys(this.draft.display.status) as DisplayState[]).map((state) => this.stringItem(`display.status.${state}`, state, this.draft.display.status[state])),
+			this.booleanItem("display.visible", "Visible", this.draft.display.visible, "Publish Headroom status to Shared Display. Hiding it does not disable compression, proxy checks, or commands."),
+			this.stringItem("display.glyphDirectory", "Glyph directory", this.draft.display.glyphDirectory, "Path for off.txt, remote-blocked.txt, starting.txt, offline.txt, idle.txt, online.txt, compressed.txt. Optional positive fps=N; whitespace frames or blank-line blocks. Invalid/missing files use theme glyphs; ~ means home."),
+			this.stringItem("display.template", "Outer template", this.draft.display.template, "Single-line wrapper around the active state template. Tokens: {status}, {glyph}, {state}, {label}, {compressionPercent}, {tokensSaved}, {tokensBefore}, {tokensAfter}, {proxyStatus}, {error}."),
+			...(Object.keys(this.draft.display.status) as DisplayState[]).map((state) => this.stringItem(`display.status.${state}`, state, this.draft.display.status[state], `${HEADROOM_STATUS_PURPOSES[state]} Must be one line; supports the Outer template tokens except {status}.`)),
 			{ id: "section:actions", label: "Actions", currentValue: "", heading: true },
-			{ id: "action:show-config", label: "Show config path", currentValue: this.configPath },
-			{ id: "action:show-glyphs", label: "Show glyph path", currentValue: this.draft.display.glyphDirectory },
-			{ id: "action:initialize-glyphs", label: "Initialize missing glyphs", currentValue: "Enter" },
-			{ id: "action:reload", label: "Reload from disk", currentValue: "Enter" },
-			{ id: "action:apply", label: "Apply changes", currentValue: "Enter" },
-			{ id: "action:cancel", label: "Cancel", currentValue: "Enter" },
+			{ id: "action:show-config", label: "Show config path", currentValue: this.configPath, description: "Show the destination config.json path; does not change the draft." },
+			{ id: "action:show-glyphs", label: "Show glyph path", currentValue: this.draft.display.glyphDirectory, description: "Show the draft Glyph directory; it may differ from the live path until Apply." },
+			{ id: "action:initialize-glyphs", label: "Initialize missing glyphs", currentValue: "Enter", description: "Create or overwrite the seven state files named above from current theme glyphs; each existing file requires confirmation. Files remain after Cancel." },
+			{ id: "action:reload", label: "Reload from disk", currentValue: "Enter", description: "Discard draft edits and reload persisted config.json without environment overrides; live settings stay unchanged until Apply." },
+			{ id: "action:apply", label: "Apply changes", currentValue: "Enter", description: "Validate every field, atomically save config.json, and activate the effective runtime settings." },
+			{ id: "action:cancel", label: "Cancel", currentValue: "Enter", description: "Close without saving draft edits or changing live settings; initialized asset files remain on disk." },
 		];
 		return new SettingsList(items, Math.min(16, items.length), getSettingsListTheme(), (id, value) => this.onChange(id, value), () => this.done({ action: "cancel" }), { layout: "flat", typeToSearch: false, hint: "Enter edit/action · Esc cancel" });
 	}
 
-	private booleanItem(id: string, label: string, value: boolean): SettingItem {
-		return { id, label, currentValue: value ? "true" : "false", values: ["true", "false"] };
+	private booleanItem(id: string, label: string, value: boolean, description: string): SettingItem {
+		return { id, label, currentValue: value ? "true" : "false", values: ["true", "false"], description };
 	}
 
-	private stringItem(id: string, label: string, value: string): SettingItem {
-		return { id, label, currentValue: value, submenu: (current, done) => this.inputSubmenu(current, done) };
+	private stringItem(id: string, label: string, value: string, description: string): SettingItem {
+		return { id, label, currentValue: value, submenu: (current, done) => this.inputSubmenu(current, done), description };
 	}
 
-	private numberItem(id: string, label: string, value: number): SettingItem {
-		return this.stringItem(id, label, String(value));
+	private numberItem(id: string, label: string, value: number, description: string): SettingItem {
+		return this.stringItem(id, label, String(value), description);
 	}
 
 	private inputSubmenu(current: string, done: (selected?: string) => void): Input {
