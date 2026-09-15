@@ -1,7 +1,7 @@
 import * as os from "node:os";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
-
+import { CODESOOK_OMP_CONFIG_PATH } from "@codesook/omp-shared-display/config-store";
 export const CAVEMAN_LEVELS = [
 	"off",
 	"lite",
@@ -45,7 +45,14 @@ export const DEFAULT_CAVEMAN_CONFIG: Readonly<CavemanConfig> = {
 };
 
 export const CONFIG_DIRECTORY = path.join(os.homedir(), ".config", "codesook-omp", "caveman");
-export const CONFIG_PATH = path.join(CONFIG_DIRECTORY, "config.json");
+export const LEGACY_CONFIG_PATH = path.join(CONFIG_DIRECTORY, "config.json");
+export const CONFIG_PATH = CODESOOK_OMP_CONFIG_PATH;
+export function getCodesookOmpConfigPath(homeDirectory: string = os.homedir()): string {
+	return path.join(homeDirectory, ".config", "codesook-omp", "config.json");
+}
+export function getLegacyPackageConfigPath(homeDirectory: string = os.homedir()): string {
+	return path.join(homeDirectory, ".config", "codesook-omp", "caveman", "config.json");
+}
 export const DEFAULT_SKILL_PATH = fileURLToPath(new URL("../skills/caveman/SKILL.md", import.meta.url));
 export const PACKAGE_ASSET_DIRECTORY = fileURLToPath(new URL("../assets", import.meta.url));
 

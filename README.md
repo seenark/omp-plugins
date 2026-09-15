@@ -6,13 +6,14 @@ Standalone [oh-my-pi](https://github.com/can1357/oh-my-pi) extensions in one Bun
 
 | Package | Feature | Default | Entry |
 | --- | --- | --- | --- |
+| `@codesook/omp-plugin-settings` | root settings command | yes with root install | `packages/codesook-omp-plugin/index.ts` |
 | `@codesook/omp-headroom` | `headroom` | yes | `packages/headroom/index.ts` |
 | `@codesook/omp-prompt-border-style` | `prompt-border-style` | yes | `packages/prompt-border-style/src/main.ts` |
 | `@codesook/omp-shared-display` | `shared-display` | no | `packages/shared-display/src/index.ts` |
 | `@codesook/omp-caveman` | `caveman` | no | `packages/caveman/src/index.ts` |
 | `@codesook/omp-theme-catppuccin` | theme package | — | `packages/theme-catppuccin/bin/install.js` |
 
-A normal root install enables only the two default features. Opt-in packages are intentionally side-effect free unless selected; importing `@codesook/omp-shared-display/client` never activates its extension entry.
+Root install loads unified settings plus default Headroom and Prompt Border features. Shared Display and Caveman remain opt-in.
 
 ## Requirements
 
@@ -53,30 +54,54 @@ bun packages/theme-catppuccin/bin/install.js
 
 ## Command tree
 
-- `/headroom [config|status|on|off|health|stats|init [config|glyphs|all]]`
-- `/shared-display [config|status]`
-- `/caveman [config|status|off|lite|full|ultra|wenyan-lite|wenyan-full|wenyan-ultra]`
-- `/prompt-border [config|status|<style> [layout]|layout <layout>|reset|rail toggle|glyphs debug [frames|demo|on|off]]`
+```text
+/codesook-omp-plugin
+/codesook-omp-plugin status
+/headroom [status|on|off|health|stats|init [config|glyphs|all]]
+/caveman [status|off|lite|full|ultra|wenyan-lite|wenyan-full|wenyan-ultra]
+/prompt-border [status|<style> [layout]|layout <layout>|reset|rail toggle|glyphs debug [frames|demo|on|off]]
+```
 
-Bare package commands and `config` open the same staged Settings Dialog. Dialog edits are drafts: `Apply` validates and atomically replaces the package JSON; `Reload` discards the draft; `Cancel` leaves persisted and live state unchanged. Initialize actions create only missing assets after confirmation.
+Root settings owns persisted configuration. Feature commands own session behavior only; feature `config` commands and `/shared-display` are removed. Status commands open focused read-only overlays; Enter/Esc closes.
+
+`/codesook-omp-plugin` edits a draft. Shift+Enter applies directly. Bare Enter on Apply asks confirmation. Reload discards draft; Cancel leaves persisted and live state unchanged.
 
 ## Configuration and migration
 
-Each package owns one destination JSON file:
+All feature settings persist in one root envelope:
 
-- Shared Display: `~/.config/codesook-omp/shared-display/config.json`
-- Caveman: `~/.config/codesook-omp/caveman/config.json`
-- Headroom: `~/.config/codesook-omp/headroom/config.json`
-- Prompt Border: `~/.config/codesook-omp/prompt-border/config.json`
+```text
+~/.config/codesook-omp/config.json
+```
 
-Migration is destination-gated and runs once. An existing destination wins, including an invalid destination (which falls back to runtime defaults without importing legacy values). A missing destination is created from independently normalized legacy sources without modifying legacy files. Legacy aliases and split command paths are not retained.
+Shape:
+
+```json
+{
+  "version": 1,
+  "display": {},
+  "behavior": {}
+}
+```
+
+`display` stores presentation settings. `behavior` stores feature runtime settings. Glyph/frame bytes stay in external files:
+
+```text
+~/.config/codesook-omp/caveman/glyphs/
+~/.config/codesook-omp/headroom/
+~/.config/codesook-omp/prompt-border/
+~/.config/codesook-omp/context-rail/
+```
+
+Missing valid legacy package/settings files migrate into missing root sections. Invalid root JSON wins and is never overwritten. Successful migration removes only valid imported legacy JSON; invalid files remain for repair. Asset files remain external.
 
 ## Implemented ownership
 
 - Shared Display owns the single `codesook-shared-display` widget, source composition, and animation clock.
-- Headroom remains a compression/proxy producer and continues working without Shared Display; it publishes no private widget or native status.
+- Headroom remains a compression producer and continues working without Shared Display; proxy lifecycle is external, while health checks may run at session start or live config change and never start the proxy.
 - Caveman injects the pinned skill, recovers session levels from branch entries, and publishes custom/native status independently.
 - Prompt Border owns the prompt editor, Context Rail, attachment band, and spinner overrides; it does not publish Shared Display sources.
+- Root settings detects Ponytail and OMP feature presence through `omp plugin list --json`; it never unloads or loads plugins.
 
 Ponytail and Caveman producers publish complete frame sequences and never create producer-side animation timers or fallback widgets. Native status visibility is independent from custom Shared Display visibility.
 
@@ -98,6 +123,7 @@ bun run publish:shared-display
 bun run publish:caveman
 bun run publish:headroom
 bun run publish:prompt-border-style
+bun run publish:settings
 bun run publish:theme-catppuccin
 bun run publish:all
 ```
@@ -110,6 +136,7 @@ Load extension entries directly from a disposable home/session tree:
 HOME="$TMP_HOME" XDG_CONFIG_HOME="$TMP_XDG" \
 PI_CODING_AGENT_DIR="$TMP_AGENT" PI_CODING_AGENT_SESSION_DIR="$TMP_SESSIONS" \
 omp --cwd "$TMP_WORK" --session-dir "$TMP_SESSIONS" \
+  --extension "$PWD/packages/codesook-omp-plugin/index.ts" \
   --extension "$PWD/packages/shared-display/src/index.ts" \
   --extension "$PWD/packages/caveman/src/index.ts" \
   --extension "$PWD/packages/headroom/index.ts" \

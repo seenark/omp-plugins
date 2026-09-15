@@ -55,9 +55,27 @@ describe("Headroom compression bridge", () => {
 		expect(result.ok).toBe(true);
 		if (!result.ok) return;
 		const toolResult = result.messages[2] as Extract<AgentMessage, { role: "toolResult" }>;
+		expect(toolResult.toolCallId).toBe("call_1");
 		expect(toolResult.toolName).toBe("list_records");
+		expect(toolResult.isError).toBe(false);
 		expect(toolResult.details).toEqual({ rows: 1000 });
 		expect(toolResult.content).toEqual([{ type: "text", text: "compressed result" }]);
+		expect(result.messages[0]).toEqual(messages[0]);
+		expect(result.messages[1]).toEqual(messages[1]);
+	});
+
+	it("renames assistant tool calls only in outbound payload", () => {
+		const messages = [createAssistantMessage(), createToolResult("large result")];
+		const payload = buildCompressionPayload(messages, 1);
+		const assistant = payload.messages[0];
+
+		expect(assistant.role).toBe("assistant");
+		if (assistant.role !== "assistant" || !assistant.tool_calls) return;
+		expect(assistant.tool_calls[0]?.function.name).toBe("pi_tool_result");
+		expect(JSON.parse(assistant.tool_calls[0]?.function.arguments ?? "{}")).toEqual({
+			originalToolName: "list_records",
+		});
+		expect((messages[0] as AgentMessage & { content: Array<{ name: string }> }).content[0]?.name).toBe("list_records");
 	});
 
 	it("preserves non-cloneable metadata while changing tool result text", () => {

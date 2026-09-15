@@ -25,7 +25,11 @@
         "@oh-my-pi/pi-coding-agent": ">=18.1.16",
         "@oh-my-pi/pi-tui": ">=18.1.16"
     },
+    "dependencies": {
+        "@codesook/omp-shared-display": "^1.0.0"
+    },
     "devDependencies": {
+        "@codesook/omp-shared-display": "workspace:*",
         "@oh-my-pi/pi-coding-agent": "18.1.16",
         "@oh-my-pi/pi-tui": "18.1.16",
         "bun-types": "latest",

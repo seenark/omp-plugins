@@ -17,7 +17,6 @@
 		"init.ts",
 		"bridge.ts",
 		"client.ts",
-		"proxy-manager.ts",
 		"README.md"
 	],
 	"peerDependencies": {

@@ -1,18 +1,21 @@
 ---
 status: accepted
 ---
-# Package-Owned Configuration and Root Commands
+# Unified Root Configuration and Feature Commands
 
-Each package owns one normalized JSON configuration file and one root slash command. The bare command and its `config` form open the same staged dialog; the dialog edits a draft only, and `Apply` or `Cancel` is the explicit boundary between a proposed configuration and live runtime state.
+Codesook OMP Plugin owns one root slash command, `/codesook-omp-plugin`, and one canonical document at `~/.config/codesook-omp/config.json`. Document envelope is `{version: 1, display: {...}, behavior: {...}}`; unknown root keys survive writes. Shared Display owns presentation state, while Caveman, Headroom, and other feature packages own behavior state.
 
-`Apply` validates the whole draft, writes canonical JSON to a uniquely named temporary sibling, and renames it over the destination. Runtime objects are updated only after the rename succeeds; a validation or write failure leaves both the existing file and live runtime unchanged. `Reload` discards the draft and rereads disk, while `Cancel` changes neither persisted configuration nor runtime. Asset initialization is the explicit exception: it may create missing assets immediately after its own confirmation and is not rolled back by a later Cancel.
+Settings dialog edits staged draft state. `Shift+Enter` applies immediately; bare `Enter` on `Apply` asks confirmation. Successful Apply validates all fields, atomically replaces root document, then emits a versioned EventBus event. Loaded project extensions consume that event and update live behavior; current provider request remains unchanged. `Reload` discards draft edits. `Cancel` changes neither disk nor runtime.
 
-Legacy migration is one-time and destination-wins. Destination `config.json` existence is the sole migration gate: when it exists, only that file is normalized, and an invalid destination falls back to runtime defaults without being overwritten or supplemented from legacy data. When it is absent, each applicable legacy source is read independently, a normalized destination is created atomically, and legacy files are never consulted again on later loads. Migration never rewrites the legacy sources, and package defaults are fallbacks rather than replacements for existing user bytes.
+Feature commands retain behavior operations: `/caveman` status and level controls, `/headroom` status/toggle/health/stats/init, and `/prompt-border` style/layout/reset/rail/glyph operations. Package config dialogs, bare config commands, and `/shared-display` are removed. Status and health views are read-only focused overlays: they show loading/result/error, close on `Enter` or `Escape`, and never send prompt messages or abort active work.
 
-The cutover removes split commands, old aliases, and compatibility shims instead of forwarding them to the new root commands. This keeps command discovery and configuration ownership unambiguous across Shared Display, Caveman, Headroom, and Prompt Border.
+Migration is section-aware. A valid root document imports only missing feature sections from valid legacy sources; an invalid root document is never supplemented or overwritten. Successful migration atomically writes missing sections and removes only valid legacy JSON sources consumed by migration; invalid sources remain for repair. Explicit non-root paths retain standalone package persistence for tests and integrations.
+
+Plugin presence and next-start lifecycle state come from `omp plugin list --json`. Settings can report missing optional plugins and cannot unload or enable plugins during an active process. Ponytail configuration is read-only when absent; its native `/ponytail off|lite|full` command remains live. Headroom does not start or manage external proxy processes; it may read an optional token file and performs health checks against externally managed services.
 
 ## Considered Options
 
-- **Keep split commands and configuration paths** — rejected; each package needs one discoverable command and one authoritative persisted document.
-- **Write configuration directly on every dialog change** — rejected; staged drafts make Cancel safe and whole-draft validation visible before persistence.
-- **Use a migration marker or keep consulting legacy files** — rejected; destination existence is deterministic, preserves destination-wins behavior, and prevents old state from reappearing after migration.
+- **Keep split config commands and package-owned canonical files** — rejected; root settings need one discoverable command and one authoritative document.
+- **Write configuration directly on every dialog change** — rejected; staged drafts make Cancel safe and validation visible before persistence.
+- **Gate migration only on destination existence** — rejected; valid partial root documents must gain missing sections without losing existing settings, while invalid roots remain protected.
+- **Let settings unload or enable plugins** — rejected; plugin lifecycle belongs to OMP and next process start.

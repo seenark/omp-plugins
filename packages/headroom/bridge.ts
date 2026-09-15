@@ -160,8 +160,9 @@ function convertToolCall(toolCall: ToolCall): OpenAIToolCall {
 		id: toolCall.id,
 		type: "function",
 		function: {
-			name: toolCall.name,
-			arguments: JSON.stringify(toolCall.arguments),
+			// Headroom may exclude built-in names; retain original name in arguments for outbound-only adaptation.
+			name: "pi_tool_result",
+			arguments: JSON.stringify({ originalToolName: toolCall.name }),
 		},
 	};
 }

@@ -4,14 +4,9 @@ import type {
 	ExtensionAPI,
 	ExtensionContext,
 } from "@oh-my-pi/pi-coding-agent";
+import { CODESOOK_OMP_CONFIG_CHANGED } from "@codesook/omp-shared-display/config-store";
 import { connectSharedDisplay } from "@codesook/omp-shared-display/client";
-import {
-	loadCavemanConfig,
-	seedMissingCavemanGlyphs,
-	validateCavemanConfig,
-	writeCavemanConfigAtomic,
-} from "./config.ts";
-import { openCavemanDialog } from "./dialog.ts";
+import { loadCavemanConfig, normalizeCavemanRootConfig } from "./config.ts";
 import {
 	loadCavemanSequence,
 	loadPackageCavemanSequence,
@@ -32,7 +27,9 @@ import {
 	DEFAULT_SKILL_PATH,
 	PACKAGE_ASSET_DIRECTORY,
 	cloneCavemanConfig,
-	expandHomePath,
+	getCodesookOmpConfigPath,
+	isCavemanLevel,
+	isRecord,
 	type CavemanConfig,
 	type CavemanLevel,
 } from "./types.ts";
@@ -42,27 +39,23 @@ export * from "./display.ts";
 export * from "./instructions.ts";
 export * from "./session.ts";
 export * from "./types.ts";
-
 const COMMAND_LEVELS = [
-	"config",
 	"status",
 	...CAVEMAN_ACTIVE_LEVELS,
 	"off",
 ] as const;
 const COMMAND_USAGE =
-	"Usage: /caveman [config|status|off|lite|full|ultra|wenyan-lite|wenyan-full|wenyan-ultra]";
+	"Usage: /caveman [status|off|lite|full|ultra|wenyan-lite|wenyan-full|wenyan-ultra]";
 
 export interface CavemanExtensionOptions {
 	configPath?: string;
 	legacyConfigPath?: string;
+	legacyPackageConfigPath?: string;
 	homeDirectory?: string;
 	skillPath?: string;
 	packageAssetDirectory?: string;
 }
 
-function isEnter(data: string): boolean {
-	return data === "\r" || data === "\n";
-}
 
 function reportWarning(
 	pi: ExtensionAPI,
@@ -81,6 +74,15 @@ function reportWarning(
 	} catch {
 		// Some test harnesses provide only a partial ExtensionAPI logger.
 	}
+}
+function hasSessionLevelEntry(entries: readonly unknown[]): boolean {
+	for (let index = entries.length - 1; index >= 0; index -= 1) {
+		const entry = entries[index];
+		if (!isRecord(entry) || entry.type !== "custom" || entry.customType !== "caveman-level") continue;
+		const data = entry.data;
+		if (isRecord(data) && isCavemanLevel(data.level)) return true;
+	}
+	return false;
 }
 
 function reportInfo(pi: ExtensionAPI, ctx: ExtensionContext, message: string): void {
@@ -114,13 +116,51 @@ function commandCompletions(prefix: string): Array<{ value: string; label: strin
 		? matches.map(value => ({
 				value,
 				label: value,
-				description: value === "config" ? "Open staged settings" : value === "status" ? "Show current state" : "Set current level",
+				description: value === "status" ? "Show current state" : "Set current level",
 			}))
 		: null;
 }
+async function showCavemanStatus(
+	ctx: ExtensionContext,
+	level: CavemanLevel,
+	config: CavemanConfig,
+	configPath: string,
+): Promise<void> {
+	const content = [
+		`Level: ${level}`,
+		`Default: ${config.defaultLevel}`,
+		`Native status: ${config.nativeVisible ? "on" : "off"}`,
+		`Shared display: ${config.display.visible ? "on" : "off"}`,
+		`Config: ${configPath}`,
+	];
+	if (!ctx.hasUI || typeof ctx.ui.custom !== "function") {
+		ctx.ui.notify(["Caveman status", ...content].join("\n"), "info");
+		return;
+	}
+	await ctx.ui.custom<void>(
+		(_tui, theme, _keybindings, done) => ({
+			render(width: number): readonly string[] {
+				const fit = (line: string): string => (line.length > width ? line.slice(0, width) : line);
+				return [
+					theme.fg("accent", theme.bold("Caveman Status")),
+					...content.map(fit),
+					"",
+					theme.fg("dim", "Enter/Esc close"),
+				];
+			},
+			handleInput(data: string): void {
+				if (data === "\r" || data === "\n" || data === "\u001b") done(undefined);
+			},
+			invalidate(): void {},
+		}),
+		{ overlay: true },
+	);
+}
 
 export default function cavemanExtension(pi: ExtensionAPI, options: CavemanExtensionOptions = {}): void {
-	const configPath = options.configPath ?? CONFIG_PATH;
+	let configPath = options.configPath ?? getCodesookOmpConfigPath(options.homeDirectory);
+	const rootConfig =
+		options.configPath === undefined || configPath === CONFIG_PATH || configPath === getCodesookOmpConfigPath(options.homeDirectory);
 	const skillPath = options.skillPath ?? DEFAULT_SKILL_PATH;
 	const packageAssetDirectory = options.packageAssetDirectory ?? PACKAGE_ASSET_DIRECTORY;
 	const warnings = new Set<string>();
@@ -129,6 +169,8 @@ export default function cavemanExtension(pi: ExtensionAPI, options: CavemanExten
 	let level: CavemanLevel = "off";
 	let active = false;
 	let hasSessionState = false;
+	let sessionLevelExplicit = false;
+	let activeContext: ExtensionContext | undefined;
 	let disposed = false;
 	let configLoad: Promise<void> | undefined;
 	let skillLoad: Promise<string> | undefined;
@@ -139,12 +181,14 @@ export default function cavemanExtension(pi: ExtensionAPI, options: CavemanExten
 		if (!configLoad) {
 			configLoad = (async () => {
 				const loaded = await loadCavemanConfig({
-					configPath,
+					configPath: options.configPath,
 					legacyConfigPath: options.legacyConfigPath,
+					legacyPackageConfigPath: options.legacyPackageConfigPath,
 					homeDirectory: options.homeDirectory,
 					packageAssetDirectory,
 					onWarning: message => reportWarning(pi, warnings, message, ctx),
 				});
+				configPath = loaded.configPath;
 				config = loaded.config;
 				if (!hasSessionState) level = config.defaultLevel;
 			})();
@@ -194,59 +238,27 @@ export default function cavemanExtension(pi: ExtensionAPI, options: CavemanExten
 			ctx.ui.setStatus("caveman", undefined);
 		}
 	};
+	const applyLiveConfig = (data: unknown): void => {
+		if (!rootConfig || disposed || !isRecord(data)) return;
+		const next = normalizeCavemanRootConfig(data.config);
+		if (!next) return;
+		config = next;
+		if (!sessionLevelExplicit) level = next.defaultLevel;
+		if (activeContext) void syncDisplay(activeContext);
+	};
+	const unsubscribeConfig = rootConfig ? pi.events.on(CODESOOK_OMP_CONFIG_CHANGED, applyLiveConfig) : undefined;
 
 	const rehydrateSession = async (ctx: ExtensionContext): Promise<void> => {
+		activeContext = ctx;
 		hasSessionState = true;
 		await loadConfig(ctx, true);
 		const entries = ctx.sessionManager.getBranch();
+		sessionLevelExplicit = hasSessionLevelEntry(entries);
 		level = resolveCavemanSessionLevelFromConfig(entries, config);
 		active = false;
 		await syncDisplay(ctx);
 	};
 
-	const applyConfig = async (draft: CavemanConfig, ctx: ExtensionContext): Promise<void> => {
-		const error = validateCavemanConfig(draft);
-		if (error) throw new Error(error);
-		const previousDefault = config.defaultLevel;
-		await writeCavemanConfigAtomic(draft, configPath);
-		config = cloneCavemanConfig(draft);
-		if (draft.defaultLevel !== previousDefault) {
-			level = draft.defaultLevel;
-			pi.appendEntry("caveman-level", { level });
-		}
-		await syncDisplay(ctx);
-	};
-
-	const openConfig = async (ctx: ExtensionContext): Promise<void> => {
-		await loadConfig(ctx);
-		if (!ctx.hasUI) {
-			notifyError(pi, ctx, "Caveman settings require an interactive UI.");
-			return;
-		}
-		await openCavemanDialog({
-			ctx,
-			config,
-			configPath,
-			skillPath,
-			glyphPath: expandHomePath(config.display.glyphDirectory, options.homeDirectory),
-			onApply: draft => applyConfig(draft, ctx),
-			onReload: async () => {
-				const loaded = await loadCavemanConfig({
-					configPath,
-					legacyConfigPath: options.legacyConfigPath,
-					homeDirectory: options.homeDirectory,
-					packageAssetDirectory,
-					onWarning: message => reportWarning(pi, warnings, message, ctx),
-				});
-				return loaded.config;
-			},
-			onInitialize: draft =>
-				seedMissingCavemanGlyphs(draft, {
-					homeDirectory: options.homeDirectory,
-					packageAssetDirectory,
-				}),
-		});
-	};
 
 	pi.on("session_start", async (_event, ctx) => {
 		await rehydrateSession(ctx);
@@ -258,10 +270,12 @@ export default function cavemanExtension(pi: ExtensionAPI, options: CavemanExten
 		await rehydrateSession(ctx);
 	});
 	pi.on("agent_start", async (_event, ctx) => {
+		activeContext = ctx;
 		active = true;
 		await syncDisplay(ctx);
 	});
 	pi.on("agent_end", async (event, ctx) => {
+		activeContext = ctx;
 		if (event.willContinue) return;
 		active = false;
 		await syncDisplay(ctx);
@@ -270,6 +284,8 @@ export default function cavemanExtension(pi: ExtensionAPI, options: CavemanExten
 		disposed = true;
 		active = false;
 		syncVersion += 1;
+		activeContext = undefined;
+		unsubscribeConfig?.();
 		ctx.ui.setStatus("caveman", undefined);
 		publisher.publish(null);
 		publisher.dispose();
@@ -298,25 +314,16 @@ export default function cavemanExtension(pi: ExtensionAPI, options: CavemanExten
 		getArgumentCompletions: commandCompletions,
 		handler: async (args, ctx) => {
 			const argument = args.trim().toLowerCase();
-			if (argument === "" || argument === "config") {
-				await openConfig(ctx);
-				return;
-			}
 			await loadConfig(ctx);
 			if (argument === "status") {
-				reportInfo(
-					pi,
-					ctx,
-					`Caveman ${level}; default ${config.defaultLevel}; native ${config.nativeVisible ? "on" : "off"}; display ${
-						config.display.visible ? "on" : "off"
-					}; config ${configPath}`,
-				);
+				await showCavemanStatus(ctx, level, config, configPath);
 				return;
 			}
 			if (!CAVEMAN_LEVELS.includes(argument as CavemanLevel)) {
 				notifyError(pi, ctx, `Unknown Caveman command: ${argument || "(empty)"}. ${COMMAND_USAGE}`);
 				return;
 			}
+			sessionLevelExplicit = true;
 			level = argument as CavemanLevel;
 			pi.appendEntry("caveman-level", { level });
 			await syncDisplay(ctx);

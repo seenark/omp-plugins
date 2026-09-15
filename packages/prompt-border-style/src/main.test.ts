@@ -58,12 +58,13 @@ describe("Prompt Border destination config", () => {
 		}
 	});
 
-	it("keeps command grammar nested and rejects unknown paths", () => {
-		expect(parsePromptBorderArgs("config", DEFAULT_PROMPT_BORDER_CONFIG)).toEqual({ kind: "config" });
+	it("keeps behavior command grammar and rejects removed config ownership", () => {
+		expect(parsePromptBorderArgs("config", DEFAULT_PROMPT_BORDER_CONFIG)).toEqual({ kind: "invalid" });
 		expect(parsePromptBorderArgs("round bottom", DEFAULT_PROMPT_BORDER_CONFIG)).toEqual({ kind: "apply", state: { style: "round", layout: "bottom" } });
 		expect(parsePromptBorderArgs("layout nope", DEFAULT_PROMPT_BORDER_CONFIG)).toEqual({ kind: "invalid" });
 		expect(getPromptBorderArgumentCompletions("layout ")?.map(item => item.value)).toContain("layout full");
 		expect(getPromptBorderArgumentCompletions("unknown")).toEqual([]);
+		expect(getPromptBorderArgumentCompletions("")?.map(item => item.value)).not.toContain("config");
 	});
 
 	it("writes only the selected persisted border fields", async () => {

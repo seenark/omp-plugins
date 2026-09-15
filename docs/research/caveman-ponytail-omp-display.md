@@ -1,6 +1,6 @@
 # Caveman, Ponytail, and OMP display research
 
-**Research snapshot:** 2026-09-14 (UTC). GitHub `main` refs were resolved and then pinned to the commits listed in [Sources](#sources). Evidence below is limited to the upstream source files, this checkout, and the installed OMP 18.1.16 source/types.
+**Research snapshot:** 2026-09-14 (UTC). GitHub `main` refs were resolved and then pinned to commits listed in [Sources](#sources). Evidence below is limited to upstream source files, this checkout, and installed OMP 18.1.16 source/types. Repository architecture described here predates unified root settings; current ownership and migration rules live in [ADR 0004](../adr/0004-package-config-command-cutover.md) and root [README](../../README.md).
 
 ## Findings
 

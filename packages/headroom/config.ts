@@ -3,6 +3,13 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { randomUUID } from "node:crypto";
 import {
+	CODESOOK_OMP_CONFIG_PATH,
+	defaultCodesookOmpConfig,
+	readCodesookOmpConfig,
+	updateCodesookOmpConfig,
+} from "@codesook/omp-shared-display/config-store";
+import { HEADROOM_PROXY_TOKEN_FILE } from "./client.ts";
+import {
 	DEFAULT_DISPLAY_CONFIG,
 	DEFAULT_TEMPLATES,
 	normalizeDisplayConfig,
@@ -20,11 +27,12 @@ export const DEFAULT_HEADROOM_SETTINGS = {
 	enabled: true,
 	baseUrl: DEFAULT_BASE_URL,
 	allowRemote: false,
-	autoStart: true,
+	autoStart: false,
 	command: "headroom",
 	minContextTokens: DEFAULT_MIN_CONTEXT_TOKENS,
 	minMessageChars: DEFAULT_MIN_MESSAGE_CHARS,
 	timeoutMs: DEFAULT_TIMEOUT_MS,
+	proxyTokenFile: HEADROOM_PROXY_TOKEN_FILE,
 } satisfies Required<Omit<HeadroomSettings, "url" | "display">>;
 
 export type HeadroomConfig = OperationalHeadroomConfig & {
@@ -41,19 +49,22 @@ export interface HeadroomSettings {
 	minContextTokens?: number | string;
 	minMessageChars?: number | string;
 	timeoutMs?: number | string;
+	proxyTokenFile?: string;
 	display?: unknown;
 }
 
 export interface HeadroomConfigLoadOptions {
 	env?: NodeJS.ProcessEnv;
 	configPath?: string;
+	legacyConfigPath?: string;
 	legacySettingsPaths?: readonly string[];
 	legacyDisplayPath?: string;
 	warn?: (message: string) => void;
 }
 
 export const HEADROOM_CONFIG_DIR = path.join(os.homedir(), ".config", "codesook-omp", "headroom");
-export const HEADROOM_CONFIG_FILE = path.join(HEADROOM_CONFIG_DIR, "config.json");
+export const HEADROOM_CONFIG_FILE = CODESOOK_OMP_CONFIG_PATH;
+export const LEGACY_HEADROOM_CONFIG_FILE = path.join(HEADROOM_CONFIG_DIR, "config.json");
 
 /** Legacy operational persistence candidates, ordered by precedence. */
 export const HEADROOM_SETTINGS_DIR = HEADROOM_CONFIG_DIR;
@@ -67,6 +78,7 @@ export const DEFAULT_HEADROOM_CONFIG: HeadroomConfig = {
 	...DEFAULT_HEADROOM_SETTINGS,
 	display: cloneDisplayConfig(DEFAULT_DISPLAY_CONFIG),
 };
+
 
 /** Read one legacy settings object without warning; used by migration-aware callers. */
 export function loadHeadroomSettings(settingsPath: string = HEADROOM_SETTINGS_FILE): HeadroomSettings {
@@ -85,10 +97,8 @@ export function loadHeadroomSettingsWithFallback(
 }
 
 /**
- * Load effective runtime configuration. The destination config wins once it
- * exists; environment values are applied after persisted values are normalized.
- * A second-argument settings object remains supported for focused callers that
- * want to bypass filesystem migration.
+ * Load effective runtime configuration. Root loads use the shared envelope;
+ * explicit non-root paths retain standalone object persistence for package tests.
  */
 export function loadHeadroomConfig(
 	envOrOptions: NodeJS.ProcessEnv | HeadroomConfigLoadOptions = process.env,
@@ -97,56 +107,67 @@ export function loadHeadroomConfig(
 ): HeadroomConfig {
 	const options = isLoadOptions(envOrOptions) ? { ...envOrOptions, ...providedOptions } : providedOptions;
 	const env = isLoadOptions(envOrOptions) ? options.env ?? process.env : envOrOptions;
-	const explicitSettings = settings !== undefined;
 	const configPath = options.configPath ?? HEADROOM_CONFIG_FILE;
-	let persisted: unknown;
 
-	if (explicitSettings) {
-		persisted = settings;
-	} else if (fs.existsSync(configPath)) {
-		const destination = readObjectFile(configPath);
-		if (!destination?.value) {
-			options.warn?.(`Headroom config is invalid: ${configPath}`);
-			persisted = {};
-		} else {
-			persisted = destination.value;
-		}
-	} else {
-		persisted = migrateLegacyConfig(options);
-		const normalized = normalizeHeadroomConfig(persisted);
-		try {
-			writeHeadroomConfig(normalized, configPath);
-		} catch (error) {
-			options.warn?.(
-				`Could not create Headroom config at ${configPath}: ${error instanceof Error ? error.message : String(error)}`,
-			);
-		}
-		persisted = normalized;
-	}
-
-	return applyEnvironment(normalizeHeadroomConfig(persisted), env);
+	if (settings !== undefined) return applyEnvironment(normalizeHeadroomConfig(settings), env);
+	if (!isHeadroomRootConfigPath(configPath)) return loadStandaloneConfig(configPath, options, env);
+	return loadRootConfig(
+		configPath,
+		{
+			...options,
+			legacyConfigPath: options.legacyConfigPath ?? LEGACY_HEADROOM_CONFIG_FILE,
+			legacySettingsPaths: options.legacySettingsPaths ?? HEADROOM_SETTINGS_PATHS,
+			legacyDisplayPath: options.legacyDisplayPath ?? LEGACY_HEADROOM_DISPLAY_FILE,
+		},
+		env,
+	);
 }
 
 /** Normalize a persisted object without applying environment overrides. */
 export function normalizeHeadroomConfig(raw: unknown): HeadroomConfig {
 	const source = isRecord(raw) ? raw : {};
-	const rawDisplay = isRecord(source.display) ? source.display : source;
+	const behaviorGroup = isRecord(source.behavior) ? source.behavior : undefined;
+	const behavior = isRecord(behaviorGroup?.headroom) ? behaviorGroup.headroom : source;
+	const displayGroup = isRecord(source.display) ? source.display : undefined;
+	const rawDisplay = isRecord(displayGroup?.headroom)
+		? displayGroup.headroom
+		: isRecord(source.display)
+			? source.display
+			: source;
 	return {
-		enabled: parseBoolean(source.enabled, DEFAULT_HEADROOM_SETTINGS.enabled),
-		baseUrl: parseUrlValue(source.baseUrl ?? source.url) ?? DEFAULT_HEADROOM_SETTINGS.baseUrl,
-		allowRemote: parseBoolean(source.allowRemote, DEFAULT_HEADROOM_SETTINGS.allowRemote),
-		autoStart: parseBoolean(source.autoStart, DEFAULT_HEADROOM_SETTINGS.autoStart),
-		command: parseString(source.command, DEFAULT_HEADROOM_SETTINGS.command),
-		minContextTokens: parseInteger(source.minContextTokens, DEFAULT_HEADROOM_SETTINGS.minContextTokens, 0),
-		minMessageChars: parseInteger(source.minMessageChars, DEFAULT_HEADROOM_SETTINGS.minMessageChars, 1),
-		timeoutMs: parseInteger(source.timeoutMs, DEFAULT_HEADROOM_SETTINGS.timeoutMs, 100),
-		display: normalizeDisplayConfig(rawDisplay),
+		enabled: parseBoolean(behavior.enabled, DEFAULT_HEADROOM_SETTINGS.enabled),
+		baseUrl: parseUrlValue(behavior.baseUrl ?? behavior.url) ?? DEFAULT_HEADROOM_SETTINGS.baseUrl,
+		allowRemote: parseBoolean(behavior.allowRemote, DEFAULT_HEADROOM_SETTINGS.allowRemote),
+		autoStart: false,
+		command: parseString(behavior.command, DEFAULT_HEADROOM_SETTINGS.command),
+		minContextTokens: parseInteger(behavior.minContextTokens, DEFAULT_HEADROOM_SETTINGS.minContextTokens, 0),
+		minMessageChars: parseInteger(behavior.minMessageChars, DEFAULT_HEADROOM_SETTINGS.minMessageChars, 1),
+		timeoutMs: parseInteger(behavior.timeoutMs, DEFAULT_HEADROOM_SETTINGS.timeoutMs, 100),
+		proxyTokenFile: parseString(behavior.proxyTokenFile, DEFAULT_HEADROOM_SETTINGS.proxyTokenFile),
+		display: normalizeDisplayConfig(behavior.display ?? rawDisplay),
 	};
 }
 
-/** Atomically replace the unified destination with canonical normalized JSON. */
+/** Return root-envelope JSON for init/config writers, or standalone JSON for test paths. */
+export function serializeHeadroomConfig(config: unknown, configPath = HEADROOM_CONFIG_FILE): unknown {
+	const normalized = normalizeHeadroomConfig(config);
+	if (!isHeadroomRootConfigPath(configPath)) return normalized;
+	const root = defaultCodesookOmpConfig();
+	root.behavior.headroom = toBehaviorSection(normalized);
+	root.display.headroom = cloneDisplayConfig(normalized.display);
+	return root;
+}
+/** Atomically replace Headroom's section while preserving other root settings. */
 export function writeHeadroomConfig(config: unknown, configPath = HEADROOM_CONFIG_FILE): void {
 	const normalized = normalizeHeadroomConfig(config);
+	if (isHeadroomRootConfigPath(configPath)) {
+		updateCodesookOmpConfig((root) => {
+			root.behavior.headroom = toBehaviorSection(normalized);
+			root.display.headroom = cloneDisplayConfig(normalized.display);
+		}, configPath);
+		return;
+	}
+
 	const directory = path.dirname(configPath);
 	fs.mkdirSync(directory, { recursive: true });
 	const temporaryPath = path.join(directory, `.${path.basename(configPath)}.${process.pid}.${randomUUID()}.tmp`);
@@ -163,6 +184,10 @@ export function writeHeadroomConfig(config: unknown, configPath = HEADROOM_CONFI
 	}
 }
 
+export function isHeadroomRootConfigPath(configPath: string): boolean {
+	return path.resolve(configPath) === path.resolve(CODESOOK_OMP_CONFIG_PATH);
+}
+
 export function isLocalHeadroomUrl(rawUrl: string): boolean {
 	try {
 		const url = new URL(rawUrl);
@@ -176,9 +201,105 @@ export function isRemoteBlocked(config: Pick<OperationalHeadroomConfig, "baseUrl
 	return !config.allowRemote && !isLocalHeadroomUrl(config.baseUrl);
 }
 
-function migrateLegacyConfig(options: HeadroomConfigLoadOptions): HeadroomSettings {
-	const settingsPaths = options.legacySettingsPaths ?? HEADROOM_SETTINGS_PATHS;
+type LegacyMigration = {
+	operational: HeadroomSettings;
+	display: unknown;
+	importedPaths: string[];
+};
+
+function loadStandaloneConfig(
+	configPath: string,
+	options: HeadroomConfigLoadOptions,
+	env: NodeJS.ProcessEnv,
+): HeadroomConfig {
+	let persisted: unknown;
+	if (fs.existsSync(configPath)) {
+		const destination = readObjectFile(configPath);
+		if (!destination?.value) {
+			options.warn?.(`Headroom config is invalid: ${configPath}`);
+			persisted = {};
+		} else {
+			persisted = destination.value;
+		}
+	} else {
+		const migration = migrateLegacyConfig(options);
+		persisted = { ...migration.operational, display: migration.display };
+		const normalized = normalizeHeadroomConfig(persisted);
+		try {
+			writeHeadroomConfig(normalized, configPath);
+		} catch (error) {
+			options.warn?.(
+				`Could not create Headroom config at ${configPath}: ${error instanceof Error ? error.message : String(error)}`,
+			);
+		}
+		persisted = normalized;
+	}
+	return applyEnvironment(normalizeHeadroomConfig(persisted), env);
+}
+
+function loadRootConfig(
+	configPath: string,
+	options: HeadroomConfigLoadOptions,
+	env: NodeJS.ProcessEnv,
+): HeadroomConfig {
+	const destination = readCodesookOmpConfig(configPath);
+	if (destination.exists && !destination.valid) {
+		options.warn?.(`Headroom config is invalid: ${configPath}`);
+		return applyEnvironment(normalizeHeadroomConfig({}), env);
+	}
+
+	const root = destination.value;
+	const needsBehavior = !Object.hasOwn(root.behavior, "headroom");
+	const needsDisplay = !Object.hasOwn(root.display, "headroom");
+	const migration = needsBehavior || needsDisplay ? migrateLegacyConfig(options, needsBehavior, needsDisplay) : undefined;
+	const persisted = {
+		behavior: { headroom: needsBehavior ? migration?.operational ?? {} : root.behavior.headroom },
+		display: { headroom: needsDisplay ? migration?.display ?? {} : root.display.headroom },
+	};
+	const normalized = normalizeHeadroomConfig(persisted);
+
+	if (needsBehavior || needsDisplay) {
+		try {
+			updateCodesookOmpConfig((next) => {
+				if (needsBehavior) next.behavior.headroom = toBehaviorSection(normalized);
+				if (needsDisplay) next.display.headroom = cloneDisplayConfig(normalized.display);
+			}, configPath);
+			removeImportedLegacyFiles(migration?.importedPaths ?? [], options.warn);
+		} catch (error) {
+			options.warn?.(
+				`Could not create Headroom config at ${configPath}: ${error instanceof Error ? error.message : String(error)}`,
+			);
+		}
+	}
+	return applyEnvironment(normalized, env);
+}
+function migrateLegacyConfig(
+	options: HeadroomConfigLoadOptions,
+	includeSettings = true,
+	includeDisplay = true,
+): LegacyMigration {
+	const importedPaths: string[] = [];
 	let operational: HeadroomSettings = {};
+	let selectedSettings = false;
+	let legacyDisplay: unknown;
+	const packagePath = options.legacyConfigPath;
+	if (packagePath) {
+		const packageConfig = readObjectFile(packagePath);
+		if (packageConfig) {
+			if (!packageConfig.value) {
+				options.warn?.(`Headroom legacy config is invalid: ${packagePath}`);
+			} else {
+				importedPaths.push(packagePath);
+				if (includeSettings) {
+					operational = packageConfig.value as HeadroomSettings;
+					selectedSettings = true;
+				}
+				if (includeDisplay) legacyDisplay = packageConfig.value.display;
+			}
+		}
+	}
+
+	const settingsPaths = options.legacySettingsPaths ?? [];
 	for (const settingsPath of settingsPaths) {
 		const result = readObjectFile(settingsPath);
 		if (!result) continue;
@@ -186,15 +307,54 @@ function migrateLegacyConfig(options: HeadroomConfigLoadOptions): HeadroomSettin
 			options.warn?.(`Headroom legacy settings are invalid: ${settingsPath}`);
 			continue;
 		}
-		operational = result.value as HeadroomSettings;
-		break;
+		importedPaths.push(settingsPath);
+		if (includeSettings && !selectedSettings) {
+			operational = result.value as HeadroomSettings;
+			selectedSettings = true;
+		}
+		if (includeDisplay && legacyDisplay === undefined && result.value.display !== undefined) {
+			legacyDisplay = result.value.display;
+		}
 	}
 
-	const displayPath = options.legacyDisplayPath ?? LEGACY_HEADROOM_DISPLAY_FILE;
-	const display = readObjectFile(displayPath);
-	if (display && !display.value) options.warn?.(`Headroom legacy display config is invalid: ${displayPath}`);
-	if (display?.value) operational = { ...operational, display: display.value };
-	return operational;
+	let display: unknown = includeDisplay ? legacyDisplay : undefined;
+	if (includeDisplay && options.legacyDisplayPath) {
+		const displayPath = options.legacyDisplayPath;
+		const result = readObjectFile(displayPath);
+		if (result && !result.value) options.warn?.(`Headroom legacy display config is invalid: ${displayPath}`);
+		if (result?.value) {
+			importedPaths.push(displayPath);
+			display = result.value;
+		}
+	}
+	return { operational, display, importedPaths };
+}
+
+function removeImportedLegacyFiles(paths: readonly string[], warn?: (message: string) => void): void {
+	for (const filePath of new Set(paths)) {
+		try {
+			fs.unlinkSync(filePath);
+		} catch (error) {
+			if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+				warn?.(`Could not remove migrated Headroom config ${filePath}: ${error instanceof Error ? error.message : String(error)}`);
+			}
+		}
+	}
+}
+
+
+function toBehaviorSection(config: HeadroomConfig): Record<string, unknown> {
+	return {
+		enabled: config.enabled,
+		baseUrl: config.baseUrl,
+		allowRemote: config.allowRemote,
+		autoStart: config.autoStart,
+		command: config.command,
+		minContextTokens: config.minContextTokens,
+		minMessageChars: config.minMessageChars,
+		timeoutMs: config.timeoutMs,
+		proxyTokenFile: config.proxyTokenFile,
+	};
 }
 
 function applyEnvironment(config: HeadroomConfig, env: NodeJS.ProcessEnv): HeadroomConfig {
@@ -207,7 +367,6 @@ function applyEnvironment(config: HeadroomConfig, env: NodeJS.ProcessEnv): Headr
 		[env.PI_HEADROOM_ALLOW_REMOTE, env.HEADROOM_ALLOW_REMOTE],
 		parseBooleanValue,
 	);
-	const envAutoStart = firstParsed([env.PI_HEADROOM_AUTO_START, env.HEADROOM_AUTO_START], parseBooleanValue);
 	const envCommand = firstParsed([env.PI_HEADROOM_COMMAND, env.HEADROOM_COMMAND], parseStringValue);
 	const envMinContextTokens = firstParsed(
 		[env.PI_HEADROOM_MIN_CONTEXT_TOKENS, env.HEADROOM_MIN_CONTEXT_TOKENS],
@@ -226,9 +385,8 @@ function applyEnvironment(config: HeadroomConfig, env: NodeJS.ProcessEnv): Headr
 		...config,
 		enabled: envEnabled ?? config.enabled,
 		baseUrl: envBaseUrl ?? config.baseUrl,
-		allowRemote: envAllowRemote ?? config.allowRemote,
-		autoStart: envAutoStart ?? config.autoStart,
 		command: envCommand ?? config.command,
+		allowRemote: envAllowRemote ?? config.allowRemote,
 		minContextTokens: envMinContextTokens ?? config.minContextTokens,
 		minMessageChars: envMinMessageChars ?? config.minMessageChars,
 		timeoutMs: envTimeoutMs ?? config.timeoutMs,
@@ -261,7 +419,12 @@ function cloneDisplayConfig(config: HeadroomDisplayConfig): HeadroomDisplayConfi
 function isLoadOptions(value: NodeJS.ProcessEnv | HeadroomConfigLoadOptions): value is HeadroomConfigLoadOptions {
 	return (
 		isRecord(value) &&
-		("env" in value || "configPath" in value || "legacySettingsPaths" in value || "legacyDisplayPath" in value || "warn" in value)
+		("env" in value ||
+			"configPath" in value ||
+			"legacyConfigPath" in value ||
+			"legacySettingsPaths" in value ||
+			"legacyDisplayPath" in value ||
+			"warn" in value)
 	);
 }
 

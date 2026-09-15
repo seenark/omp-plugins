@@ -66,6 +66,7 @@ export interface HeadroomConfig {
 	minContextTokens: number;
 	minMessageChars: number;
 	timeoutMs: number;
+	proxyTokenFile: string;
 }
 
 export interface HeadroomStats {

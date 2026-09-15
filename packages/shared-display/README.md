@@ -1,11 +1,18 @@
 # @codesook/omp-shared-display
 
-Opt-in OMP extension that owns the `codesook-shared-display` widget and a versioned EventBus snapshot protocol for Ponytail, Caveman, and Headroom producers.
+Opt-in OMP extension that owns `codesook-shared-display` widget and versioned EventBus snapshot protocol for Ponytail, Caveman, and Headroom producers.
 
-The side-effect-free client is available from `@codesook/omp-shared-display/client`:
+Side-effect-free client and root config helpers:
 
 ```ts
-import { connectSharedDisplay, parseFrameSequenceAsset } from "@codesook/omp-shared-display/client";
+import { connectSharedDisplay } from "@codesook/omp-shared-display/client";
+import { readCodesookOmpConfig } from "@codesook/omp-shared-display/config-store";
 ```
 
-Configure the host at `~/.config/codesook-omp/shared-display/config.json`. The extension registers `/shared-display status` and `/shared-display config`; producers remain safe when no host or EventBus is available.
+Shared Display presentation persists in `display.sharedDisplay` inside:
+
+```text
+~/.config/codesook-omp/config.json
+```
+
+Legacy `~/.config/codesook-omp/shared-display/config.json` migrates once when root section is missing. `/shared-display` command is removed; root `/codesook-omp-plugin` settings owns persisted presentation. Producers remain safe when host/EventBus is absent.

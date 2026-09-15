@@ -1,3 +1,6 @@
+import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
 import type { CompressResult, OpenAIMessage } from "./types.ts";
 
 interface ProxyCompressResponse {
@@ -13,20 +16,41 @@ interface ProxyCompressResponse {
 interface HeadroomClientOptions {
 	baseUrl: string;
 	timeoutMs: number;
+	proxyToken?: string;
+}
+
+export const HEADROOM_PROXY_TOKEN_FILE = path.join(os.homedir(), ".config", "codesook-omp", "headroom", "proxy-token");
+
+export function loadHeadroomProxyToken(tokenPath: string = HEADROOM_PROXY_TOKEN_FILE): string | undefined {
+	const resolvedPath =
+		tokenPath === "~" ? os.homedir() : tokenPath.startsWith("~/") ? path.join(os.homedir(), tokenPath.slice(2)) : tokenPath;
+	try {
+		const token = fs.readFileSync(resolvedPath, "utf8").trim();
+		return token || undefined;
+	} catch {
+		return undefined;
+	}
 }
 
 export class HeadroomHttpClient {
 	private readonly baseUrl: string;
 	private readonly timeoutMs: number;
+	private readonly proxyToken: string | undefined;
 
 	constructor(options: HeadroomClientOptions) {
 		this.baseUrl = options.baseUrl.replace(/\/+$/, "");
 		this.timeoutMs = options.timeoutMs;
+		this.proxyToken = options.proxyToken?.trim() || undefined;
+	}
+
+	private proxyHeaders(): Record<string, string> {
+		return this.proxyToken ? { "X-Headroom-Proxy-Token": this.proxyToken } : {};
 	}
 
 	async health(signal?: AbortSignal): Promise<boolean> {
 		try {
 			const response = await fetch(`${this.baseUrl}/health`, {
+				headers: this.proxyHeaders(),
 				signal: buildSignal(this.timeoutMs, signal),
 			});
 			if (!response.ok) return false;
@@ -40,6 +64,7 @@ export class HeadroomHttpClient {
 
 	async stats(signal?: AbortSignal): Promise<unknown> {
 		const response = await fetch(`${this.baseUrl}/stats`, {
+			headers: this.proxyHeaders(),
 			signal: buildSignal(this.timeoutMs, signal),
 		});
 		if (!response.ok) {
@@ -52,6 +77,7 @@ export class HeadroomHttpClient {
 		const response = await fetch(`${this.baseUrl}/v1/compress`, {
 			method: "POST",
 			headers: {
+				...this.proxyHeaders(),
 				"Content-Type": "application/json",
 				"X-Headroom-Stack": "omp-extension",
 			},

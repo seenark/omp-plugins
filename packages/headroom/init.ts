@@ -3,6 +3,9 @@ import * as path from "node:path";
 import {
 	DEFAULT_HEADROOM_CONFIG,
 	HEADROOM_CONFIG_FILE,
+	isHeadroomRootConfigPath,
+	serializeHeadroomConfig,
+	writeHeadroomConfig,
 } from "./config.ts";
 import {
 	DEFAULT_GLYPHS,
@@ -54,7 +57,7 @@ export function buildHeadroomInitFiles(
 	const configFile: HeadroomInitFile = {
 		path: configPath,
 		label: "config.json",
-		content: `${JSON.stringify(DEFAULT_HEADROOM_CONFIG, null, 2)}\n`,
+		content: `${JSON.stringify(serializeHeadroomConfig(DEFAULT_HEADROOM_CONFIG, configPath), null, 2)}\n`,
 	};
 	const glyphFiles = INIT_GLYPH_STATES.map((state) => ({
 		path: path.join(glyphDirectory, `${state}.txt`),
@@ -91,7 +94,8 @@ export async function writeHeadroomInitFiles(
 				result.skipped.push(file.path);
 				continue;
 			}
-			await Bun.write(file.path, file.content);
+			if (isHeadroomRootConfigPath(file.path)) writeHeadroomConfig(DEFAULT_HEADROOM_CONFIG, file.path);
+			else await Bun.write(file.path, file.content);
 			(exists ? result.overwritten : result.created).push(file.path);
 		} catch (error) {
 			result.failed.push({

@@ -2,6 +2,10 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import {
+	CODESOOK_OMP_CONFIG_PATH,
+	readCodesookOmpConfig,
+} from "@codesook/omp-shared-display/config-store";
+import {
 	parseFrameSequenceAsset,
 	type BlockFrame,
 	type FrameSequence,
@@ -38,13 +42,7 @@ export interface HeadroomDisplayConfig {
 	status: Record<DisplayState, string>;
 }
 
-const HEADROOM_CONFIG_FILE = path.join(
-	os.homedir(),
-	".config",
-	"codesook-omp",
-	"headroom",
-	"config.json",
-);
+const HEADROOM_CONFIG_FILE = CODESOOK_OMP_CONFIG_PATH;
 export const GLYPH_DIR = path.join(os.homedir(), ".config", "codesook-omp", "headroom");
 export const DEFAULT_GLYPH_DIRECTORY = "~/.config/codesook-omp/headroom";
 export const DEFAULT_HEADROOM_SEGMENT_TEMPLATE = "{status}";
@@ -118,13 +116,16 @@ export function normalizeDisplayConfig(raw: unknown): HeadroomDisplayConfig {
 }
 
 export function loadDisplayConfig(configPath = HEADROOM_CONFIG_FILE): HeadroomDisplayConfig {
+	if (path.resolve(configPath) === path.resolve(CODESOOK_OMP_CONFIG_PATH)) {
+		const destination = readCodesookOmpConfig(configPath);
+		return destination.valid ? normalizeDisplayConfig(destination.value.display.headroom) : normalizeDisplayConfig({});
+	}
 	try {
 		return normalizeDisplayConfig(JSON.parse(fs.readFileSync(configPath, "utf8")));
 	} catch {
 		return normalizeDisplayConfig({});
 	}
 }
-
 export interface GlyphAsset {
 	frames: readonly BlockFrame[];
 	fps?: number;

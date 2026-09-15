@@ -1,39 +1,42 @@
 {
-  "name": "@codesook/omp-shared-display",
+  "name": "@codesook/omp-plugin-settings",
   "version": "1.0.0",
   "type": "module",
-  "description": "Opt-in shared status display host and EventBus client for oh-my-pi",
+  "description": "Unified Codesook OMP plugin settings for oh-my-pi",
   "license": "MIT",
   "files": [
-    "src/index.ts",
-    "src/client.ts",
-    "src/config-store.ts",
-    "assets",
-    "README.md",
+    "index.ts",
     "tsconfig.json"
   ],
   "scripts": {
     "check:types": "tsc -p tsconfig.json --noEmit",
-    "test": "bun test",
     "pack:check": "bun ../../scripts/check-package-files.ts"
   },
   "exports": {
-    ".": "./src/index.ts",
-    "./client": "./src/client.ts",
-    "./config-store": "./src/config-store.ts"
+    ".": "./index.ts"
+  },
+  "dependencies": {
+    "@codesook/omp-caveman": "^1.0.0",
+    "@codesook/omp-headroom": "^2.0.0",
+    "@codesook/omp-prompt-border-style": "^2.0.0",
+    "@codesook/omp-shared-display": "^1.0.0"
   },
   "peerDependencies": {
     "@oh-my-pi/pi-coding-agent": ">=18.1.16",
     "@oh-my-pi/pi-tui": ">=18.1.16"
   },
   "devDependencies": {
+    "@codesook/omp-caveman": "workspace:*",
+    "@codesook/omp-headroom": "workspace:*",
+    "@codesook/omp-prompt-border-style": "workspace:*",
+    "@codesook/omp-shared-display": "workspace:*",
     "@oh-my-pi/pi-coding-agent": "18.1.16",
     "@oh-my-pi/pi-tui": "18.1.16",
     "bun-types": "latest",
     "typescript": "latest"
   },
   "omp": {
-    "extensions": ["./src/index.ts"]
+    "extensions": ["./index.ts"]
   },
   "publishConfig": {
     "access": "public"

@@ -23,6 +23,30 @@
         "@oh-my-pi/pi-tui": ">=18.1.16",
       },
     },
+    "packages/codesook-omp-plugin": {
+      "name": "@codesook/omp-plugin-settings",
+      "version": "1.0.0",
+      "dependencies": {
+        "@codesook/omp-caveman": "^1.0.0",
+        "@codesook/omp-headroom": "^2.0.0",
+        "@codesook/omp-prompt-border-style": "^2.0.0",
+        "@codesook/omp-shared-display": "^1.0.0",
+      },
+      "devDependencies": {
+        "@codesook/omp-caveman": "workspace:*",
+        "@codesook/omp-headroom": "workspace:*",
+        "@codesook/omp-prompt-border-style": "workspace:*",
+        "@codesook/omp-shared-display": "workspace:*",
+        "@oh-my-pi/pi-coding-agent": "18.1.16",
+        "@oh-my-pi/pi-tui": "18.1.16",
+        "bun-types": "latest",
+        "typescript": "latest",
+      },
+      "peerDependencies": {
+        "@oh-my-pi/pi-coding-agent": ">=18.1.16",
+        "@oh-my-pi/pi-tui": ">=18.1.16",
+      },
+    },
     "packages/headroom": {
       "name": "@codesook/omp-headroom",
       "version": "2.0.0",
@@ -46,7 +70,11 @@
     "packages/prompt-border-style": {
       "name": "@codesook/omp-prompt-border-style",
       "version": "2.0.0",
+      "dependencies": {
+        "@codesook/omp-shared-display": "^1.0.0",
+      },
       "devDependencies": {
+        "@codesook/omp-shared-display": "workspace:*",
         "@oh-my-pi/pi-coding-agent": "18.1.16",
         "@oh-my-pi/pi-tui": "18.1.16",
         "bun-types": "latest",
@@ -91,6 +119,8 @@
     "@codesook/omp-caveman": ["@codesook/omp-caveman@workspace:packages/caveman"],
 
     "@codesook/omp-headroom": ["@codesook/omp-headroom@workspace:packages/headroom"],
+
+    "@codesook/omp-plugin-settings": ["@codesook/omp-plugin-settings@workspace:packages/codesook-omp-plugin"],
 
     "@codesook/omp-prompt-border-style": ["@codesook/omp-prompt-border-style@workspace:packages/prompt-border-style"],
 

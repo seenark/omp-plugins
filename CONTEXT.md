@@ -117,3 +117,27 @@ The configured relation of Meaning Text to inline Glyph Tiles: above, below, or 
 **Independent Gauges**:
 The native context gauge and plugin Context Rail may be enabled simultaneously; neither one changes the other's settings or visibility.
 _Avoid_: Mirrored gauge, replacement gauge
+
+**Root Plugin Configuration**:
+The versioned `~/.config/codesook-omp/config.json` envelope containing `display` and `behavior` groups for all Codesook OMP features.
+_Avoid_: Package config, shared config file
+
+**Display Configuration**:
+Presentation settings owned by a display surface or producer, including layout, templates, visibility, and external asset paths. Glyph and frame bytes remain outside root JSON.
+_Avoid_: Runtime behavior
+
+**Behavior Configuration**:
+Feature runtime settings such as enable gates, thresholds, proxy URL, and session defaults.
+_Avoid_: Lifecycle state
+
+**Plugin Lifecycle State**:
+OMP plugin-manager enablement reported by `omp plugin list --json`; changes apply on next OMP start and are informational in root settings.
+_Avoid_: Live unload, runtime toggle
+
+**Read-only Status Overlay**:
+A focused TUI surface that starts with `Loading…`, renders async result or error, closes with Enter/Esc, and never captures prompt input or aborts active work.
+_Avoid_: Notification, prompt dialog
+
+**External Proxy**:
+A Headroom service managed outside OMP, such as Docker or Cloudflare. Headroom performs health checks and requests but never starts or stops that service.
+_Avoid_: Auto-start proxy

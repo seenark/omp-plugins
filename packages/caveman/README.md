@@ -20,41 +20,46 @@ The package is opt-in in the repository feature manifest. It requires OMP and pi
 
 ## Levels and commands
 
-The canonical levels are `off`, `lite`, `full`, `ultra`, `wenyan-lite`, `wenyan-full`, and `wenyan-ultra`. `full` is the default for a new session.
+Canonical levels: `off`, `lite`, `full`, `ultra`, `wenyan-lite`, `wenyan-full`, and `wenyan-ultra`. `full` is default for new session.
 
 ```text
-/caveman                         Open staged settings
-/caveman config                  Open staged settings
-/caveman status                  Report current and persisted settings
+/caveman status                  Show focused read-only status overlay
 /caveman off|lite|full|ultra     Set current-session level
 /caveman wenyan-lite             Set current-session level
 /caveman wenyan-full             Set current-session level
 /caveman wenyan-ultra            Set current-session level
 ```
 
-`micro`, bare `wenyan`, `stop`, `quit`, and unknown arguments are rejected. Level commands append a `caveman-level` session entry, so resume and branch operations recover the newest valid entry by reverse branch scan. Changing `defaultLevel` in settings selects and records that level for the current session; display-only changes do not change the current level.
+Bare `/caveman` settings form and `/caveman config` are removed; root `/codesook-omp-plugin` owns persisted settings. Status overlay closes with Enter/Esc. Level commands append `caveman-level` session entry, so resume and branch operations recover newest valid entry.
 
 ## Configuration
 
-The package persists one normalized file at `~/.config/codesook-omp/caveman/config.json`:
+All feature settings persist in root envelope:
+
+```text
+~/.config/codesook-omp/config.json
+```
+
+Caveman uses `behavior.caveman.defaultLevel` and `display.caveman`:
 
 ```json
 {
-  "defaultLevel": "full",
-  "nativeVisible": false,
+  "version": 1,
   "display": {
-    "visible": true,
-    "template": "{activity} {glyph} caveman: {level}",
-    "glyphDirectory": "~/.config/codesook-omp/caveman/glyphs"
+    "caveman": {
+      "visible": true,
+      "template": "{activity} {glyph} caveman: {level}",
+      "glyphDirectory": "~/.config/codesook-omp/caveman/glyphs",
+      "nativeVisible": false
+    }
+  },
+  "behavior": {
+    "caveman": { "defaultLevel": "full" }
   }
 }
 ```
 
-`defaultLevel` accepts only the six active canonical levels or `off`. A missing value uses `full`; an explicitly noncanonical destination value becomes `off` and raises one warning per extension activation. Boolean fields must be booleans. `template` and `glyphDirectory` must be nonempty single-line strings. Invalid individual fields use their defaults while an invalid JSON destination is never overwritten or supplemented from legacy data.
-
-Before this file exists, the extension reads exactly one legacy `caveman.json`: `$PI_CODING_AGENT_DIR/caveman.json`, or `$XDG_CONFIG_HOME/pi/agent/caveman.json`, or `~/.pi/agent/caveman.json`. It maps legacy `wenyan` to `wenyan-full`, maps `micro` and other noncanonical levels to `off`, maps `showStatus` to `nativeVisible`, then atomically creates the unified file. Missing active-level glyph files are seeded without overwriting existing files. Later loads use the destination only.
-
-The settings dialog edits a draft. Apply validates the whole draft and atomically renames a temporary sibling over `config.json`; failed writes, Escape, Cancel, and Reload leave live runtime unchanged. Initialize missing glyphs asks for confirmation and is intentionally not rolled back by Cancel.
+Legacy `~/.config/codesook-omp/caveman/config.json` and `.pi/agent/caveman.json` migrate into missing root sections, then valid legacy JSON files are removed after successful migration. Invalid root JSON wins and is never overwritten; invalid legacy files remain for repair. Glyph files remain external.
 
 ## Assets
 
@@ -65,7 +70,7 @@ fps=5
 ⠠⠄ ⠔⠂ ⠊⠑ ⠑⠊ ⠂⠔ ⠄⠠ ⠠⠄ ⠔⠂
 ```
 
-Lite assets use `fps=3.3333333333333335`, full assets use `fps=5`, and ultra assets use `fps=10`. A user file named `<level>.txt` in `display.glyphDirectory` overrides its packaged asset only when the Shared Display parser accepts it. Missing or invalid user files fall back to the package asset. Explicit Initialize copies only missing files.
+Lite assets use `fps=3.3333333333333335`, full assets use `fps=5`, and ultra assets use `fps=10`. A user file named `<level>.txt` in `display.glyphDirectory` overrides its packaged asset only when the Shared Display parser accepts it. Missing or invalid user files fall back to the package asset. Config load seeds only missing asset files.
 
 Templates replace `{activity}`, `{glyph}`, and `{level}` once. Multiline frame rows remain multiline in the published Block Frame. The glyph is rendered with the OMP accent theme. Native status uses only frame zero's first row (or the packaged one-row fallback), so it never receives CR/LF.
 

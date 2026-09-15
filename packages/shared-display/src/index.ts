@@ -1,3 +1,26 @@
+export {
+	CODESOOK_OMP_CONFIG_CHANGED,
+	CODESOOK_OMP_CONFIG_PATH,
+	defaultCodesookOmpConfig,
+	isRecord,
+	readCodesookOmpConfig,
+	readCodesookOmpSection,
+	updateCodesookOmpConfig,
+	updateCodesookOmpSection,
+	writeCodesookOmpConfig,
+	type CodesookOmpConfig,
+	type CodesookOmpConfigGroup,
+	type CodesookOmpConfigReadResult,
+} from "./config-store.ts";
+import {
+	CODESOOK_OMP_CONFIG_CHANGED,
+	CODESOOK_OMP_CONFIG_PATH,
+	isRecord,
+	readCodesookOmpConfig,
+	readCodesookOmpSection,
+	updateCodesookOmpSection,
+} from "./config-store.ts";
+
 import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import * as os from "node:os";
@@ -71,13 +94,14 @@ export type SharedDisplayConfig = {
 	};
 };
 
-export const SHARED_DISPLAY_CONFIG_PATH = path.join(
+const LEGACY_SHARED_DISPLAY_CONFIG_PATH = path.join(
 	os.homedir(),
 	".config",
 	"codesook-omp",
 	"shared-display",
 	"config.json",
 );
+export const SHARED_DISPLAY_CONFIG_PATH = CODESOOK_OMP_CONFIG_PATH;
 export const DEFAULT_SHARED_DISPLAY_CONFIG: SharedDisplayConfig = {
 	enabled: true,
 	layout: "horizontal",
@@ -142,7 +166,43 @@ export function normalizeSharedDisplayConfig(raw: unknown): SharedDisplayConfig 
 	return normalized;
 }
 
+function isRootConfigPath(configPath: string): boolean {
+	return configPath === CODESOOK_OMP_CONFIG_PATH;
+}
+
+function loadLegacySharedDisplayConfig(): SharedDisplayConfig | undefined {
+	try {
+		const raw: unknown = JSON.parse(readFileSync(LEGACY_SHARED_DISPLAY_CONFIG_PATH, "utf8"));
+		return isObject(raw) ? normalizeSharedDisplayConfig(raw) : undefined;
+	} catch {
+		return undefined;
+	}
+}
+
+function migrateLegacySharedDisplayConfig(fallback: SharedDisplayConfig): SharedDisplayConfig {
+	const legacy = loadLegacySharedDisplayConfig();
+	if (legacy === undefined) return fallback;
+	try {
+		updateCodesookOmpSection("display", "sharedDisplay", legacy, CODESOOK_OMP_CONFIG_PATH);
+		rmSync(LEGACY_SHARED_DISPLAY_CONFIG_PATH, { force: true });
+	} catch {
+		// Keep legacy settings active when migration cannot be completed.
+	}
+	return legacy;
+}
+
+function loadRootSharedDisplayConfig(): SharedDisplayConfig {
+	const root = readCodesookOmpConfig(CODESOOK_OMP_CONFIG_PATH);
+	if (root.exists && !root.valid) return cloneDefaultConfig();
+	if (root.exists) {
+		const section = readCodesookOmpSection(root.value, "display", "sharedDisplay");
+		if (section !== undefined) return normalizeSharedDisplayConfig(section);
+	}
+	return migrateLegacySharedDisplayConfig(cloneDefaultConfig());
+}
+
 export function loadSharedDisplayConfig(configPath = SHARED_DISPLAY_CONFIG_PATH): SharedDisplayConfig {
+	if (isRootConfigPath(configPath)) return loadRootSharedDisplayConfig();
 	try {
 		return normalizeSharedDisplayConfig(JSON.parse(readFileSync(configPath, "utf8")));
 	} catch {
@@ -208,6 +268,10 @@ export function writeSharedDisplayConfig(
 ): void {
 	const errors = validateSharedDisplayConfig(config);
 	if (errors.length > 0) throw new Error(errors.join("; "));
+	if (isRootConfigPath(configPath)) {
+		updateCodesookOmpSection("display", "sharedDisplay", config, configPath);
+		return;
+	}
 	mkdirSync(path.dirname(configPath), { recursive: true });
 	const temporaryPath = path.join(
 		path.dirname(configPath),
@@ -458,6 +522,7 @@ type HostRuntime = {
 	events?: SharedDisplayEvents;
 	publisher?: SharedDisplayPublisher;
 	unsubscribe?: () => void;
+	configUnsubscribe?: () => void;
 	ctx?: HostContext;
 	epoch?: string;
 	snapshots: Map<DisplaySource, FrameSequence>;
@@ -609,6 +674,19 @@ function syncWidget(runtime: HostRuntime): void {
 	}
 	ensureAnimationTimer(runtime);
 	requestRender(runtime);
+}
+
+function parseSharedDisplayConfigChanged(data: unknown): SharedDisplayConfig | undefined {
+	if (!isRecord(data) || !isRecord(data.config)) return undefined;
+	const config = data.config;
+	if (config.version !== 1 || !isRecord(config.display) || !isRecord(config.behavior)) return undefined;
+	return normalizeSharedDisplayConfig(config.display.sharedDisplay);
+}
+
+function handleSharedDisplayConfigChanged(runtime: HostRuntime, data: unknown): void {
+	if (!isRootConfigPath(runtime.configPath)) return;
+	const next = parseSharedDisplayConfigChanged(data);
+	if (next !== undefined) applySharedDisplayRuntime(runtime, next);
 }
 
 function safeEmit(events: SharedDisplayEvents | undefined, data: unknown): void {
@@ -765,17 +843,10 @@ function shutdown(runtime: HostRuntime): void {
 	resetSnapshots(runtime);
 	runtime.unsubscribe?.();
 	runtime.unsubscribe = undefined;
+	runtime.configUnsubscribe?.();
+	runtime.configUnsubscribe = undefined;
 }
 
-function statusText(runtime: HostRuntime): string {
-	return [
-		`Shared Display: ${runtime.config.enabled ? "enabled" : "disabled"}`,
-		`Layout: ${runtime.config.layout}`,
-		`Placement: ${runtime.config.widgetPlacement}`,
-		`Sources: ${runtime.config.order.length > 0 ? runtime.config.order.join(", ") : "none"}`,
-		`Config: ${runtime.configPath}`,
-	].join("\n");
-}
 function parseOrderInput(value: string): DisplaySource[] {
 	if (value.trim() === "") return [];
 	return [...new Set(value.split(",").map(item => item.trim()).filter(isDisplaySource))];
@@ -793,7 +864,7 @@ function inputSubmenu(
 	return input;
 }
 
-function sharedDisplaySettingsItems(
+export function sharedDisplaySettingsItems(
 	draft: SharedDisplayConfig,
 ): SettingItem[] {
 	return [
@@ -920,7 +991,7 @@ function sharedDisplaySettingsItems(
 	];
 }
 
-function updateSharedDisplayDraft(
+export function updateSharedDisplayDraft(
 	draft: SharedDisplayConfig,
 	id: string,
 	value: string,
@@ -970,7 +1041,7 @@ function applySharedDisplayRuntime(runtime: HostRuntime, next: SharedDisplayConf
 	syncWidget(runtime);
 }
 
-async function openSharedDisplayConfigDialog(runtime: HostRuntime, context: HostContext): Promise<void> {
+export async function openSharedDisplayConfigDialog(runtime: HostRuntime, context: HostContext): Promise<void> {
 	if (!context.hasUI || context.ui.custom === undefined) {
 		context.ui.notify("Shared Display configuration requires the interactive TUI.", "warning");
 		return;
@@ -1074,6 +1145,11 @@ export default function sharedDisplayExtension(pi: ExtensionAPI, options: HostOp
 	runtime.events = (pi as unknown as { events?: SharedDisplayEvents }).events;
 	if (runtime.events !== undefined) {
 		runtime.unsubscribe = runtime.events.on(CHANNEL, data => handleHostMessage(runtime, data));
+		if (isRootConfigPath(runtime.configPath)) {
+			runtime.configUnsubscribe = runtime.events.on(CODESOOK_OMP_CONFIG_CHANGED, data =>
+				handleSharedDisplayConfigChanged(runtime, data),
+			);
+		}
 	}
 
 	pi.on("session_start", (_event, ctx) => startSession(runtime, ctx));
@@ -1083,28 +1159,6 @@ export default function sharedDisplayExtension(pi: ExtensionAPI, options: HostOp
 	pi.on("agent_end", (event) => endAgent(runtime, event));
 	pi.on("session_shutdown", () => shutdown(runtime));
 
-	pi.registerCommand("shared-display", {
-		description: "Configure or inspect Shared Display. Usage: /shared-display [config|status]",
-		getArgumentCompletions(argumentPrefix) {
-			const prefix = argumentPrefix.trim().toLowerCase();
-			return ["config", "status"]
-				.filter(value => value.startsWith(prefix))
-				.map(value => ({ value, label: value }));
-		},
-		handler: async (args, ctx) => {
-			const tokens = args.trim().toLowerCase().split(/\s+/u).filter(Boolean);
-			const command = tokens[0] ?? "config";
-			if (tokens.length > 1 || (command !== "config" && command !== "status")) {
-				ctx.ui.notify("Usage: /shared-display [config|status]", "warning");
-				return;
-			}
-			if (command === "status") {
-				ctx.ui.notify(statusText(runtime), "info");
-				return;
-			}
-			await openSharedDisplayConfigDialog(runtime, ctx as unknown as HostContext);
-		},
-	});
 }
 
 export const __test__ = {
