@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -11,6 +12,16 @@ interface ProxyCompressResponse {
 	compression_ratio: number;
 	transforms_applied: string[];
 	ccr_hashes?: string[];
+}
+
+export class HeadroomHttpError extends Error {
+	constructor(
+		readonly status: number,
+		message: string,
+	) {
+		super(message);
+		this.name = "HeadroomHttpError";
+	}
 }
 
 interface HeadroomClientOptions {
@@ -31,6 +42,37 @@ export function loadHeadroomProxyToken(tokenPath: string = HEADROOM_PROXY_TOKEN_
 		return undefined;
 	}
 }
+
+export function writeHeadroomProxyToken(token: string, tokenPath: string = HEADROOM_PROXY_TOKEN_FILE): string {
+	const normalizedToken = token.trim();
+	if (!normalizedToken) throw new Error("Headroom proxy token must not be empty.");
+	if (/[\r\n]/u.test(normalizedToken)) throw new Error("Headroom proxy token must not contain newlines.");
+
+	const resolvedPath =
+		tokenPath === "~" ? os.homedir() : tokenPath.startsWith("~/") ? path.join(os.homedir(), tokenPath.slice(2)) : tokenPath;
+	const directory = path.dirname(resolvedPath);
+	fs.mkdirSync(directory, { recursive: true, mode: 0o700 });
+	fs.chmodSync(directory, 0o700);
+	const temporaryPath = path.join(directory, `.${path.basename(resolvedPath)}.${process.pid}.${randomUUID()}.tmp`);
+	try {
+		fs.writeFileSync(temporaryPath, `${normalizedToken}\n`, {
+			encoding: "utf8",
+			flag: "wx",
+			mode: 0o600,
+		});
+		fs.chmodSync(temporaryPath, 0o600);
+		fs.renameSync(temporaryPath, resolvedPath);
+	} catch (error) {
+		try {
+			fs.unlinkSync(temporaryPath);
+		} catch {
+			// Preserve the original write error.
+		}
+		throw error;
+	}
+	return resolvedPath;
+}
+
 
 export class HeadroomHttpClient {
 	private readonly baseUrl: string;
@@ -87,7 +129,7 @@ export class HeadroomHttpClient {
 
 		if (!response.ok) {
 			const message = await readErrorMessage(response);
-			throw new Error(message || `Headroom /v1/compress failed with HTTP ${response.status}`);
+			throw new HeadroomHttpError(response.status, message || `Headroom /v1/compress failed with HTTP ${response.status}`);
 		}
 
 		const payload = (await response.json()) as ProxyCompressResponse;

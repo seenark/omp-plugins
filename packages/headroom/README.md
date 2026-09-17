@@ -47,10 +47,11 @@ The package manifest exposes `./index.ts` through `omp.extensions`.
 /headroom off
 /headroom health
 /headroom stats
+/headroom token
 /headroom init [config|glyphs|all]
 ```
 
-`/headroom status`, `/headroom health`, and `/headroom stats` open focused read-only overlays. Loading is immediate; Enter/Esc closes. `/headroom on` and `/headroom off` change compression for current session only. `/headroom health` checks external proxy reachability. Initialization creates root config sections and state glyph files, asking before overwriting.
+`/headroom status`, `/headroom health`, and `/headroom stats` open focused read-only overlays. Loading is immediate; Enter/Esc closes. `/headroom on` and `/headroom off` change compression for current session only. `/headroom token` opens an interactive token field, overwrites the configured token file, reloads the client, and checks proxy health immediately. The field is intentionally visible while typing. Never pass the token as a command argument. `/headroom health` checks external proxy reachability. Initialization creates root config sections and state glyph files, asking before overwriting.
 
 Persisted settings are owned by root `/codesook-omp-plugin`; Headroom has no config dialog.
 
@@ -99,7 +100,7 @@ Example:
 }
 ```
 
-`autoStart` remains normalized to `false` for compatibility. Proxy token file is optional and read only by request path; token contents never enter root JSON.
+`autoStart` remains normalized to `false` for compatibility. Proxy token file is optional and read only by request path; token contents never enter root JSON. When the file is absent or blank, requests omit `X-Headroom-Proxy-Token` and use the proxy's unauthenticated access policy. `/headroom token` trims outer whitespace, rejects blank values and embedded newlines, writes atomically with file mode `0600`, and keeps the saved token when the health check cannot reach the proxy.
 
 ## Migration
 
@@ -126,7 +127,8 @@ Headroom connects to versioned `codesook/shared-display/v1` channel with source 
 2. Convert messages to the Headroom OpenAI-shaped payload.
 3. Submit only eligible large `toolResult` messages.
 4. Apply a response only when message alignment, roles, tool-call IDs, and non-candidate content remain safe.
-5. On timeout, proxy failure, or unsafe output, retain the original context.
+5. Keep a reachable proxy online when its compression endpoint returns an HTTP error; status reports compression as unavailable until a successful health check allows retry.
+6. On timeout, proxy failure, or unsafe output, retain the original context.
 
 
 ## Development

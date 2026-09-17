@@ -13,7 +13,7 @@ import {
 	type SharedDisplayPublisher,
 } from "@codesook/omp-shared-display/client";
 import { applyCompressionResult, buildCompressionPayload } from "./bridge.ts";
-import { HeadroomHttpClient, loadHeadroomProxyToken } from "./client.ts";
+import { HeadroomHttpClient, HeadroomHttpError, loadHeadroomProxyToken, writeHeadroomProxyToken } from "./client.ts";
 import {
 	HEADROOM_CONFIG_FILE,
 	isHeadroomRootConfigPath,
@@ -38,9 +38,9 @@ import {
 } from "./init.ts";
 import type { AgentMessage, CompressResult, HeadroomStats } from "./types.ts";
 
-const SUBCOMMANDS = ["status", "on", "off", "health", "stats", "init"] as const;
+const SUBCOMMANDS = ["status", "on", "off", "health", "stats", "token", "init"] as const;
 const INIT_TARGETS = ["config", "glyphs", "all"] as const;
-const HEADROOM_USAGE = "Usage: /headroom [status|on|off|health|stats|init [config|glyphs|all]]";
+const HEADROOM_USAGE = "Usage: /headroom [status|on|off|health|stats|token|init [config|glyphs|all]]";
 
 type Subcommand = (typeof SUBCOMMANDS)[number];
 type ParsedCommand = { command: Subcommand | "invalid"; initTarget?: HeadroomInitTarget };
@@ -49,6 +49,7 @@ type HeadroomRuntimeState = {
 	enabled: boolean;
 	sessionEnabledOverride: boolean | undefined;
 	proxyOnline: boolean | null;
+	compressionAvailable: boolean | null;
 	proxyStarting: boolean;
 	proxyStartAttempted: boolean;
 	remoteWarningShown: boolean;
@@ -164,6 +165,7 @@ function createRuntime(options: HeadroomConfigLoadOptions & { glyphDirectory?: s
 		enabled: config.enabled,
 		sessionEnabledOverride: undefined,
 		proxyOnline: null,
+		compressionAvailable: null,
 		proxyStarting: false,
 		proxyStartAttempted: false,
 		remoteWarningShown: false,
@@ -219,7 +221,7 @@ function resetSession(
 	}
 	runtime.state.enabled = nextConfig.enabled;
 	runtime.state.sessionEnabledOverride = undefined;
-	runtime.state.proxyOnline = null;
+	runtime.state.compressionAvailable = null;
 	runtime.state.proxyStarting = false;
 	runtime.state.proxyStartAttempted = false;
 	runtime.state.remoteWarningShown = false;
@@ -290,10 +292,12 @@ function applyLiveConfig(runtime: HeadroomRuntime, next: HeadroomConfig, ctx: Ex
 	if (clientChanged) {
 		runtime.client = createClient(next);
 		runtime.state.proxyOnline = null;
+		runtime.state.compressionAvailable = null;
 		runtime.state.proxyStarting = false;
 		runtime.state.proxyStartAttempted = false;
 	}
 	runtime.state.enabled = runtime.state.sessionEnabledOverride ?? next.enabled;
+	if (!wasEnabled && runtime.state.enabled) runtime.state.compressionAvailable = null;
 	runtime.state.remoteWarningShown = false;
 	runtime.state.offlineWarningShown = false;
 	if (ctx) {
@@ -316,6 +320,7 @@ async function updateHealthState(
 	const online = await client.health(signal);
 	if (generation !== runtime.healthGeneration || client !== runtime.client) return runtime.state.proxyOnline === true;
 	runtime.state.proxyOnline = online;
+	if (online && runtime.state.compressionAvailable === false) runtime.state.compressionAvailable = null;
 	return online;
 }
 
@@ -347,11 +352,12 @@ async function handleContextCompression(
 	const config = runtime.config;
 	const client = runtime.client;
 	const payload = buildCompressionPayload(event.messages, config.minMessageChars);
-	if (payload.candidateCount === 0 || runtime.state.proxyOnline !== true) return undefined;
+	if (payload.candidateCount === 0 || runtime.state.proxyOnline !== true || runtime.state.compressionAvailable === false) return undefined;
 
 	runtime.state.stats.attempts++;
 	try {
 		const result = await client.compress(payload.messages, ctx.model?.id);
+		runtime.state.compressionAvailable = true;
 		runtime.state.proxyOnline = true;
 		if (!result.compressed || result.tokensSaved <= 0) {
 			runtime.refreshStatus(ctx);
@@ -406,6 +412,11 @@ function recordAppliedCompression(stats: HeadroomStats, result: CompressResult, 
 function recordCompressionError(runtime: HeadroomRuntime, ctx: ExtensionContext, error: unknown): void {
 	runtime.state.stats.lastError = getErrorMessage(error);
 	if (isAbortOrTimeoutError(error)) {
+		runtime.refreshStatus(ctx);
+		return;
+	}
+	if (error instanceof HeadroomHttpError) {
+		runtime.state.compressionAvailable = false;
 		runtime.refreshStatus(ctx);
 		return;
 	}
@@ -509,6 +520,45 @@ async function showProxyHealth(runtime: HeadroomRuntime, ctx: ExtensionContext):
 	});
 }
 
+async function setupProxyToken(runtime: HeadroomRuntime, ctx: ExtensionContext): Promise<void> {
+	if (!ctx.hasUI || typeof ctx.ui.input !== "function") {
+		notify(ctx, "Headroom token setup requires interactive UI.", "warning");
+		return;
+	}
+
+	let token: string | undefined;
+	try {
+		token = await ctx.ui.input("Headroom proxy token (visible)", "Paste token");
+	} catch (error) {
+		notify(ctx, `Headroom token setup failed: ${getErrorMessage(error)}`, "error");
+		return;
+	}
+	if (token === undefined) {
+		notify(ctx, "Headroom token setup cancelled.", "info");
+		return;
+	}
+
+	try {
+		const tokenPath = writeHeadroomProxyToken(token, runtime.config.proxyTokenFile);
+		runtime.healthGeneration++;
+		runtime.client = createClient(runtime.config);
+		runtime.state.proxyOnline = null;
+		runtime.state.compressionAvailable = null;
+		runtime.state.remoteWarningShown = false;
+		runtime.state.offlineWarningShown = false;
+		const healthy = await runtime.updateHealth(ctx);
+		notify(
+			ctx,
+			healthy
+				? `Headroom proxy token saved: ${tokenPath}\nProxy online: ${runtime.config.baseUrl}`
+				: `Headroom proxy token saved: ${tokenPath}\nProxy not reachable: ${runtime.config.baseUrl}`,
+			healthy ? "info" : "warning",
+		);
+	} catch (error) {
+		notify(ctx, `Headroom token setup failed: ${getErrorMessage(error)}`, "error");
+	}
+}
+
 async function handleCommand(
 	runtime: HeadroomRuntime,
 	parsed: ParsedCommand,
@@ -521,6 +571,11 @@ async function handleCommand(
 	}
 	if (parsed.command === "init") {
 		await handleInitCommand(ctx, parsed.initTarget, initPaths);
+		return;
+	}
+
+	if (parsed.command === "token") {
+		await setupProxyToken(runtime, ctx);
 		return;
 	}
 	if (parsed.command === "on") {
@@ -626,6 +681,7 @@ function renderStatus(config: HeadroomConfig, state: HeadroomRuntimeState, confi
 		`  Persisted enabled: ${config.enabled ? "yes" : "no"}`,
 		`  Display: ${config.display.visible ? "shown" : "hidden"}`,
 		`  Proxy:   ${config.baseUrl} (${state.proxyOnline === true ? "online" : state.proxyStarting ? "starting" : state.proxyOnline === false ? "not running" : "unknown"})`,
+		`  Compression: ${!state.enabled ? "disabled" : state.compressionAvailable === false ? "unavailable" : state.compressionAvailable === true ? "available" : "unknown"}`,
 		"  Proxy start: manual",
 		"  Shutdown: proxy is left running after Pi exits",
 		`  Remote:  ${isRemoteBlocked(config) ? "blocked" : config.allowRemote ? "allowed" : "local-only"}`,
@@ -687,11 +743,13 @@ function parseCommand(args: string): ParsedCommand {
 	if (tokens.length === 0) return { command: "status" };
 	const command = tokens[0];
 	if (!SUBCOMMANDS.includes(command as Subcommand)) return { command: "invalid" };
-	if (command !== "init") return tokens.length === 1 ? { command: command as Subcommand } : { command: "invalid" };
-	if (tokens.length === 1) return { command: "init", initTarget: "all" };
-	return tokens.length === 2 && INIT_TARGETS.includes(tokens[1] as HeadroomInitTarget)
-		? { command: "init", initTarget: tokens[1] as HeadroomInitTarget }
-		: { command: "invalid" };
+	if (command === "init") {
+		if (tokens.length === 1) return { command: "init", initTarget: "all" };
+		return tokens.length === 2 && INIT_TARGETS.includes(tokens[1] as HeadroomInitTarget)
+			? { command: "init", initTarget: tokens[1] as HeadroomInitTarget }
+			: { command: "invalid" };
+	}
+	return tokens.length === 1 ? { command: command as Subcommand } : { command: "invalid" };
 }
 
 function emptyStats(): HeadroomStats {

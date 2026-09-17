@@ -2,7 +2,7 @@ import { describe, expect, it } from "bun:test";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { HEADROOM_PROXY_TOKEN_FILE, HeadroomHttpClient, loadHeadroomProxyToken } from "./client.ts";
+import { HEADROOM_PROXY_TOKEN_FILE, HeadroomHttpClient, loadHeadroomProxyToken, writeHeadroomProxyToken } from "./client.ts";
 
 describe("Headroom HTTP client", () => {
 	it("uses proxy health, stats, and compression endpoints with token", async () => {
@@ -114,6 +114,28 @@ describe("Headroom HTTP client", () => {
 			fs.rmSync(tokenPath);
 			fs.mkdirSync(tokenPath);
 			expect(loadHeadroomProxyToken(tokenPath)).toBeUndefined();
+		} finally {
+			fs.rmSync(root, { recursive: true, force: true });
+		}
+	});
+
+	it("writes a trimmed proxy token with private permissions and validates input", () => {
+		const root = fs.mkdtempSync(path.join(os.tmpdir(), "omp-headroom-token-write-"));
+		const tokenPath = path.join(root, "headroom", "proxy-token");
+		try {
+			expect(writeHeadroomProxyToken("  first-token \n", tokenPath)).toBe(tokenPath);
+			expect(fs.readFileSync(tokenPath, "utf8")).toBe("first-token\n");
+			expect(fs.statSync(tokenPath).mode & 0o777).toBe(0o600);
+			expect(fs.statSync(path.dirname(tokenPath)).mode & 0o777).toBe(0o700);
+
+			fs.chmodSync(tokenPath, 0o644);
+			expect(writeHeadroomProxyToken(" second-token ", tokenPath)).toBe(tokenPath);
+			expect(loadHeadroomProxyToken(tokenPath)).toBe("second-token");
+			expect(fs.statSync(tokenPath).mode & 0o777).toBe(0o600);
+
+			expect(() => writeHeadroomProxyToken(" \n", tokenPath)).toThrow("must not be empty");
+			expect(() => writeHeadroomProxyToken("token\nwith-newline", tokenPath)).toThrow("must not contain newlines");
+			expect(loadHeadroomProxyToken(tokenPath)).toBe("second-token");
 		} finally {
 			fs.rmSync(root, { recursive: true, force: true });
 		}

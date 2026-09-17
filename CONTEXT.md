@@ -141,3 +141,10 @@ _Avoid_: Notification, prompt dialog
 **External Proxy**:
 A Headroom service managed outside OMP, such as Docker or Cloudflare. Headroom performs health checks and requests but never starts or stops that service.
 _Avoid_: Auto-start proxy
+**Proxy Token**:
+An optional credential used to authorize requests to an External Proxy. When absent, the proxy's own unauthenticated access policy applies.
+_Avoid_: Headroom password
+
+**Proxy Token File**:
+A local secret source for a Proxy Token, separate from Root Plugin Configuration.
+_Avoid_: Token configuration
