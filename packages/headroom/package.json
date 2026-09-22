@@ -20,17 +20,17 @@
 		"README.md"
 	],
 	"peerDependencies": {
-		"@oh-my-pi/pi-coding-agent": ">=18.1.16",
-		"@oh-my-pi/pi-tui": ">=18.1.16",
-		"@oh-my-pi/pi-ai": ">=18.1.16"
+		"@oh-my-pi/pi-coding-agent": ">=18.2.8",
+		"@oh-my-pi/pi-tui": ">=18.2.8",
+		"@oh-my-pi/pi-ai": ">=18.2.8"
 	},
 	"dependencies": {
 		"@codesook/omp-shared-display": "^1.0.0"
 	},
 	"devDependencies": {
-		"@oh-my-pi/pi-coding-agent": "18.1.16",
-		"@oh-my-pi/pi-tui": "18.1.16",
-		"@oh-my-pi/pi-ai": "18.1.16",
+		"@oh-my-pi/pi-coding-agent": "18.2.8",
+		"@oh-my-pi/pi-tui": "18.2.8",
+		"@oh-my-pi/pi-ai": "18.2.8",
 		"@codesook/omp-shared-display": "workspace:*",
 		"bun-types": "latest",
 		"typescript": "latest"

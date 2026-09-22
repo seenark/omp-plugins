@@ -1,8 +1,8 @@
 import { CustomEditor, type ExtensionAPI, type ExtensionUIContext, type SpinnerType, type Theme } from "@oh-my-pi/pi-coding-agent";
-import { AttachmentChipsBand } from "@oh-my-pi/pi-coding-agent/modes/components/attachment-chips";
-import { getSelectListTheme, getSettingsListTheme } from "@oh-my-pi/pi-coding-agent/modes/theme/theme";
+import { AttachmentChipsBand } from "@oh-my-pi/pi-tui/prompt/attachment-chips";
+import { getSelectListTheme, getSettingsListTheme } from "@oh-my-pi/pi-tui/theme";
 import { settings } from "@oh-my-pi/pi-coding-agent/config/settings";
-import { computeCompactionBoundaries } from "@oh-my-pi/pi-coding-agent/modes/utils/context-usage";
+import { computeCompactionBoundaries } from "@oh-my-pi/pi-tui/status-line/context-usage";
 import { mkdir, rename, unlink } from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -225,13 +225,7 @@ function contextRailBoundariesEqual(
 	);
 }
 
-type ContextRailModel = Parameters<typeof computeCompactionBoundaries>[2];
-
-function updateContextRailState(
-	runtime: ContextRailRuntime,
-	usage: ContextRailUsage | undefined,
-	model?: ContextRailModel,
-): boolean {
+function updateContextRailState(runtime: ContextRailRuntime, usage: ContextRailUsage | undefined): boolean {
 	const previousUsage = runtime.usage;
 	const usageChanged =
 		previousUsage?.tokens !== usage?.tokens ||
@@ -245,7 +239,7 @@ function updateContextRailState(
 		Number.isFinite(usage.percent)
 	) {
 		try {
-			boundaries = computeCompactionBoundaries(settings, usage.contextWindow, model) ?? undefined;
+			boundaries = computeCompactionBoundaries(settings.getGroup("compaction"), usage.contextWindow) ?? undefined;
 		} catch {
 			boundaries = undefined;
 		}
@@ -2388,14 +2382,12 @@ function installPromptBorderEditor(ctx: { ui: ExtensionUIContext }): void {
 function refreshContextRail(ctx: {
 	hasUI: boolean;
 	getContextUsage?(): { tokens: number; contextWindow: number; percent: number } | undefined;
-	model?: ContextRailModel | null;
 }): void {
 	if (!ctx.hasUI || activeContextRailRuntime === undefined) return;
 	const raw = ctx.getContextUsage?.();
 	updateContextRailState(
 		activeContextRailRuntime,
 		raw === undefined ? undefined : { tokens: raw.tokens, contextWindow: raw.contextWindow, percent: raw.percent },
-		ctx.model,
 	);
 }
 
@@ -2937,7 +2929,6 @@ type PromptBorderLiveContext = {
 	hasUI: boolean;
 	ui: ExtensionUIContext;
 	getContextUsage?: () => { tokens: number; contextWindow: number; percent: number } | undefined;
-	model?: ContextRailModel | null;
 };
 
 function effectiveContextRailConfig(config: PromptBorderConfig): ContextRailConfig {

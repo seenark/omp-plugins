@@ -23,12 +23,12 @@
     "./config-store": "./src/config-store.ts"
   },
   "peerDependencies": {
-    "@oh-my-pi/pi-coding-agent": ">=18.1.16",
-    "@oh-my-pi/pi-tui": ">=18.1.16"
+    "@oh-my-pi/pi-coding-agent": ">=18.2.8",
+    "@oh-my-pi/pi-tui": ">=18.2.8"
   },
   "devDependencies": {
-    "@oh-my-pi/pi-coding-agent": "18.1.16",
-    "@oh-my-pi/pi-tui": "18.1.16",
+    "@oh-my-pi/pi-coding-agent": "18.2.8",
+    "@oh-my-pi/pi-tui": "18.2.8",
     "bun-types": "latest",
     "typescript": "latest"
   },
