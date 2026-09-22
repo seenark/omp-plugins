@@ -1,8 +1,7 @@
 import { CustomEditor, type ExtensionAPI, type ExtensionUIContext, type SpinnerType, type Theme } from "@oh-my-pi/pi-coding-agent";
-import { AttachmentChipsBand } from "@oh-my-pi/pi-tui/prompt/attachment-chips";
-import { getSelectListTheme, getSettingsListTheme } from "@oh-my-pi/pi-tui/theme";
+import type { AttachmentChipsBand } from "@oh-my-pi/pi-tui/prompt/attachment-chips";
+import type { computeCompactionBoundaries } from "@oh-my-pi/pi-tui/status-line/context-usage";
 import { settings } from "@oh-my-pi/pi-coding-agent/config/settings";
-import { computeCompactionBoundaries } from "@oh-my-pi/pi-tui/status-line/context-usage";
 import { mkdir, rename, unlink } from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -19,10 +18,12 @@ import {
 import {
 	Box,
 	CURSOR_MARKER,
+	getSelectListTheme,
+	getSettingsListTheme,
 	Input,
 	Loader,
-	SelectList,
 	SettingsList,
+	SelectList,
 	Spacer,
 	Text,
 	matchesKey,
@@ -60,6 +61,26 @@ import {
 	normalizeContextRailConfig,
 } from "./context-rail";
 export { DEFAULT_CONTEXT_RAIL_CONFIG } from "./context-rail";
+
+// Compiled omp hosts cannot statically resolve pi-tui subpath imports from
+// installed plugin trees; dynamic import is required so the extension still
+// loads and these features degrade off when the subpath is unavailable.
+type AttachmentChipsBandCtor = typeof AttachmentChipsBand;
+type ComputeCompactionBoundaries = typeof computeCompactionBoundaries;
+let AttachmentChipsBandImpl: AttachmentChipsBandCtor | undefined;
+let computeCompactionBoundariesFn: ComputeCompactionBoundaries | undefined;
+try {
+	({ AttachmentChipsBand: AttachmentChipsBandImpl } = await import("@oh-my-pi/pi-tui/prompt/attachment-chips"));
+} catch {
+	// Attachment chips render degrades off.
+}
+try {
+	({ computeCompactionBoundaries: computeCompactionBoundariesFn } = await import(
+		"@oh-my-pi/pi-tui/status-line/context-usage"
+	));
+} catch {
+	// Context rail compaction boundary degrades off.
+}
 export type BorderStyleName =
 	| "round"
 	| "sharp"
@@ -239,7 +260,7 @@ function updateContextRailState(runtime: ContextRailRuntime, usage: ContextRailU
 		Number.isFinite(usage.percent)
 	) {
 		try {
-			boundaries = computeCompactionBoundaries(settings.getGroup("compaction"), usage.contextWindow) ?? undefined;
+			boundaries = computeCompactionBoundariesFn?.(settings.getGroup("compaction"), usage.contextWindow) ?? undefined;
 		} catch {
 			boundaries = undefined;
 		}
@@ -734,7 +755,7 @@ function mountPromptAttachmentWidget(ctx: {
 					if (activeEditor === undefined) return [];
 					if (activeEditor !== editor) {
 						editor = activeEditor;
-						band = new AttachmentChipsBand(activeEditor, tui.imageBudget, () => tui.requestRender());
+						band = AttachmentChipsBandImpl ? new AttachmentChipsBandImpl(activeEditor, tui.imageBudget, () => tui.requestRender()) : undefined;
 					}
 					return band?.render(width) ?? [];
 				},
