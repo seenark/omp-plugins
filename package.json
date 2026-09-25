@@ -10,8 +10,8 @@
     "bun": ">=1.4.0"
   },
   "peerDependencies": {
-    "@oh-my-pi/pi-coding-agent": ">=18.2.8",
-    "@oh-my-pi/pi-tui": ">=18.2.8",
+    "@oh-my-pi/pi-coding-agent": ">=18.3.1",
+    "@oh-my-pi/pi-tui": ">=18.3.1",
     "@oh-my-pi/pi-ai": ">=18.2.8"
   },
   "omp": {

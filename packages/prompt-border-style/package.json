@@ -22,16 +22,16 @@
         "access": "public"
     },
     "peerDependencies": {
-        "@oh-my-pi/pi-coding-agent": ">=18.2.8",
-        "@oh-my-pi/pi-tui": ">=18.2.8"
+        "@oh-my-pi/pi-coding-agent": ">=18.3.1",
+        "@oh-my-pi/pi-tui": ">=18.3.1"
     },
     "dependencies": {
         "@codesook/omp-shared-display": "^1.0.0"
     },
     "devDependencies": {
         "@codesook/omp-shared-display": "workspace:*",
-        "@oh-my-pi/pi-coding-agent": "18.2.8",
-        "@oh-my-pi/pi-tui": "18.2.8",
+        "@oh-my-pi/pi-coding-agent": "18.3.1",
+        "@oh-my-pi/pi-tui": "18.3.1",
         "bun-types": "latest",
         "typescript": "latest"
     },

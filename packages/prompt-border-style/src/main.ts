@@ -2,6 +2,8 @@ import { CustomEditor, type ExtensionAPI, type ExtensionUIContext, type SpinnerT
 import type { AttachmentChipsBand } from "@oh-my-pi/pi-tui/prompt/attachment-chips";
 import type { computeCompactionBoundaries } from "@oh-my-pi/pi-tui/status-line/context-usage";
 import { settings } from "@oh-my-pi/pi-coding-agent/config/settings";
+import { cfgComposerShape } from "@oh-my-pi/pi-coding-agent/modes/settings";
+import { cfgCompaction } from "@oh-my-pi/pi-coding-agent/session/context-settings";
 import { mkdir, rename, unlink } from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -260,7 +262,11 @@ function updateContextRailState(runtime: ContextRailRuntime, usage: ContextRailU
 		Number.isFinite(usage.percent)
 	) {
 		try {
-			boundaries = computeCompactionBoundariesFn?.(settings.getGroup("compaction"), usage.contextWindow) ?? undefined;
+			const compaction = cfgCompaction.get(settings);
+			boundaries =
+				compaction.methodOrder.length > 0
+					? (computeCompactionBoundariesFn?.(compaction, usage.contextWindow) ?? undefined)
+					: undefined;
 		} catch {
 			boundaries = undefined;
 		}
@@ -2370,7 +2376,7 @@ export class PromptBorderEditor extends CustomEditor {
 }
 function installPromptBorderEditor(ctx: { ui: ExtensionUIContext }): void {
 	const runtime = activeContextRailRuntime;
-	settings.override("composer.shape", "box");
+	cfgComposerShape.override(settings, "box");
 	try {
 		ctx.ui.setEditorComponent((tui, theme) => {
 			if (runtime !== undefined) runtime.requestRender = () => tui.requestRender();
@@ -2379,7 +2385,7 @@ function installPromptBorderEditor(ctx: { ui: ExtensionUIContext }): void {
 			return editor;
 		});
 	} finally {
-		settings.clearOverride("composer.shape");
+		cfgComposerShape.clearOverride(settings);
 	}
 }
 
