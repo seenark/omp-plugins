@@ -2,12 +2,14 @@ import { describe, expect, it } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
+import { parseFrameSequenceAsset } from "@codesook/omp-shared-display/client";
 import {
+	CAVEMAN_ACTIVE_LEVELS,
 	DEFAULT_CAVEMAN_CONFIG,
 	getCodesookOmpConfigPath,
 	getLegacyPackageConfigPath,
 } from "./types.ts";
-import { loadCavemanConfig, writeCavemanConfigAtomic } from "./config.ts";
+import { loadCavemanConfig, seedMissingCavemanGlyphs, writeCavemanConfigAtomic } from "./config.ts";
 
 function makeHome(): string {
 	return mkdtempSync(path.join(os.tmpdir(), "omp-caveman-config-"));
@@ -135,6 +137,43 @@ describe("Caveman config", () => {
 			expect(loaded.config.defaultLevel).toBe("ultra");
 			expect(persisted.version).toBeUndefined();
 			expect(persisted.defaultLevel).toBe("ultra");
+		} finally {
+			rmSync(home, { recursive: true, force: true });
+		}
+	});
+
+	it("seeds one static packaged frame and preserves existing glyph files", async () => {
+		const home = makeHome();
+		try {
+			const packageAssetDirectory = path.join(home, "package-assets");
+			const glyphDirectory = path.join(home, "glyphs");
+			mkdirSync(packageAssetDirectory, { recursive: true });
+			for (const level of CAVEMAN_ACTIVE_LEVELS) {
+				writeFileSync(path.join(packageAssetDirectory, `${level}.txt`), "fps=12\nfirst\n\nsecond\n", "utf8");
+			}
+			mkdirSync(glyphDirectory, { recursive: true });
+			const preservedPath = path.join(glyphDirectory, "full.txt");
+			writeFileSync(preservedPath, "custom\n", "utf8");
+			const config = {
+				...DEFAULT_CAVEMAN_CONFIG,
+				display: { ...DEFAULT_CAVEMAN_CONFIG.display, glyphDirectory },
+			};
+
+			const created = await seedMissingCavemanGlyphs(config, { packageAssetDirectory });
+
+			expect(created).toHaveLength(CAVEMAN_ACTIVE_LEVELS.length - 1);
+			expect(readFileSync(preservedPath, "utf8")).toBe("custom\n");
+			for (const level of CAVEMAN_ACTIVE_LEVELS) {
+				const text = readFileSync(path.join(glyphDirectory, `${level}.txt`), "utf8");
+				if (level === "full") {
+					expect(text).toBe("custom\n");
+					continue;
+				}
+				expect(text).toBe("first\n");
+				const sequence = parseFrameSequenceAsset(text);
+				expect(sequence?.frames).toEqual([["first"]]);
+				expect(sequence?.fps).toBeUndefined();
+			}
 		} finally {
 			rmSync(home, { recursive: true, force: true });
 		}

@@ -70,7 +70,7 @@ fps=5
 ⠠⠄ ⠔⠂ ⠊⠑ ⠑⠊ ⠂⠔ ⠄⠠ ⠠⠄ ⠔⠂
 ```
 
-Lite assets use `fps=3.3333333333333335`, full assets use `fps=5`, and ultra assets use `fps=10`. A user file named `<level>.txt` in `display.glyphDirectory` overrides its packaged asset only when the Shared Display parser accepts it. Missing or invalid user files fall back to the package asset. Config load seeds only missing asset files.
+Lite assets use `fps=3.3333333333333335`, full assets use `fps=5`, and ultra assets use `fps=10`. A user file named `<level>.txt` in `display.glyphDirectory` overrides its packaged asset only when the Shared Display parser accepts it. Missing or invalid user files fall back to the package asset. Config load seeds only missing files, using the first packaged frame without FPS.
 
 Templates replace `{activity}`, `{glyph}`, and `{level}` once. Multiline frame rows remain multiline in the published Block Frame. The glyph is rendered with the OMP accent theme. Native status uses only frame zero's first row (or the packaged one-row fallback), so it never receives CR/LF.
 

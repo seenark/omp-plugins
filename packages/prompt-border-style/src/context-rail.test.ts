@@ -164,8 +164,7 @@ describe("Context Rail config", () => {
 			meaning: "now",
 		});
 		expect(normalized.speculation).toEqual({ framesFile: "speculation.txt", meaning: "spec" });
-		expect(normalized.compaction).toEqual({ framesFile: "compact.frames", fps: 18, meaning: "compact" });
-		expect(normalized.maximum).toEqual({ framesFile: "maximum.txt", meaning: "max" });
+		expect(normalized.compaction).toEqual({ framesFile: "compact.frames", meaning: "compact" });
 		expect(normalized.custom.meaningPlacement).toBe("top");
 		expect(normalized.custom.items).toEqual([
 			{ role: "speculation", template: "{frame} {text-meaning}" },
@@ -192,13 +191,26 @@ describe("Context Rail config", () => {
 		expect(normalized.custom.meaningPlacement).toBe("beside");
 		expect(normalized.custom.items.find(item => item.role === "pointer")?.template).toBe("{frame} {percent}");
 	});
+	test("renders native percentage precision and shows unknown usage without a filled bar", () => {
+		const percentage = renderContextRail(32, palette, { ...usage, percent: 25.2 }, boundaries, {
+			presentation: markerPresentation(),
+		});
+		expect(percentage).toContain("25.2%");
+		expect(renderContextRail(32, palette, usage, boundaries)).toContain("62.0%");
+
+		const unknown = renderContextRail(8, palette, undefined, boundaries, {
+			presentation: markerPresentation(),
+		});
+		expect(unknown).toContain("?");
+		expect(unknown).not.toContain("─");
+	});
 	test("renders positioned tiles over a continuous fixed-width bar", () => {
 		const line = renderContextRail(32, palette, usage, boundaries, {
 			presentation: markerPresentation(),
 		});
 		expect(visibleWidth(line)).toBe(32);
 		expect(line).toContain("─");
-		expect(line).toContain("62%");
+		expect(line).toContain("62.0%");
 		expect(line).toContain("SS");
 		expect(line).toContain("PP");
 		expect(line).toContain("CC");
@@ -242,7 +254,7 @@ describe("Context Rail config", () => {
 			presentation: markerPresentation("compact"),
 		});
 		expect(line).toContain("─");
-		expect(line).toContain("62%");
+		expect(line).toContain("62.0%");
 		expect(line).not.toContain("spec");
 		expect(line).not.toContain("now");
 		expect(line).not.toContain("62K");
@@ -254,7 +266,7 @@ describe("Context Rail config", () => {
 		const line = renderContextRail(100, palette, usage, boundaries, {
 			presentation: markerPresentation("full"),
 		});
-		expect(line).toContain("62%");
+		expect(line).toContain("62.0%");
 		expect(line).toContain("100K");
 		expect(line).toContain("spec");
 		expect(line).toContain("now");
@@ -272,7 +284,7 @@ describe("Context Rail config", () => {
 		const line = renderContextRail(160, palette, usage, boundaries, {
 			presentation: markerPresentation("custom", "beside", {}, items),
 		});
-		for (const token of ["speculation", "pointer", "compaction", "maximum", "spec", "now", "compact", "max", "62%", "62K", "100K"]) {
+		for (const token of ["speculation", "pointer", "compaction", "maximum", "spec", "now", "compact", "max", "62.0%", "62K", "100K"]) {
 			expect(line).toContain(token);
 		}
 		expect(line).toContain("SS");
@@ -300,9 +312,9 @@ describe("Context Rail config", () => {
 		const explicitGap = renderContextRail(80, palette, usage, boundaries, {
 			presentation: markerPresentation("custom", "beside", {}, explicitGapItems),
 		});
-		expect(noGap).toContain("PP62%");
-		expect(explicitGap).toContain("PP 62%");
-		expect(noGap).not.toContain("PP 62%");
+		expect(noGap).toContain("PP62.0%");
+		expect(explicitGap).toContain("PP 62.0%");
+		expect(noGap).not.toContain("PP 62.0%");
 		expect(visibleWidth(noGap)).toBe(80);
 		expect(visibleWidth(explicitGap)).toBe(80);
 	});
@@ -401,7 +413,7 @@ describe("Context Rail config", () => {
 		expect(low).toContain("0.5%");
 		expect(low).toContain("999");
 		expect(low).toContain("1M");
-		expect(high).toContain("120%");
+		expect(high).toContain("120.0%");
 		expect(high).toContain("620K");
 		expect(high).toContain("1M");
 		expect(visibleWidth(low)).toBe(64);
@@ -421,15 +433,15 @@ describe("Context Rail config", () => {
 		expect(line).toContain("CC");
 	});
 
-	test("returns blank fixed-width rows when usage is unknown", () => {
+	test("shows unknown usage marker in blank fixed-width rows", () => {
 		const compact = renderContextRail(16, palette, undefined, boundaries, {
 			presentation: markerPresentation(),
 		});
 		const top = renderContextRailRows(16, palette, undefined, boundaries, {
 			presentation: markerPresentation("custom", "top"),
 		});
-		expect(compact).toBe(" ".repeat(16));
-		expect(top).toEqual([" ".repeat(16), " ".repeat(16)]);
+		expect(compact).toBe("?".padEnd(16));
+		expect(top).toEqual(["?".padEnd(16), " ".repeat(16)]);
 	});
 	test("hides the pointer rather than crossing higher-priority anchors", () => {
 		const line = renderContextRail(
@@ -456,7 +468,7 @@ describe("Context Rail config", () => {
 		});
 		const roleStart = line.indexOf("pointer");
 		const frameStart = line.indexOf("PP");
-		const percentStart = line.indexOf("50%");
+		const percentStart = line.indexOf("50.0%");
 		expect(roleStart).toBeGreaterThanOrEqual(0);
 		expect(frameStart).toBeGreaterThan(roleStart);
 		expect(percentStart).toBeGreaterThan(frameStart);
@@ -475,11 +487,11 @@ describe("Context Rail renderer", () => {
 		const line = renderContextRail(24, palette, { tokens: 50_000, contextWindow: 100_000, percent: 50 });
 		expect(visibleWidth(line)).toBe(24);
 		expect(line).toContain("●");
-		expect(line).toContain("50%");
+		expect(line).toContain("50.0%");
 	});
 	test("places the percentage label at the requested side without changing rail width", () => {
 		const usage = { tokens: 50_000, contextWindow: 100_000, percent: 50 };
-		const expectedStarts = { left: 0, center: 6, right: 13 } as const;
+		const expectedStarts = { left: 0, center: 5, right: 11 } as const;
 		for (const [labelPosition, expectedStart] of Object.entries(expectedStarts) as [
 			"left" | "center" | "right",
 			number,
@@ -489,7 +501,7 @@ describe("Context Rail renderer", () => {
 				labelPosition,
 			});
 			expect(visibleWidth(line)).toBe(16);
-			expect(line.indexOf("50%")).toBe(expectedStart);
+			expect(line.indexOf("50.0%")).toBe(expectedStart);
 		}
 	});
 
@@ -503,8 +515,8 @@ describe("Context Rail renderer", () => {
 		const secondFrame = renderContextRail(16, palette, usage, undefined, { ...options, labelFrame: 1 });
 		const wrappedFrame = renderContextRail(16, palette, usage, undefined, { ...options, labelFrame: 3 });
 
-		expect(secondFrame.startsWith("A150%")).toBe(true);
-		expect(wrappedFrame.startsWith("A150%")).toBe(true);
+		expect(secondFrame.startsWith("A150.0%")).toBe(true);
+		expect(wrappedFrame.startsWith("A150.0%")).toBe(true);
 		expect(visibleWidth(secondFrame)).toBe(16);
 		expect(visibleWidth(wrappedFrame)).toBe(16);
 	});
@@ -522,7 +534,7 @@ describe("Context Rail renderer", () => {
 				showLabelGlyph: false,
 			},
 		);
-		expect(hidden.startsWith("50%")).toBe(true);
+		expect(hidden.startsWith("50.0%")).toBe(true);
 		expect(hidden).not.toContain("A0");
 		expect(hidden[8]).toBe("x");
 		expect(visibleWidth(hidden)).toBe(16);
@@ -568,7 +580,7 @@ describe("Context Rail renderer", () => {
 			{ pointer: "hidden", labelPosition: "left", labelGlyphs: ["AB\nCD"] },
 		);
 		expect(line).not.toContain("\n");
-		expect(line.startsWith("ABCD50%")).toBe(true);
+		expect(line.startsWith("ABCD50.0%")).toBe(true);
 		expect(visibleWidth(line)).toBe(24);
 	});
 	test("renders a configured multiline frame beside the top-aligned usage gauge", () => {
@@ -587,9 +599,9 @@ describe("Context Rail renderer", () => {
 		);
 		expect(rows).toHaveLength(2);
 		expect(rows[0]).toContain("AB");
-		expect(rows[0]).toContain("50%");
+		expect(rows[0]).toContain("50.0%");
 		expect(rows[1]).toContain("CD");
-		expect(rows[1]).not.toContain("50%");
+		expect(rows[1]).not.toContain("50.0%");
 		expect(rows.every(row => visibleWidth(row) === 24)).toBe(true);
 	});
 	test("skips multiline label art when the label glyph is hidden", () => {
@@ -608,7 +620,7 @@ describe("Context Rail renderer", () => {
 			},
 		);
 		expect(rows).toHaveLength(1);
-		expect(rows[0]).toContain("50%");
+		expect(rows[0]).toContain("50.0%");
 		expect(rows[0]).not.toContain("AB");
 		expect(rows[0]).not.toContain("CD");
 		expect(visibleWidth(rows[0]!)).toBe(24);
@@ -635,7 +647,7 @@ describe("Context Rail renderer", () => {
 			},
 		);
 		expect(narrow).toHaveLength(2);
-		expect(narrow[0]).toContain("2%");
+		expect(narrow[0]).toContain("2.0%");
 		expect(narrow.every(row => visibleWidth(row) === 10)).toBe(true);
 	});
 
@@ -649,7 +661,7 @@ describe("Context Rail renderer", () => {
 				labelFrame: Number.NaN,
 				labelGlyphFallback: "✓",
 			});
-			expect(line.startsWith("✓50%")).toBe(true);
+			expect(line.startsWith("✓50.0%")).toBe(true);
 			expect(visibleWidth(line)).toBe(16);
 		}
 		const plain = renderContextRail(16, palette, usage, undefined, {
@@ -657,7 +669,7 @@ describe("Context Rail renderer", () => {
 			labelPosition: "left",
 			labelGlyphs: [],
 		});
-		expect(plain.startsWith("50%")).toBe(true);
+		expect(plain.startsWith("50.0%")).toBe(true);
 	});
 
 	test("counts framed labels in marker protection and ANSI/wide width", () => {
@@ -681,11 +693,11 @@ describe("Context Rail renderer", () => {
 		});
 
 		expect(marked[0]).toBe("┃");
-		expect(marked.slice(1, 6)).toBe("XY50%");
+		expect(marked.slice(1, 8)).toBe("XY50.0%");
 		expect(visibleWidth(marked)).toBe(12);
-		expect(wide.startsWith("界50%")).toBe(true);
+		expect(wide.startsWith("界50.0%")).toBe(true);
 		expect(visibleWidth(wide)).toBe(16);
-		expect(ansi).toContain("\x1b[31m⚡\x1b[0m50%");
+		expect(ansi).toContain("\x1b[31m⚡\x1b[0m50.0%");
 		expect(visibleWidth(ansi)).toBe(16);
 	});
 
@@ -699,7 +711,7 @@ describe("Context Rail renderer", () => {
 		);
 		expect(visibleWidth(line)).toBe(12);
 		expect(line[0]).toBe("┃");
-		expect(line.indexOf("50%")).toBe(1);
+		expect(line.indexOf("50.0%")).toBe(1);
 	});
 
 	test("hides automatic pointer and labels in compact mode", () => {
@@ -712,7 +724,7 @@ describe("Context Rail renderer", () => {
 		);
 		expect(visibleWidth(line)).toBe(24);
 		expect(line).not.toContain("●");
-		expect(line).not.toContain("50%");
+		expect(line).not.toContain("50.0%");
 	});
 
 	test("changes used-fill semantics at the native warning and purple levels", () => {

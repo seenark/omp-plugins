@@ -57,12 +57,13 @@ bun packages/theme-catppuccin/bin/install.js
 ```text
 /codesook-omp-plugin
 /codesook-omp-plugin status
+/codesook-omp-plugin init config
 /headroom [status|on|off|health|stats|init [config|glyphs|all]]
 /caveman [status|off|lite|full|ultra|wenyan-lite|wenyan-full|wenyan-ultra]
 /prompt-border [status|<style> [layout]|layout <layout>|reset|rail toggle|glyphs debug [frames|demo|on|off]]
 ```
 
-Root settings owns persisted configuration. Feature commands own session behavior only; feature `config` commands and `/shared-display` are removed. Status commands open focused read-only overlays; Enter/Esc closes.
+Root settings owns persisted configuration. Feature commands own session behavior only; feature `config` commands and `/shared-display` are removed. Status commands open focused read-only overlays; Enter/Esc closes. `/codesook-omp-plugin init config` creates the v1 config only when absent and seeds only missing glyph files.
 
 `/codesook-omp-plugin` edits a draft. Shift+Enter applies directly. Bare Enter on Apply asks confirmation. Reload discards draft; Cancel leaves persisted and live state unchanged.
 

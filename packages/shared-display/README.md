@@ -16,3 +16,7 @@ Shared Display presentation persists in `display.sharedDisplay` inside:
 ```
 
 Legacy `~/.config/codesook-omp/shared-display/config.json` migrates once when root section is missing. `/shared-display` command is removed; root `/codesook-omp-plugin` settings owns persisted presentation. Producers remain safe when host/EventBus is absent.
+
+## Frame assets
+
+All plugin glyph files use shared `FrameSequence` text format. Optional first nonblank `fps=<positive number>` sets animation rate; blank-line-separated blocks form frames, and rows within each block stay together. One frame or missing/invalid FPS displays first frame statically. Context Rail also accepts `size=<width>x<height>` as layout metadata before frame rows.

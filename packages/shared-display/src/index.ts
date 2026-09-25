@@ -321,7 +321,7 @@ function expandHome(value: string): string {
 	return value === "~" ? os.homedir() : value.startsWith("~/") ? path.join(os.homedir(), value.slice(2)) : value;
 }
 
-function packagePonytailAsset(mode: PonytailMode): FrameSequence | undefined {
+export function loadPackagedPonytailSequence(mode: PonytailMode): FrameSequence | undefined {
 	try {
 		return parseFrameSequenceAsset(readFileSync(new URL(`../assets/ponytail/${mode}.txt`, import.meta.url), "utf8"));
 	} catch {
@@ -355,7 +355,7 @@ function ponytailAsset(mode: PonytailMode, config: SharedDisplayConfig): FrameSe
 	} catch {
 		// Package fallback below.
 	}
-	return packagePonytailAsset(mode) ?? { frames: [["🐴"]] };
+	return loadPackagedPonytailSequence(mode) ?? { frames: [["🐴"]] };
 }
 
 function renderPonytailTemplate(
@@ -411,10 +411,10 @@ export function selectFrame(
 	sequence: FrameSequence,
 	nowMs = 0,
 	animationOriginMs = 0,
-	active = true,
+	_active = true,
 ): BlockFrame {
 	if (sequence.frames.length === 0) return [];
-	if (!active || sequence.frames.length < 2 || sequence.fps === undefined || !Number.isFinite(sequence.fps)) {
+	if (sequence.frames.length < 2 || sequence.fps === undefined || !Number.isFinite(sequence.fps)) {
 		return sequence.frames[0]!;
 	}
 	const elapsed = Math.max(0, nowMs - animationOriginMs);
@@ -589,7 +589,7 @@ function stopAnimationTimer(runtime: HostRuntime): void {
 
 function ensureAnimationTimer(runtime: HostRuntime): void {
 	const ctx = runtime.ctx;
-	const fps = runtime.active ? fastestFps(runtime) : undefined;
+	const fps = fastestFps(runtime);
 	if (ctx === undefined || runtime.component === undefined || runtime.tui === undefined || fps === undefined) {
 		stopAnimationTimer(runtime);
 		return;
@@ -779,7 +779,7 @@ function startSession(runtime: HostRuntime, context: unknown): void {
 	runtime.capturedNativeText = undefined;
 	clearWidget(runtime);
 	runtime.active = false;
-	runtime.animationOriginMs = undefined;
+	runtime.animationOriginMs = monotonicNow();
 	resetSnapshots(runtime);
 	runtime.ctx = ctx;
 	runtime.config = loadSharedDisplayConfig(runtime.configPath);
@@ -797,15 +797,13 @@ function startSession(runtime: HostRuntime, context: unknown): void {
 
 function terminalAgentEnd(runtime: HostRuntime): void {
 	runtime.active = false;
-	runtime.animationOriginMs = undefined;
-	stopAnimationTimer(runtime);
 	requestRender(runtime);
 }
 
 function startAgent(runtime: HostRuntime): void {
 	if (runtime.active) return;
 	runtime.active = true;
-	runtime.animationOriginMs = monotonicNow();
+	if (runtime.animationOriginMs === undefined) runtime.animationOriginMs = monotonicNow();
 	if (runtime.ponytailStatus !== undefined) {
 		runtime.ponytailStatus = { ...runtime.ponytailStatus, active: true };
 		 runtime.publisher?.publish(ponytailFrameSequence(runtime.ponytailStatus, runtime.config));

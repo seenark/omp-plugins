@@ -29,7 +29,7 @@ describe("Shared Display client", () => {
 	it("parses multiline assets and preserves row boundaries", () => {
 		expect(parseFrameSequenceAsset("fps=5\n A  \n B\n\nC\n")).toEqual({ frames: [[" A  ", " B"], ["C"]], fps: 5 });
 		expect(parseFrameSequenceAsset("A B")).toEqual({ frames: [["A"], ["B"]] });
-		expect(parseFrameSequenceAsset("fps=0\nA")).toBeUndefined();
+		expect(parseFrameSequenceAsset("fps=0\nA\n\nB")).toEqual({ frames: [["A"], ["B"]] });
 	});
 
 	it("replays the latest immutable snapshot and emits a tombstone", () => {

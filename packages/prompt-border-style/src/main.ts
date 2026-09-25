@@ -15,6 +15,7 @@ import {
 	writeCodesookOmpConfig,
 	type CodesookOmpConfig,
 } from "@codesook/omp-shared-display/config-store";
+import { parseFrameSequenceAsset } from "@codesook/omp-shared-display/client";
 import {
 	Box,
 	CURSOR_MARKER,
@@ -164,6 +165,7 @@ type ContextRailRuntime = {
 	pointerGlyphFrame: number;
 	pointerGlyphTimer: Timer | undefined;
 	pointerGlyphFallback: string;
+	getContextUsage?: () => ContextRailUsage | undefined;
 	requestRender: (() => void) | undefined;
 	palette: (horizontal: string) => ContextRailPalette;
 };
@@ -192,10 +194,8 @@ function contextRailRoleFrameCount(runtime: ContextRailRuntime, role: ContextRai
 }
 
 function contextRailRoleFps(runtime: ContextRailRuntime, role: ContextRailRole): number | undefined {
-	const configured = runtime.config[role].fps;
-	if (typeof configured === "number" && Number.isFinite(configured) && configured > 0) return configured;
-	const assetFps = runtime.roleAssets[role].fps;
-	return typeof assetFps === "number" && Number.isFinite(assetFps) && assetFps > 0 ? assetFps : undefined;
+	const fps = runtime.roleAssets[role].fps;
+	return typeof fps === "number" && Number.isFinite(fps) && fps > 0 ? fps : undefined;
 }
 
 function createContextRailRuntime(
@@ -504,9 +504,11 @@ export const DEFAULT_ACTIVITY_SPINNER_GLYPH_TEXT_PATH = path.join(CONFIG_DIRECTO
 export const DEFAULT_LEFT_GLYPH_TEXT =
 	"􁦘􁦙  􁦚􁦛  􁦜􁦝  􁦞􁦟  􁦠􁦡  􁦢􁦣  􁦤􁦥  􁦦􁦧  􁦨􁦩  􁦪􁦫  􁦬􁦭  􁦮􁦯  􁦰􁦱  􁦲􁦳  􁦴􁦵  􁦶􁦷  􁦸􁦹  􁦺􁦻  􁦼􁦽  􁦾􁦿  􁧀􁧁  􁧂􁧃  􁧄􁧅  􁧆􁧇  􁧈􁧉  􁧊􁧋  􁧌􁧍  􁧎􁧏  􁧐􁧑  􁧒􁧓  􁧔􁧕  􁧖􁧗  􁧘􁧙  􁧚􁧛  􁧜􁧝  􁧞􁧟  􁧠􁧡  􁧢􁧣  􁧤􁧥  􁧦􁧧  􁧨􁧩  􁧪􁧫  􁧬􁧭  􁧮􁧯  􁧰􁧱  􁧲􁧳  􁧴􁧵  􁧶􁧷  􁧸􁧹  􁧺􁧻  􁧼􁧽  􁧾􁧿  􁨀􁨁  􁨂􁨃  􁨄􁨅  􁨆􁨇  􁨈􁨉  􁨊􁨋  􁨌􁨍  􁨎􁨏  􁨐􁨑  􁨒􁨓  􁨔􁨕  􁨖􁨗  􁨘􁨙  􁨚􁨛  􁨜􁨝  􁨞􁨟  􁨠􁨡  􁨢􁨣  􁨤􁨥  􁨦􁨧  􁨨􁨩";
 
+
 export function parseGlyphFrames(glyphs: string): string[] {
-	return glyphs.trim().split(/\s+/u).filter(Boolean);
+	return parseFrameSequenceAsset(glyphs)?.frames.map(frame => frame.join("\n")) ?? [];
 }
+const DEFAULT_LEFT_GLYPH_FRAME = parseGlyphFrames(DEFAULT_LEFT_GLYPH_TEXT)[0] ?? "";
 
 export function buildTimedSpinnerFrames(
 	frames: readonly string[],
@@ -514,13 +516,12 @@ export function buildTimedSpinnerFrames(
 	hostFrameMs = HOST_SPINNER_FRAME_MS,
 ): string[] {
 	if (frames.length === 0) return [];
+	if (!Number.isFinite(frameMs) || frameMs <= 0) return [frames[0]!];
 	const safeHostFrameMs = Number.isFinite(hostFrameMs) && hostFrameMs > 0 ? hostFrameMs : HOST_SPINNER_FRAME_MS;
-	const safeFrameMs =
-		Number.isFinite(frameMs) && frameMs >= 16 && frameMs <= 1000 ? frameMs : DEFAULT_SPINNER_GLYPH_FRAME_MS;
-	const hostFrameCount = Math.max(1, Math.round((frames.length * safeFrameMs) / safeHostFrameMs));
+	const hostFrameCount = Math.max(1, Math.round((frames.length * frameMs) / safeHostFrameMs));
 	return Array.from({ length: hostFrameCount }, (_unused, hostFrameIndex) => {
-		const sourceFrameIndex = Math.floor((hostFrameIndex * safeHostFrameMs) / safeFrameMs) % frames.length;
-		return frames[sourceFrameIndex];
+		const sourceFrameIndex = Math.floor((hostFrameIndex * safeHostFrameMs) / frameMs) % frames.length;
+		return frames[sourceFrameIndex]!;
 	});
 }
 
@@ -620,9 +621,9 @@ export const EXAMPLE_PROMPT_BORDER_CONFIG: PromptBorderConfig = {
 	style: "double",
 	layout: "full",
 	leftGlyph: {
-		frameMs: DEFAULT_GLYPH_FRAME_MS,
+		frameMs: 0,
 		glyphs: DEFAULT_LEFT_GLYPH_TEXT,
-		frames: parseGlyphFrames(DEFAULT_LEFT_GLYPH_TEXT),
+		frames: parseGlyphFrames(DEFAULT_LEFT_GLYPH_TEXT).slice(0, 1),
 	},
 	rightGlyph: {
 		frameMs: DEFAULT_GLYPH_FRAME_MS,
@@ -789,6 +790,7 @@ function mountContextRailWidget(ctx: { hasUI: boolean; ui: { setWidget?: Extensi
 		(_tui, theme) => ({
 			render(width: number): readonly string[] {
 				if (!contextRailVisible(runtime)) return [];
+				refreshContextRailUsage(runtime);
 				scheduleContextRailRoleFrames(runtime);
 				const horizontal = theme.boxRound.horizontal;
 				return renderContextRailRows(
@@ -912,20 +914,6 @@ function toPromptBorderJson(config: PromptBorderConfig): Record<string, unknown>
 	return {
 		style: config.style,
 		layout: config.layout,
-		leftGlyph: {
-			frameMs: config.leftGlyph.frameMs,
-		},
-		rightGlyph: {
-			frameMs: config.rightGlyph.frameMs,
-		},
-		spinnerGlyphs: {
-			status: {
-				frameMs: config.spinnerGlyphs.status.frameMs,
-			},
-			activity: {
-				frameMs: config.spinnerGlyphs.activity.frameMs,
-			},
-		},
 	};
 }
 
@@ -936,7 +924,6 @@ function toContextRailJson(config: ContextRailConfig): Record<string, unknown> {
 			framesFile: roleConfig.framesFile,
 			meaning: roleConfig.meaning,
 		};
-		if (roleConfig.fps !== undefined) serialized.fps = roleConfig.fps;
 		if (role === "pointer") serialized.visibility = config.pointer.visibility;
 		return serialized;
 	};
@@ -1125,7 +1112,6 @@ async function ensureMigratedGlyphTextFile(
 	seedText: string,
 ): Promise<string> {
 	const destinationPath = path.join(paths.assetDirectory, GLYPH_TEXT_FILE_NAMES[slot]);
-	await mkdir(path.dirname(destinationPath), { recursive: true });
 	const destination = Bun.file(destinationPath);
 	if (await destination.exists()) return await destination.text();
 	for (const legacyAssetDirectory of paths.legacyAssetDirectories) {
@@ -1133,10 +1119,11 @@ async function ensureMigratedGlyphTextFile(
 		const legacy = Bun.file(legacyPath);
 		if (!(await legacy.exists())) continue;
 		const bytes = await legacy.arrayBuffer();
+		await mkdir(path.dirname(destinationPath), { recursive: true });
 		await Bun.write(destinationPath, bytes);
 		return await destination.text();
 	}
-	return ensureGlyphTextFile(paths.configPath, slot, seedText);
+	return seedText.length > 0 && !seedText.endsWith("\n") ? `${seedText}\n` : seedText;
 }
 
 function parsePromptBorderConfigJson(rawText: string): { json: unknown; invalid: boolean } {
@@ -1166,27 +1153,20 @@ export function normalizePromptBorderConfig(
 		typeof promptBorder.layout === "string" && isBorderLayoutName(promptBorder.layout)
 			? promptBorder.layout
 			: DEFAULT_PROMPT_BORDER_CONFIG.layout;
-	const normalizeGlyph = (
-		glyph: Record<string, unknown>,
-		slot: PromptBorderGlyphSlot,
-		defaultFrameMs: number,
-	): PromptBorderGlyphConfig => {
-		const frameMs =
-			typeof glyph.frameMs === "number" &&
-			Number.isFinite(glyph.frameMs) &&
-			glyph.frameMs >= 16 &&
-			glyph.frameMs <= 1000
-				? glyph.frameMs
-				: defaultFrameMs;
+	const normalizeGlyph = (glyph: Record<string, unknown>, slot: PromptBorderGlyphSlot): PromptBorderGlyphConfig => {
 		const glyphText =
 			typeof glyphTexts[slot] === "string"
 				? glyphTexts[slot]
 				: typeof glyph.glyphs === "string"
 					? glyph.glyphs
-					: "";
-		const frames = glyphText.trim().length > 0 ? parseGlyphFrames(glyphText) : [];
+					: slot === "left"
+						? DEFAULT_LEFT_GLYPH_FRAME
+						: "";
+		const sequence = glyphText.trim().length > 0 ? parseFrameSequenceAsset(glyphText) : undefined;
+		const sourceFrames = sequence?.frames.map(frame => frame.join("\n")) ?? [];
+		const frames = sequence?.fps === undefined ? sourceFrames.slice(0, 1) : sourceFrames;
 		return {
-			frameMs,
+			frameMs: sequence?.fps === undefined ? 0 : 1000 / sequence.fps,
 			glyphs: frames.length > 0 ? glyphText : "",
 			frames,
 		};
@@ -1194,19 +1174,11 @@ export function normalizePromptBorderConfig(
 	return {
 		style,
 		layout,
-		leftGlyph: normalizeGlyph(leftGlyph, "left", DEFAULT_GLYPH_FRAME_MS),
-		rightGlyph: normalizeGlyph(rightGlyph, "right", DEFAULT_GLYPH_FRAME_MS),
+		leftGlyph: normalizeGlyph(leftGlyph, "left"),
+		rightGlyph: normalizeGlyph(rightGlyph, "right"),
 		spinnerGlyphs: {
-			status: normalizeGlyph(
-				isRecord(spinnerGlyphs.status) ? spinnerGlyphs.status : {},
-				"status",
-				DEFAULT_SPINNER_GLYPH_FRAME_MS,
-			),
-			activity: normalizeGlyph(
-				isRecord(spinnerGlyphs.activity) ? spinnerGlyphs.activity : {},
-				"activity",
-				DEFAULT_SPINNER_GLYPH_FRAME_MS,
-			),
+			status: normalizeGlyph(isRecord(spinnerGlyphs.status) ? spinnerGlyphs.status : {}, "status"),
+			activity: normalizeGlyph(isRecord(spinnerGlyphs.activity) ? spinnerGlyphs.activity : {}, "activity"),
 		},
 		contextRail: normalizeContextRailConfig(contextRail, contextRailGlyphAsset, contextRailPointerGlyphAsset),
 	};
@@ -1296,18 +1268,20 @@ async function ensureRootPersistedPromptBorderConfig(
 
 	const promptBorder = isRecord(raw.promptBorder) ? raw.promptBorder : {};
 	const glyphTexts = {
-		left: await ensureMigratedGlyphTextFile(paths, "left", legacyInlineGlyphSeed(promptBorder, "left", DEFAULT_LEFT_GLYPH_TEXT)),
+		left: await ensureMigratedGlyphTextFile(paths, "left", legacyInlineGlyphSeed(promptBorder, "left", DEFAULT_LEFT_GLYPH_FRAME)),
 		right: await ensureMigratedGlyphTextFile(paths, "right", legacyInlineGlyphSeed(promptBorder, "right", "")),
 		status: await ensureMigratedGlyphTextFile(paths, "status", legacyInlineGlyphSeed(promptBorder, "status", "")),
 		activity: await ensureMigratedGlyphTextFile(paths, "activity", legacyInlineGlyphSeed(promptBorder, "activity", "")),
 	};
 	const persisted = await buildPersistedPromptBorderConfig(paths, raw, glyphTexts);
-	if (destination.valid) {
+	if (!destination.exists && migratePackageConfig) {
+		writeCodesookOmpConfig(rootEnvelopeFromLegacy(raw, persisted.config), paths.configPath);
+	} else if (destination.exists && destination.valid && migratePackageConfig) {
 		updateCodesookOmpConfig(config => {
 			config.display.promptBorder = toPromptBorderJson(persisted.config);
 			config.display.contextRail = toContextRailJson(persisted.config.contextRail);
 		}, paths.configPath);
-	} else {
+	} else if (destination.exists && !destination.valid) {
 		writeCodesookOmpConfig(rootEnvelopeFromLegacy(raw, persisted.config), paths.configPath);
 	}
 	if (migratePackageConfig && paths.legacyConfigPath !== undefined) {
@@ -1332,7 +1306,7 @@ async function ensurePersistedPromptBorderConfig(
 			left: await ensureGlyphTextFile(
 				paths.configPath,
 				"left",
-				legacyInlineGlyphSeed(promptBorder, "left", DEFAULT_LEFT_GLYPH_TEXT),
+				legacyInlineGlyphSeed(promptBorder, "left", DEFAULT_LEFT_GLYPH_FRAME),
 			),
 			right: await ensureGlyphTextFile(paths.configPath, "right", legacyInlineGlyphSeed(promptBorder, "right", "")),
 			status: await ensureGlyphTextFile(paths.configPath, "status", legacyInlineGlyphSeed(promptBorder, "status", "")),
@@ -1356,7 +1330,7 @@ async function ensurePersistedPromptBorderConfig(
 		left: await ensureMigratedGlyphTextFile(
 			paths,
 			"left",
-			legacyInlineGlyphSeed(legacyPromptBorder, "left", DEFAULT_LEFT_GLYPH_TEXT),
+			legacyInlineGlyphSeed(legacyPromptBorder, "left", DEFAULT_LEFT_GLYPH_FRAME),
 		),
 		right: await ensureMigratedGlyphTextFile(
 			paths,
@@ -2237,7 +2211,7 @@ export class PromptBorderEditor extends CustomEditor {
 	override setShimmerRepaintHandler(handler: (() => void) | undefined): void {
 		super.setShimmerRepaintHandler(handler);
 		this.#requestGlyphRepaint = handler;
-		if (handler !== undefined) return;
+		if (handler !== undefined || this.#contextRail?.requestRender !== undefined) return;
 		if (this.#leftGlyphTimer !== undefined) clearTimeout(this.#leftGlyphTimer);
 		if (this.#rightGlyphTimer !== undefined) clearTimeout(this.#rightGlyphTimer);
 		this.#leftGlyphTimer = undefined;
@@ -2252,7 +2226,15 @@ export class PromptBorderEditor extends CustomEditor {
 	#scheduleGlyphFrame(side: PromptBorderGlyphSide): void {
 		const glyphConfig = side === "left" ? this.#config.leftGlyph : this.#config.rightGlyph;
 		const timer = side === "left" ? this.#leftGlyphTimer : this.#rightGlyphTimer;
-		if (glyphConfig.frames.length <= 1 || timer !== undefined || this.#requestGlyphRepaint === undefined) return;
+		const repaint = this.#requestGlyphRepaint ?? this.#contextRail?.requestRender;
+		if (
+			glyphConfig.frames.length <= 1 ||
+			glyphConfig.frameMs <= 0 ||
+			timer !== undefined ||
+			repaint === undefined
+		) {
+			return;
+		}
 		const scheduledTimer = setTimeout(() => {
 			if (side === "left") {
 				this.#leftGlyphTimer = undefined;
@@ -2261,7 +2243,7 @@ export class PromptBorderEditor extends CustomEditor {
 				this.#rightGlyphTimer = undefined;
 				this.#rightGlyphFrameIndex = (this.#rightGlyphFrameIndex + 1) % glyphConfig.frames.length;
 			}
-			this.#requestGlyphRepaint?.();
+			(this.#requestGlyphRepaint ?? this.#contextRail?.requestRender)?.();
 		}, glyphConfig.frameMs);
 		scheduledTimer.unref?.();
 		if (side === "left") this.#leftGlyphTimer = scheduledTimer;
@@ -2271,6 +2253,7 @@ export class PromptBorderEditor extends CustomEditor {
 	#renderContextRailRows(width: number): readonly string[] | undefined {
 		const runtime = this.#contextRail;
 		if (runtime === undefined || runtime.config.placement !== "inside" || !contextRailVisible(runtime)) return undefined;
+		refreshContextRailUsage(runtime);
 		scheduleContextRailRoleFrames(runtime);
 		const innerWidth = Math.max(0, width - 2);
 		const contents = renderContextRailRows(
@@ -2400,16 +2383,17 @@ function installPromptBorderEditor(ctx: { ui: ExtensionUIContext }): void {
 	}
 }
 
+function refreshContextRailUsage(runtime: ContextRailRuntime): void {
+	updateContextRailState(runtime, runtime.getContextUsage?.());
+}
+
 function refreshContextRail(ctx: {
 	hasUI: boolean;
-	getContextUsage?(): { tokens: number; contextWindow: number; percent: number } | undefined;
+	getContextUsage?: () => ContextRailUsage | undefined;
 }): void {
 	if (!ctx.hasUI || activeContextRailRuntime === undefined) return;
-	const raw = ctx.getContextUsage?.();
-	updateContextRailState(
-		activeContextRailRuntime,
-		raw === undefined ? undefined : { tokens: raw.tokens, contextWindow: raw.contextWindow, percent: raw.percent },
-	);
+	activeContextRailRuntime.getContextUsage = ctx.getContextUsage?.bind(ctx);
+	refreshContextRailUsage(activeContextRailRuntime);
 }
 
 function disposeContextRailRuntime(): void {
@@ -2522,7 +2506,7 @@ async function initializeMissingPromptBorderAssets(input: PromptBorderConfigPath
 	if (!(await ctx.ui.confirm("Initialize Prompt Border assets?", "Create only missing Prompt Border glyph files?"))) return;
 	const paths = resolveConfigPaths(input);
 	const seeds: Record<PromptBorderGlyphSlot, string> = {
-		left: DEFAULT_LEFT_GLYPH_TEXT,
+		left: DEFAULT_LEFT_GLYPH_FRAME,
 		right: "",
 		status: "",
 		activity: "",
@@ -2582,16 +2566,6 @@ type PromptBorderDialogCallbacks = {
 function validatePromptBorderDraft(config: PromptBorderConfig): string | undefined {
 	if (!isBorderStyleName(String(config.style))) return `Invalid border style: ${String(config.style)}`;
 	if (!isBorderLayoutName(String(config.layout))) return `Invalid border layout: ${String(config.layout)}`;
-	for (const [label, glyph] of [
-		["left glyph", config.leftGlyph],
-		["right glyph", config.rightGlyph],
-		["status spinner", config.spinnerGlyphs.status],
-		["activity spinner", config.spinnerGlyphs.activity],
-	] as const) {
-		if (!Number.isFinite(glyph.frameMs) || glyph.frameMs < 16 || glyph.frameMs > 1000) {
-			return `${label} frameMs must be between 16 and 1000`;
-		}
-	}
 	const rail = config.contextRail;
 	if (typeof rail.enabled !== "boolean") return "Context Rail enabled must be boolean";
 	if (!(CONTEXT_RAIL_PLACEMENTS as readonly string[]).includes(String(rail.placement))) return "Invalid Context Rail placement";
@@ -2615,9 +2589,6 @@ function validatePromptBorderDraft(config: PromptBorderConfig): string | undefin
 		}
 		if (typeof roleConfig.meaning !== "string" || roleConfig.meaning.trim().length === 0) {
 			return `Context Rail ${role} meaning must be nonempty`;
-		}
-		if (roleConfig.fps !== undefined && (!Number.isFinite(roleConfig.fps) || roleConfig.fps <= 0)) {
-			return `Context Rail ${role} fps must be positive`;
 		}
 	}
 	if (!(CONTEXT_RAIL_MEANING_PLACEMENTS as readonly string[]).includes(String(rail.custom.meaningPlacement))) {
@@ -2715,24 +2686,6 @@ class PromptBorderSettingsDialog implements Component {
 			{ id: "heading.config", label: "Config", currentValue: "", heading: true },
 			selectSetting("style", "Style", String(this.#draft.style), STYLE_NAMES, "Glyph set used to draw the prompt editor border; choose from the listed built-in styles."),
 			selectSetting("layout", "Layout", String(this.#draft.layout), LAYOUT_NAMES, "Edges to draw: full=all, bottom=sides+bottom, sides=sides only, top-bottom=no sides, default=OMP's native box layout."),
-			inputSetting("left.frameMs", "Left glyph frameMs", String(this.#draft.leftGlyph.frameMs), value => {
-				this.#draft.leftGlyph.frameMs = Number(value);
-			}, "Milliseconds between frames from prompt-border-left-glyphs.txt beside config.json. Range 16-1000 ms; whitespace separates frames. Missing/blank files use theme frames."),
-			inputSetting("right.frameMs", "Right glyph frameMs", String(this.#draft.rightGlyph.frameMs), value => {
-				this.#draft.rightGlyph.frameMs = Number(value);
-			}, "Milliseconds between frames from prompt-border-right-glyphs.txt beside config.json. Range 16-1000 ms; whitespace separates frames. Missing/blank files use theme frames."),
-			inputSetting("spinner.status.frameMs", "Status spinner frameMs", String(this.#draft.spinnerGlyphs.status.frameMs), value => {
-				this.#draft.spinnerGlyphs.status.frameMs = Number(value);
-			}, "Frame time for prompt-border-status-spinner-glyphs.txt beside config.json. Range 16-1000 ms; OMP's 80 ms tick may repeat/skip. Missing/blank files use theme frames."),
-			inputSetting(
-				"spinner.activity.frameMs",
-				"Activity spinner frameMs",
-				String(this.#draft.spinnerGlyphs.activity.frameMs),
-				value => {
-					this.#draft.spinnerGlyphs.activity.frameMs = Number(value);
-				},
-				"Frame time for prompt-border-activity-spinner-glyphs.txt beside config.json. Range 16-1000 ms; OMP's 80 ms tick may repeat/skip. Missing/blank files use theme frames.",
-			),
 			{ id: "heading.display", label: "Context Rail", currentValue: "", heading: true },
 			{
 				id: "rail.enabled",
@@ -2763,9 +2716,6 @@ class PromptBorderSettingsDialog implements Component {
 					inputSetting(`rail.${role}.framesFile`, "Frames file", roleConfig.framesFile, value => {
 						roleConfig.framesFile = value;
 					}, `File joined to Glyph directory for the ${CONTEXT_RAIL_ROLE_PURPOSES[role]} marker. Default: ${DEFAULT_CONTEXT_RAIL_CONFIG[role].framesFile}. Missing/unreadable files use the theme fallback.`),
-					inputSetting(`rail.${role}.fps`, "FPS (blank = asset)", roleConfig.fps === undefined ? "" : String(roleConfig.fps), value => {
-						roleConfig.fps = value.trim().length === 0 ? undefined : Number(value);
-					}, `Positive FPS override for the ${CONTEXT_RAIL_ROLE_PURPOSES[role]} marker. Blank uses the asset fps= header; without either, multiple frames stay static.`),
 					inputSetting(`rail.${role}.meaning`, "Meaning", roleConfig.meaning, value => {
 						roleConfig.meaning = value;
 					}, `Nonempty label for the ${CONTEXT_RAIL_ROLE_PURPOSES[role]} marker. Full mode and custom {text-meaning} use it; placement may omit it when space is unavailable.`),
@@ -2798,7 +2748,7 @@ class PromptBorderSettingsDialog implements Component {
 			),
 			{ id: "heading.assets", label: "Assets", currentValue: "", heading: true },
 			{ id: "action.show-paths", label: "Show paths", currentValue: "Enter", description: "Show the active config.json and resolved Prompt Border and Context Rail asset paths." },
-			{ id: "action.initialize-prompt-assets", label: "Initialize missing Prompt Border assets", currentValue: "Enter", description: "Create only the four Prompt Border glyph files named by the frame settings beside config.json; existing files stay untouched and created files remain after Cancel." },
+			{ id: "action.initialize-prompt-assets", label: "Initialize missing Prompt Border assets", currentValue: "Enter", description: "Create only the four missing Prompt Border glyph files; existing files stay untouched. Asset fps= headers control animation; created files remain after Cancel." },
 			{ id: "action.initialize-context-assets", label: "Initialize missing Context Rail assets", currentValue: "Enter", description: "Create only missing label.txt, pointer.txt, and configured role Frames files in the draft Glyph directory; existing files stay untouched and created files remain after Cancel." },
 			{ id: "action.reload", label: "Reload from disk", currentValue: "Enter", description: "Discard draft edits and reread config.json; live settings stay unchanged until Apply." },
 			{ id: "heading.actions", label: "Actions", currentValue: "", heading: true },
@@ -2831,18 +2781,6 @@ class PromptBorderSettingsDialog implements Component {
 				break;
 			case "layout":
 				this.#draft.layout = value as BorderLayoutName;
-				break;
-			case "left.frameMs":
-				this.#draft.leftGlyph.frameMs = Number(value);
-				break;
-			case "right.frameMs":
-				this.#draft.rightGlyph.frameMs = Number(value);
-				break;
-			case "spinner.status.frameMs":
-				this.#draft.spinnerGlyphs.status.frameMs = Number(value);
-				break;
-			case "spinner.activity.frameMs":
-				this.#draft.spinnerGlyphs.activity.frameMs = Number(value);
 				break;
 			case "rail.enabled":
 				this.#draft.contextRail.enabled = value === "true";
@@ -2878,9 +2816,6 @@ class PromptBorderSettingsDialog implements Component {
 				if (id.startsWith("rail.") && id.endsWith(".framesFile")) {
 					const role = id.split(".")[1] as ContextRailRole;
 					this.#draft.contextRail[role].framesFile = value;
-				} else if (id.startsWith("rail.") && id.endsWith(".fps")) {
-					const role = id.split(".")[1] as ContextRailRole;
-					this.#draft.contextRail[role].fps = value.trim().length === 0 ? undefined : Number(value);
 				} else if (id.startsWith("rail.") && id.endsWith(".meaning")) {
 					const role = id.split(".")[1] as ContextRailRole;
 					this.#draft.contextRail[role].meaning = value;
@@ -2949,7 +2884,7 @@ class PromptBorderSettingsDialog implements Component {
 type PromptBorderLiveContext = {
 	hasUI: boolean;
 	ui: ExtensionUIContext;
-	getContextUsage?: () => { tokens: number; contextWindow: number; percent: number } | undefined;
+	getContextUsage?: () => ContextRailUsage | undefined;
 };
 
 function effectiveContextRailConfig(config: PromptBorderConfig): ContextRailConfig {

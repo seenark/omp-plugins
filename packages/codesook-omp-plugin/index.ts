@@ -1,4 +1,4 @@
-import { readFileSync, unlinkSync } from "node:fs";
+import { mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "@oh-my-pi/pi-coding-agent";
@@ -11,6 +11,7 @@ import {
 	type SettingItem,
 } from "@oh-my-pi/pi-tui";
 import {
+	defaultCodesookOmpConfig,
 	CODESOOK_OMP_CONFIG_CHANGED,
 	CODESOOK_OMP_CONFIG_PATH,
 	isRecord,
@@ -19,7 +20,9 @@ import {
 	type CodesookOmpConfig,
 	type CodesookOmpConfigReadResult,
 } from "@codesook/omp-shared-display/config-store";
+import { parseFrameSequenceAsset } from "@codesook/omp-shared-display/client";
 import {
+	loadPackagedPonytailSequence,
 	isDisplaySource,
 	normalizeSharedDisplayConfig,
 	validateSharedDisplayConfig,
@@ -28,6 +31,8 @@ import {
 	type SharedDisplayPlacement,
 } from "@codesook/omp-shared-display";
 import {
+	CAVEMAN_ACTIVE_LEVELS,
+	PACKAGE_ASSET_DIRECTORY,
 	normalizeLegacyCavemanConfig,
 } from "@codesook/omp-caveman";
 import {
@@ -35,8 +40,13 @@ import {
 	type HeadroomConfig,
 } from "@codesook/omp-headroom/config";
 import { HEADROOM_PROXY_TOKEN_FILE } from "@codesook/omp-headroom/client";
+import { DEFAULT_GLYPHS, DISPLAY_STATES, resolveThemeGlyph } from "@codesook/omp-headroom/display";
 import {
-	DEFAULT_PROMPT_BORDER_CONFIG,
+	DEFAULT_LEFT_GLYPH_TEXT,
+	DEFAULT_LEFT_GLYPH_TEXT_PATH,
+	DEFAULT_RIGHT_GLYPH_TEXT_PATH,
+	DEFAULT_STATUS_SPINNER_GLYPH_TEXT_PATH,
+	DEFAULT_ACTIVITY_SPINNER_GLYPH_TEXT_PATH,
 	borderStyles,
 	isBorderLayoutName,
 	isBorderStyleName,
@@ -162,7 +172,7 @@ const RAIL_LABEL_POSITIONS = ["left", "center", "right"] as const satisfies read
 const RAIL_POINTERS = ["auto", "visible", "hidden"] as const satisfies readonly ContextRailPointer[];
 const RAIL_MEANING_PLACEMENTS = ["top", "below", "beside"] as const satisfies readonly ContextRailMeaningPlacement[];
 
-const COMMAND_USAGE = "Usage: /codesook-omp-plugin [status]";
+const COMMAND_USAGE = "Usage: /codesook-omp-plugin [status|init config]";
 const STATUS_ACTION_ID = "action:status";
 const APPLY_ACTION_ID = "action:apply";
 const CANCEL_ACTION_ID = "action:cancel";
@@ -195,7 +205,6 @@ export type UnifiedSettingsDraft = {
 		promptBorder: {
 			style: BorderStyleName;
 			layout: BorderLayoutName;
-			frameMs: number;
 		};
 		contextRail: ContextRailConfig;
 	};
@@ -340,31 +349,6 @@ function featureWarning(presence: PluginPresence, feature: ProjectFeature): stri
 		: "Feature is not enabled in omp-plugins; setting applies when extension loads (usually next start).";
 }
 
-function normalizePromptRaw(raw: unknown): Record<string, unknown> {
-	const source = asRecord(raw);
-	const promptBorder = asRecord(source.promptBorder);
-	const explicitFrame =
-		typeof promptBorder.frameMs === "number" && Number.isFinite(promptBorder.frameMs) ? promptBorder.frameMs : undefined;
-	const left = asRecord(promptBorder.leftGlyph);
-	const right = asRecord(promptBorder.rightGlyph);
-	const spinners = asRecord(promptBorder.spinnerGlyphs);
-	const status = asRecord(spinners.status);
-	const activity = asRecord(spinners.activity);
-	const frameMs = explicitFrame ?? (typeof left.frameMs === "number" ? left.frameMs : DEFAULT_PROMPT_BORDER_CONFIG.leftGlyph.frameMs);
-	return {
-		...source,
-		promptBorder: {
-			...promptBorder,
-			leftGlyph: { ...left, frameMs: left.frameMs ?? frameMs },
-			rightGlyph: { ...right, frameMs: right.frameMs ?? frameMs },
-			spinnerGlyphs: {
-				...spinners,
-				status: { ...status, frameMs: status.frameMs ?? frameMs },
-				activity: { ...activity, frameMs: activity.frameMs ?? frameMs },
-			},
-		},
-	};
-}
 
 function createDraft(raw: unknown, legacy: LegacySources = {}): UnifiedSettingsDraft {
 	const source = asRecord(raw);
@@ -411,13 +395,11 @@ function createDraft(raw: unknown, legacy: LegacySources = {}): UnifiedSettingsD
 		display.promptBorder === undefined || display.contextRail === undefined ? asRecord(legacy.promptBorder) : {};
 	const rootPrompt = asRecord(display.promptBorder);
 	const rootRail = display.contextRail;
-	const prompt = normalizePromptBorderConfig(
-		normalizePromptRaw({
-			...legacyPrompt,
-			promptBorder: mergeRecords(legacyPrompt.promptBorder, rootPrompt),
-			contextRail: rootRail ?? legacyPrompt.contextRail,
-		}),
-	);
+	const prompt = normalizePromptBorderConfig({
+		...legacyPrompt,
+		promptBorder: mergeRecords(legacyPrompt.promptBorder, rootPrompt),
+		contextRail: rootRail ?? legacyPrompt.contextRail,
+	});
 
 	return {
 		display: {
@@ -427,7 +409,6 @@ function createDraft(raw: unknown, legacy: LegacySources = {}): UnifiedSettingsD
 			promptBorder: {
 				style: prompt.style,
 				layout: prompt.layout,
-				frameMs: prompt.leftGlyph.frameMs,
 			},
 			contextRail: clone(prompt.contextRail),
 		},
@@ -468,7 +449,6 @@ export function draftToRootSections(draft: UnifiedSettingsDraft): {
 			framesFile: value.framesFile,
 			meaning: value.meaning,
 		};
-		if (value.fps !== undefined) serialized.fps = value.fps;
 		if (role === "pointer") serialized.visibility = rail.pointer.visibility;
 		return serialized;
 	};
@@ -496,13 +476,6 @@ export function draftToRootSections(draft: UnifiedSettingsDraft): {
 			promptBorder: {
 				style: promptBorder.style,
 				layout: promptBorder.layout,
-				frameMs: promptBorder.frameMs,
-				leftGlyph: { frameMs: promptBorder.frameMs },
-				rightGlyph: { frameMs: promptBorder.frameMs },
-				spinnerGlyphs: {
-					status: { frameMs: promptBorder.frameMs },
-					activity: { frameMs: promptBorder.frameMs },
-				},
 			},
 			contextRail: {
 				enabled: rail.enabled,
@@ -664,10 +637,159 @@ export function persistDraftToRoot(
 	const next = clone(current.value) as CodesookOmpConfig & Record<string, unknown>;
 	next.display = mergeRecords(next.display, sections.display);
 	next.behavior = mergeRecords(next.behavior, sections.behavior);
+	const promptBorder = asRecord(next.display.promptBorder);
+	delete promptBorder.frameMs;
+	delete asRecord(promptBorder.leftGlyph).frameMs;
+	delete asRecord(promptBorder.rightGlyph).frameMs;
+	const spinnerGlyphs = asRecord(promptBorder.spinnerGlyphs);
+	delete asRecord(spinnerGlyphs.status).frameMs;
+	delete asRecord(spinnerGlyphs.activity).frameMs;
+	const contextRail = asRecord(next.display.contextRail);
+	for (const role of CONTEXT_RAIL_ROLES) delete asRecord(contextRail[role]).fps;
 	writeCodesookOmpConfig(next, configPath);
 	removeMigratedLegacySources(legacySources);
 	return next;
 }
+type InitAsset = { path: string; content: string };
+
+function staticAssetContent(source: string): string {
+	const frame = parseFrameSequenceAsset(source)?.frames[0];
+	return frame === undefined ? "" : `${frame.join("\n")}\n`;
+}
+
+function resolveGlyphDirectory(directory: string): string {
+	if (directory === "~") return os.homedir();
+	if (directory.startsWith("~/")) return path.join(os.homedir(), directory.slice(2));
+	return directory;
+}
+
+function themeSymbol(theme: unknown, name: string, fallback: string): string {
+	try {
+		const symbol = isRecord(theme) ? theme.symbol : undefined;
+		if (typeof symbol !== "function") return fallback;
+		const value = symbol.call(theme, name);
+		return typeof value === "string" && value.trim().length > 0 ? value : fallback;
+	} catch {
+		return fallback;
+	}
+}
+
+function writeMissingFile(filePath: string, content: string): boolean {
+	mkdirSync(path.dirname(filePath), { recursive: true });
+	try {
+		writeFileSync(filePath, content, { encoding: "utf8", flag: "wx" });
+		return true;
+	} catch (error) {
+		if (isRecord(error) && error.code === "EEXIST") return false;
+		throw error;
+	}
+}
+
+function configuredInitAssets(draft: UnifiedSettingsDraft, theme: unknown): InitAsset[] {
+	const assets: InitAsset[] = [];
+	const ponytailDirectory = resolveGlyphDirectory(draft.display.sharedDisplay.ponytail.glyphDirectory);
+	for (const mode of ["off", "lite", "full", "ultra", "review"] as const) {
+		const frame = loadPackagedPonytailSequence(mode)?.frames[0];
+		assets.push({
+			path: path.join(ponytailDirectory, `${mode}.txt`),
+			content: frame === undefined ? "" : `${frame.join("\n")}\n`,
+		});
+	}
+	const cavemanDirectory = resolveGlyphDirectory(draft.display.caveman.display.glyphDirectory);
+	for (const level of CAVEMAN_ACTIVE_LEVELS) {
+		const source = readFileSync(path.join(PACKAGE_ASSET_DIRECTORY, `${level}.txt`), "utf8");
+		assets.push({
+			path: path.join(cavemanDirectory, `${level}.txt`),
+			content: staticAssetContent(source),
+		});
+	}
+
+	const headroomDirectory = resolveGlyphDirectory(draft.display.headroom.glyphDirectory);
+	for (const state of DISPLAY_STATES) {
+		assets.push({
+			path: path.join(headroomDirectory, `${state}.txt`),
+			content: `${resolveThemeGlyph(theme, state) || DEFAULT_GLYPHS[state]}\n`,
+		});
+	}
+
+	const promptDefaults = [
+		{ path: DEFAULT_LEFT_GLYPH_TEXT_PATH, content: staticAssetContent(DEFAULT_LEFT_GLYPH_TEXT) },
+		{ path: DEFAULT_RIGHT_GLYPH_TEXT_PATH, content: "" },
+		{ path: DEFAULT_STATUS_SPINNER_GLYPH_TEXT_PATH, content: "" },
+		{ path: DEFAULT_ACTIVITY_SPINNER_GLYPH_TEXT_PATH, content: "" },
+	];
+	assets.push(...promptDefaults);
+
+	const rail = draft.display.contextRail;
+	const railDirectory = resolveGlyphDirectory(rail.glyphDirectory);
+	const roleGlyphs: Record<(typeof CONTEXT_RAIL_ROLES)[number], string> = {
+		speculation: themeSymbol(theme, "context.speculation", "╎"),
+		pointer: themeSymbol(theme, "context.pointer", "●"),
+		compaction: themeSymbol(theme, "context.compaction", "┃"),
+		maximum: themeSymbol(theme, "boxRound.vertical", "│"),
+	};
+	assets.push(
+		{ path: path.join(railDirectory, "label.txt"), content: `${themeSymbol(theme, "status.success", "✓")}\n` },
+		{ path: path.join(railDirectory, "pointer.txt"), content: `${roleGlyphs.pointer}\n` },
+		...CONTEXT_RAIL_ROLES.map(role => ({
+			path: path.join(railDirectory, rail[role].framesFile),
+			content: `${roleGlyphs[role]}\n`,
+		})),
+	);
+	return assets;
+}
+
+function initializePluginConfig(ctx: ExtensionContext): void {
+	const created: string[] = [];
+	const existed: string[] = [];
+	const failed: string[] = [];
+	const configPath = CODESOOK_OMP_CONFIG_PATH;
+	const configBefore = readCodesookOmpConfig(configPath);
+	if (configBefore.exists) {
+		existed.push(`${configPath} (config)`);
+	} else {
+		try {
+			const config = defaultCodesookOmpConfig();
+			const sections = draftToRootSections(createDraft(undefined));
+			config.display = sections.display;
+			config.behavior = sections.behavior;
+			const wroteConfig = writeMissingFile(configPath, `${JSON.stringify(config, null, 2)}\n`);
+			(wroteConfig ? created : existed).push(`${configPath} (config)`);
+		} catch (error) {
+			failed.push(`${configPath}: ${error instanceof Error ? error.message : String(error)}`);
+		}
+	}
+
+	const root = readCodesookOmpConfig(configPath);
+	const draft = draftFromRootConfig(root.valid ? root.value : undefined);
+	try {
+		const uniqueAssets = new Map<string, InitAsset>();
+		for (const asset of configuredInitAssets(draft, ctx.ui.theme)) {
+			uniqueAssets.set(path.resolve(asset.path), asset);
+		}
+		for (const asset of uniqueAssets.values()) {
+			try {
+				(writeMissingFile(asset.path, asset.content) ? created : existed).push(asset.path);
+			} catch (error) {
+				failed.push(`${asset.path}: ${error instanceof Error ? error.message : String(error)}`);
+			}
+		}
+	} catch (error) {
+		failed.push(`Could not load packaged glyph defaults: ${error instanceof Error ? error.message : String(error)}`);
+	}
+
+	ctx.ui.notify(
+		[
+			`Created (${created.length}):`,
+			...(created.length > 0 ? created : ["none"]),
+			`Already existed (${existed.length}):`,
+			...(existed.length > 0 ? existed : ["none"]),
+			...(failed.length > 0 ? [`Failed (${failed.length}):`, ...failed] : []),
+		].join("\n"),
+		failed.length > 0 ? "error" : "info",
+	);
+}
+
 
 function validateDraft(draft: UnifiedSettingsDraft): string | undefined {
 	const sharedErrors = validateSharedDisplayConfig(clone(draft.display.sharedDisplay));
@@ -690,8 +812,6 @@ function validateDraft(draft: UnifiedSettingsDraft): string | undefined {
 	if (!Number.isSafeInteger(headroom.minContextTokens) || headroom.minContextTokens < 0) return "Headroom minimum context tokens must be a non-negative integer.";
 	if (!Number.isSafeInteger(headroom.minMessageChars) || headroom.minMessageChars < 1) return "Headroom minimum message chars must be at least 1.";
 	if (!Number.isSafeInteger(headroom.timeoutMs) || headroom.timeoutMs < 100) return "Headroom timeout must be an integer of at least 100 ms.";
-	const frameMs = draft.display.promptBorder.frameMs;
-	if (!Number.isSafeInteger(frameMs) || frameMs < 16 || frameMs > 1000) return "Prompt Border frameMs must be an integer from 16 through 1000.";
 	if (!isBorderStyleName(draft.display.promptBorder.style)) return "Prompt Border style is invalid.";
 	if (!isBorderLayoutName(draft.display.promptBorder.layout)) return "Prompt Border layout is invalid.";
 	const rail = draft.display.contextRail;
@@ -707,7 +827,6 @@ function validateDraft(draft: UnifiedSettingsDraft): string | undefined {
 	for (const role of CONTEXT_RAIL_ROLES) {
 		const config = rail[role];
 		if (!config.framesFile.trim() || !config.meaning.trim()) return `Context Rail ${role} files and meaning must not be empty.`;
-		if (config.fps !== undefined && (!Number.isFinite(config.fps) || config.fps <= 0)) return `Context Rail ${role} fps must be positive.`;
 	}
 	const shared = draft.display.sharedDisplay;
 	if (!SHARED_LAYOUTS.includes(shared.layout) || !SHARED_PLACEMENTS.includes(shared.widgetPlacement)) return "Shared Display layout or placement is invalid.";
@@ -811,7 +930,6 @@ function settingsItems(
 		return [
 			{ id: `rail.${role}.heading`, label: role, currentValue: "", heading: true } satisfies SettingItem,
 			textItem(`rail.${role}.framesFile`, "Frames file", roleConfig.framesFile, "External frame asset file name; frame bytes never enter root config.", promptWarning),
-			numberItem(`rail.${role}.fps`, "FPS", roleConfig.fps ?? 0, "Positive timing override; zero means use asset fps header. 0 is shown for unset.", promptWarning),
 			textItem(`rail.${role}.meaning`, "Meaning", roleConfig.meaning, "Meaning text used by full/custom rail modes.", promptWarning),
 			...(role === "pointer"
 				? [selectItem("rail.pointer.visibility", "Pointer visibility", rail.pointer.visibility, RAIL_POINTERS, "Visibility policy for current-usage pointer.", promptWarning)]
@@ -873,7 +991,6 @@ function settingsItems(
 		{ id: "section:prompt", label: "Prompt Border", currentValue: "", heading: true },
 		selectItem("prompt.style", "Style", draft.display.promptBorder.style, Object.keys(borderStyles) as BorderStyleName[], "Prompt border style.", promptWarning),
 		selectItem("prompt.layout", "Layout", draft.display.promptBorder.layout, ["full", "bottom", "sides", "top-bottom", "default"], "Prompt border layout.", promptWarning),
-		numberItem("prompt.frameMs", "Frame ms", draft.display.promptBorder.frameMs, "Shared timing for external left/right/spinner glyph assets, 16-1000 ms.", promptWarning),
 		{ id: "section:rail", label: "Context Rail", currentValue: "", heading: true },
 		boolItem("rail.enabled", "Enabled", rail.enabled, "Render plugin Context Rail; native context gauge remains independent.", promptWarning),
 		selectItem("rail.placement", "Placement", rail.placement, RAIL_PLACEMENTS, "Place rail inside, above, or below prompt editor.", promptWarning),
@@ -949,7 +1066,6 @@ function updateDraft(draft: UnifiedSettingsDraft, id: string, value: string): vo
 		case "headroom.glyphDirectory": draft.display.headroom.glyphDirectory = value; return;
 		case "prompt.style": if (isBorderStyleName(value)) draft.display.promptBorder.style = value; return;
 		case "prompt.layout": if (isBorderLayoutName(value)) draft.display.promptBorder.layout = value; return;
-		case "prompt.frameMs": draft.display.promptBorder.frameMs = Number(value); return;
 		case "rail.enabled": draft.display.contextRail.enabled = bool; return;
 		case "rail.placement": if (RAIL_PLACEMENTS.includes(value as ContextRailPlacement)) draft.display.contextRail.placement = value as ContextRailPlacement; return;
 		case "rail.visibility": if (RAIL_VISIBILITIES.includes(value as ContextRailVisibility)) draft.display.contextRail.visibility = value as ContextRailVisibility; return;
@@ -967,9 +1083,6 @@ function updateDraft(draft: UnifiedSettingsDraft, id: string, value: string): vo
 	if (id.startsWith("rail.") && id.endsWith(".framesFile")) {
 		const role = id.split(".")[1] as (typeof CONTEXT_RAIL_ROLES)[number];
 		draft.display.contextRail[role].framesFile = value;
-	} else if (id.startsWith("rail.") && id.endsWith(".fps")) {
-		const role = id.split(".")[1] as (typeof CONTEXT_RAIL_ROLES)[number];
-		draft.display.contextRail[role].fps = Number(value) > 0 ? Number(value) : undefined;
 	} else if (id.startsWith("rail.") && id.endsWith(".meaning")) {
 		const role = id.split(".")[1] as (typeof CONTEXT_RAIL_ROLES)[number];
 		draft.display.contextRail[role].meaning = value;
@@ -1183,12 +1296,16 @@ export default function codesookOmpPluginSettings(pi: ExtensionAPI): void {
 		description: `Unified Codesook OMP plugin settings. ${COMMAND_USAGE}`,
 		getArgumentCompletions(argumentPrefix) {
 			const prefix = argumentPrefix.trim().toLowerCase();
-			return ["status"].filter(value => value.startsWith(prefix)).map(value => ({ value, label: value }));
+			return ["status", "init config"].filter(value => value.startsWith(prefix)).map(value => ({ value, label: value }));
 		},
 		handler: async (args, ctx) => {
 			const argument = args.trim().toLowerCase();
 			if (argument === "status") {
 				await showStatus(pi, ctx);
+				return;
+			}
+			if (argument === "init config") {
+				initializePluginConfig(ctx);
 				return;
 			}
 			if (argument !== "") {

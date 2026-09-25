@@ -33,6 +33,26 @@ describe("Prompt Border destination config", () => {
 		}
 	});
 
+	it("uses asset FPS and keeps untimed frames static", () => {
+		const staticConfig = normalizePromptBorderConfig({
+			promptBorder: { leftGlyph: { glyphs: "A\n\nB", frameMs: 25 } },
+		});
+		expect(staticConfig.leftGlyph.frames).toEqual(["A"]);
+		expect(staticConfig.leftGlyph.frameMs).toBe(0);
+
+		const timedConfig = normalizePromptBorderConfig({
+			promptBorder: { leftGlyph: { glyphs: "fps=20\nA\n\nB", frameMs: 999 } },
+		});
+		expect(timedConfig.leftGlyph.frames).toEqual(["A", "B"]);
+		expect(timedConfig.leftGlyph.frameMs).toBe(50);
+
+		const invalidFpsConfig = normalizePromptBorderConfig({
+			promptBorder: { leftGlyph: { glyphs: "fps=0\nA\n\nB", frameMs: 999 } },
+		});
+		expect(invalidFpsConfig.leftGlyph.frames).toEqual(["A"]);
+		expect(invalidFpsConfig.leftGlyph.frameMs).toBe(0);
+	});
+
 	it("migrates legacy inline config and adjacent asset bytes only when destination is missing", async () => {
 		const root = fs.mkdtempSync(path.join(os.tmpdir(), "omp-prompt-border-migration-"));
 		const legacyConfigPath = path.join(root, "legacy", "config.json");

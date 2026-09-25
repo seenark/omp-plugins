@@ -45,8 +45,12 @@ One animation state for a role, represented by one or more Glyph Tiles or rows, 
 _Avoid_: Individual glyph animation
 
 **Frame Sequence**:
-An ordered set of Block Frames for one role. A sequence may be static when it contains one frame or animated when it contains several; when its asset is unavailable, the role uses a static Default Glyph Tile.
+An ordered set of Block Frames for one role. One-frame sequences are static; multi-frame sequences animate at their configured Frame Rate, or show their first frame when no Frame Rate is configured. If its asset is unavailable, the role uses a static Default Glyph Tile.
 _Avoid_: Glyph list
+
+**Frame Rate**:
+The target number of frame changes per second for an animated Frame Sequence.
+_Avoid_: Update interval
 
 **Default Glyph Tile**:
 The built-in single-frame visual used when a role has no readable custom asset; it never animates.
@@ -115,7 +119,7 @@ The human-readable explanation associated with a role's Glyph Tile.
 The configured relation of Meaning Text to inline Glyph Tiles: above, below, or beside. Full Mode defaults to beside; Compact Mode omits Meaning Text; Custom Mode may override the placement.
 
 **Independent Gauges**:
-The native context gauge and plugin Context Rail may be enabled simultaneously; neither one changes the other's settings or visibility.
+The Native Context Gauge and Context Rail may be enabled simultaneously. Their visibility and configuration remain independent, but both represent the same current context usage.
 _Avoid_: Mirrored gauge, replacement gauge
 
 **Root Plugin Configuration**:

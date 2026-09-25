@@ -128,8 +128,7 @@ export function parseFrameSequenceAsset(text: string): FrameSequence | undefined
 		const directive = /^fps=(.*)$/u.exec(lines[firstNonEmpty]!.trim());
 		if (directive) {
 			const candidate = Number(directive[1]!.trim());
-			if (!Number.isFinite(candidate) || candidate <= 0) return undefined;
-			fps = candidate;
+			if (Number.isFinite(candidate) && candidate > 0) fps = candidate;
 			lines.splice(firstNonEmpty, 1);
 		}
 	}

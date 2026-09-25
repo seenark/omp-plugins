@@ -6,6 +6,7 @@ import {
 	readCodesookOmpConfig,
 	updateCodesookOmpConfig,
 } from "@codesook/omp-shared-display/config-store";
+import { parseFrameSequenceAsset } from "@codesook/omp-shared-display/client";
 import {
 	CAVEMAN_LEVELS,
 	CONFIG_PATH,
@@ -218,7 +219,10 @@ export async function seedMissingCavemanGlyphs(
 		const destination = path.join(glyphDirectory, `${level}.txt`);
 		if (fs.existsSync(destination)) continue;
 		const source = path.join(packageDirectory, `${level}.txt`);
-		const content = await readFile(source, "utf8");
+		const sequence = parseFrameSequenceAsset(await readFile(source, "utf8"));
+		const firstFrame = sequence?.frames[0];
+		if (firstFrame === undefined) throw new Error(`Invalid packaged Caveman glyph asset: ${source}`);
+		const content = `${firstFrame.join("\n")}\n`;
 		await mkdir(path.dirname(destination), { recursive: true });
 		try {
 			await writeFile(destination, content, { encoding: "utf8", flag: "wx" });

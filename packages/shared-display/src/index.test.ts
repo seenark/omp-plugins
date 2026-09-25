@@ -2,8 +2,8 @@ import { describe, expect, it } from "bun:test";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { DEFAULT_SHARED_DISPLAY_CONFIG, loadSharedDisplayConfig, writeSharedDisplayConfig } from "./index.ts";
-import type { SharedDisplayConfig } from "./index.ts";
+import { composeDisplayRows, DEFAULT_SHARED_DISPLAY_CONFIG, loadSharedDisplayConfig, writeSharedDisplayConfig } from "./index.ts";
+import type { FrameSequence, SharedDisplayConfig } from "./index.ts";
 
 describe("Shared Display configuration", () => {
 	it("keeps explicit non-root paths as standalone config files", () => {
@@ -21,6 +21,23 @@ describe("Shared Display configuration", () => {
 		} finally {
 			fs.rmSync(root, { recursive: true, force: true });
 		}
+	});
+	describe("Shared Display animation", () => {
+		it("animates configured frames while the agent is idle", () => {
+			const snapshots = new Map<"headroom", FrameSequence>([
+				["headroom", { frames: [["A"], ["B"]], fps: 1 }],
+			]);
+			expect(
+				composeDisplayRows(snapshots, {
+					layout: "horizontal",
+					order: ["headroom"],
+					width: 1,
+					nowMs: 1_500,
+					animationOriginMs: 0,
+					active: false,
+				}),
+			).toEqual(["B"]);
+		});
 	});
 
 	it("migrates legacy root config and applies root config events live", () => {

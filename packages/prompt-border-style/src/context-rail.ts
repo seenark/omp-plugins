@@ -1,3 +1,5 @@
+import { parseFrameSequenceAsset } from "@codesook/omp-shared-display/client";
+
 export const CONTEXT_RAIL_ROLES = ["speculation", "pointer", "compaction", "maximum"] as const;
 export type ContextRailRole = (typeof CONTEXT_RAIL_ROLES)[number];
 export type ContextRailMode = "compact" | "full" | "custom";
@@ -22,7 +24,6 @@ export type ContextRailGlyphAsset = {
 
 export type ContextRailRoleConfig = {
 	framesFile: string;
-	fps?: number;
 	meaning: string;
 };
 
@@ -214,47 +215,39 @@ function isOneOf<T extends string>(value: unknown, values: readonly T[]): value 
 }
 
 export function parseContextRailGlyphAsset(source: string): ContextRailGlyphAsset {
-	const lines = source.split(/\r?\n/u);
-	const firstNonEmptyIndex = lines.findIndex(line => line.trim().length > 0);
-	let fps: number | undefined;
-	if (firstNonEmptyIndex >= 0) {
-		const directive = /^fps=(.*)$/u.exec(lines[firstNonEmptyIndex]!.trim());
-		if (directive) {
-			const candidate = Number(directive[1]!.trim());
-			if (Number.isFinite(candidate) && candidate > 0) fps = candidate;
-			lines.splice(firstNonEmptyIndex, 1);
-		}
-	}
-
+	const lines = source.replace(/\r\n?/gu, "\n").split("\n");
 	let size: ContextRailGlyphSize | undefined;
-	const sizeIndex = lines.findIndex(line => line.trim().length > 0);
-	if (sizeIndex >= 0) {
-		const directive = /^size=(.*)$/u.exec(lines[sizeIndex]!.trim());
-		if (directive) {
-			const dimensions = /^(\d+)x(\d+)$/u.exec(directive[1]!.trim());
+	let sawFps = false;
+	let sawSize = false;
+	for (let index = 0; index < lines.length; index += 1) {
+		const line = lines[index]!.trim();
+		if (line.length === 0) continue;
+		if (!sawFps && /^fps=/u.test(line)) {
+			sawFps = true;
+			continue;
+		}
+		const sizeDirective = /^size=(.*)$/u.exec(line);
+		if (!sawSize && sizeDirective !== null) {
+			const dimensions = /^(\d+)x(\d+)$/u.exec(sizeDirective[1]!.trim());
 			const width = dimensions === null ? Number.NaN : Number(dimensions[1]);
 			const height = dimensions === null ? Number.NaN : Number(dimensions[2]);
 			if (Number.isSafeInteger(width) && width > 0 && Number.isSafeInteger(height) && height > 0) {
 				size = { width, height };
 			}
-			lines.splice(sizeIndex, 1);
+			lines[index] = "";
+			sawSize = true;
+			continue;
 		}
+		break;
 	}
 
-	const buildAsset = (frames: string[]): ContextRailGlyphAsset => {
-		const asset: ContextRailGlyphAsset = { frames, fps };
-		if (size !== undefined) asset.size = size;
-		return asset;
+	const sequence = parseFrameSequenceAsset(lines.join("\n"));
+	const asset: ContextRailGlyphAsset = {
+		frames: sequence?.frames.map(frame => frame.join("\n")) ?? [],
+		fps: sequence?.fps,
 	};
-	const body = lines.join("\n");
-	if (!body.trim()) return buildAsset([]);
-	const frames = /\r?\n[ \t]*\r?\n/u.test(body)
-		? body
-				.split(/\r?\n[ \t]*\r?\n/u)
-				.map(frame => frame.trim())
-				.filter(Boolean)
-		: body.trim().split(/\s+/u).filter(Boolean);
-	return buildAsset(frames);
+	if (size !== undefined) asset.size = size;
+	return asset;
 }
 
 function normalizeRoleConfig(raw: unknown, defaults: ContextRailRoleConfig): ContextRailRoleConfig {
@@ -265,10 +258,9 @@ function normalizeRoleConfig(raw: unknown, defaults: ContextRailRoleConfig): Con
 			: defaults.framesFile;
 	const meaning =
 		typeof source.meaning === "string" && source.meaning.trim().length > 0 ? source.meaning : defaults.meaning;
-	const normalized: ContextRailRoleConfig = { framesFile, meaning };
-	if (typeof source.fps === "number" && Number.isFinite(source.fps) && source.fps > 0) normalized.fps = source.fps;
-	return normalized;
+	return { framesFile, meaning };
 }
+
 
 function normalizePointerRoleConfig(raw: unknown): ContextRailPointerRoleConfig {
 	if (isOneOf(raw, POINTERS)) {
@@ -634,8 +626,7 @@ function boundaryPosition(value: number | null | undefined, width: number): numb
 }
 
 function formatPercent(percent: number): string {
-	const displayPercent = percent < 0 ? 0 : percent;
-	return Number.isInteger(displayPercent) ? `${displayPercent}%` : `${Math.round(displayPercent)}%`;
+	return Number.isFinite(percent) ? `${percent.toFixed(1)}%` : "?";
 }
 
 function flattenGlyphFrame(frame: string): string {
@@ -773,9 +764,9 @@ function writeLabelCells(
 
 
 function renderUnknownRail(width: number, palette: ContextRailPalette): string {
-	const glyph = typeof palette.horizontal === "string" && palette.horizontal.length > 0 ? palette.horizontal : DEFAULT_HORIZONTAL;
-	const cells = Array.from({ length: width }, () => fitToWidth(glyph, 1));
-	return safeColor(palette.muted, cells.join(""));
+	const horizontal =
+		typeof palette.horizontal === "string" && palette.horizontal.length > 0 ? palette.horizontal : DEFAULT_HORIZONTAL;
+	return safeColor(palette.muted, fitToWidth(horizontal, 1).repeat(width));
 }
 
 type MarkerRolePlacement = {
@@ -1002,13 +993,7 @@ function placeAnnotation(
 }
 
 function markerPercent(percent: number): string {
-	if (!Number.isFinite(percent)) return "0%";
-	const safePercent = Math.max(0, percent);
-	if (safePercent > 0 && safePercent < 1) {
-		const fractional = Math.round(safePercent * 10) / 10;
-		return `${fractional}%`;
-	}
-	return `${Math.round(safePercent)}%`;
+	return formatPercent(percent);
 }
 
 function markerNumber(value: number): string {
@@ -1139,6 +1124,9 @@ function buildMarkerGrid(
 		occupied: Array.from({ length: width }, () => false),
 		markers: [],
 	};
+	const reserveInlineAnnotations =
+		normalizedPresentationMode(presentation.mode) === "custom" &&
+		normalizedMeaningPlacement(presentation.meaningPlacement) === "beside";
 	for (const role of MARKER_PRIORITY) {
 		const roleConfig = presentation.roles[role];
 		if (roleConfig === undefined || roleConfig.visible !== true) continue;
@@ -1154,8 +1142,38 @@ function buildMarkerGrid(
 				? maxStart
 				: Math.min(maxStart, Math.max(0, markerPosition(anchor, width) - Math.floor(tileWidth / 2)));
 		const starts = role === "maximum" ? [nominalStart] : candidateStarts(width, tileWidth, nominalStart);
+		const annotation = reserveInlineAnnotations
+			? splitCustomTemplate(customTemplateForRole(presentation, role), role, roleConfig, usage)
+			: undefined;
+		const beforeWidth = visibleWidth(annotation?.before ?? "");
+		const afterWidth = visibleWidth(annotation?.after ?? "");
+		const fitsInlineAnnotations = (start: number): boolean => {
+			const beforeStart = start - beforeWidth;
+			const afterStart = start + tileWidth;
+			if (beforeStart < 0 || afterStart + afterWidth > width) return false;
+			for (let column = beforeStart; column < start; column += 1) {
+				if (grid.occupied[column]) return false;
+			}
+			for (let column = afterStart; column < afterStart + afterWidth; column += 1) {
+				if (grid.occupied[column]) return false;
+			}
+			return true;
+		};
+		const canPlaceMarker = (start: number): boolean => {
+			if (!preservesMarkerAnchorOrder(grid.markers, anchor, start, tileWidth)) return false;
+			for (let column = start; column < start + tileWidth; column += 1) {
+				if (grid.occupied[column]) return false;
+			}
+			return true;
+		};
+		const hasInlineAnnotationPlacement =
+			beforeWidth > 0 || afterWidth > 0
+				? starts.some(start => canPlaceMarker(start) && fitsInlineAnnotations(start))
+				: false;
+		// Keep custom text beside its frame when a nearby marker would otherwise split them.
 		let placed = false;
 		for (const start of starts) {
+			if (hasInlineAnnotationPlacement && !fitsInlineAnnotations(start)) continue;
 			const placement: MarkerRolePlacement = {
 				role,
 				tile,
@@ -1219,11 +1237,18 @@ function renderMarkerPresentation(
 	const mode = normalizedPresentationMode(presentation.mode);
 	if (!isKnownUsage(usage)) {
 		const blank = EMPTY_CELL.repeat(width);
+		const question = safeColor(palette.muted, fitToWidth("?", width));
 		const customPlacement = mode === "custom" ? normalizedMeaningPlacement(presentation.meaningPlacement) : "beside";
-		return customPlacement === "top" || customPlacement === "below" ? `${blank}\n${blank}` : blank;
+		if (customPlacement === "top") return `${question}\n${blank}`;
+		if (customPlacement === "below") return `${blank}\n${question}`;
+		return question;
 	}
 	const grid = buildMarkerGrid(width, palette, usage, boundaries, presentation);
 	applyBarBackground(grid, width, palette, usage);
+	if (mode === "custom" && normalizedMeaningPlacement(presentation.meaningPlacement) === "beside") {
+		const barCell = grid.occupied.findIndex(occupied => !occupied);
+		if (barCell >= 0) grid.occupied[barCell] = true;
+	}
 	if (mode === "compact") {
 		placeAnnotation(grid.cells, grid.occupied, markerPercent(usage.percent), 0, palette.label);
 		return grid.cells.join("");

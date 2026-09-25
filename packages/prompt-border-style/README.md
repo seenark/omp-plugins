@@ -59,8 +59,7 @@ Example:
   "display": {
     "promptBorder": {
       "style": "double",
-      "layout": "full",
-      "frameMs": 70
+      "layout": "full"
     },
     "contextRail": {
       "enabled": true,
@@ -74,7 +73,7 @@ Example:
 }
 ```
 
-Root settings exposes border style/layout/frame timing plus Context Rail topology, visibility, mode, labels, role meanings, and asset paths. Full role configuration remains supported in root `display.contextRail`; glyph/frame bytes stay external.
+Root settings exposes border style/layout and Context Rail topology, visibility, mode, labels, role meanings, and asset paths. Glyph files use the shared [Frame Sequence asset format](../shared-display/README.md#frame-assets), including Context Rail's optional `size=<width>x<height>` layout metadata.
 
 Prompt Border glyph text files remain under:
 
