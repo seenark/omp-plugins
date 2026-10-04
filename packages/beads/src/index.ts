@@ -1,7 +1,7 @@
 import type { ExtensionAPI, ExtensionContext } from "@oh-my-pi/pi-coding-agent";
 import { matchesKey, truncateToWidth, type Component } from "@oh-my-pi/pi-tui";
 import { connectSharedDisplay, type SharedDisplayPublisher } from "@codesook/omp-shared-display/client";
-import { CODESOOK_OMP_CONFIG_CHANGED } from "@codesook/omp-shared-display/config-store";
+import { CODESOOK_OMP_CONFIG_CHANGED, isRecord, readCodesookOmpConfig } from "@codesook/omp-shared-display/config-store";
 import { readIntegrationSettings, resolveIntegrationProject, setProjectIntegrationPolicy, type IntegrationPolicy, type IntegrationVisibility } from "@codesook/omp-shared-display/project-integrations";
 import { inspectBeads, type BeadsInspection } from "./status";
 
@@ -67,7 +67,10 @@ export default function beadsExtension(pi: ExtensionAPI, options: BeadsOptions =
 			};
 		} catch (error) {
 			if (version !== refreshVersion || stopped || ctx.cwd !== cwd) return undefined;
-			status = { state: "error", initialized: false, integrationProject: cwd, policySource: "unresolved", visibility: "ready", errors: [], detail: error instanceof Error ? error.message : String(error) };
+			const global = readCodesookOmpConfig(options.globalConfigPath);
+			const display = global.valid && isRecord(global.value.display.beads) ? global.value.display.beads : undefined;
+			const visibility = display?.visibility;
+			status = { state: "error", initialized: false, integrationProject: cwd, policySource: "unresolved", visibility: visibility === "always" || visibility === "never" ? visibility : "ready", errors: [], detail: error instanceof Error ? error.message : String(error) };
 		}
 		syncDisplay();
 		return status;

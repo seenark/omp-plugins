@@ -1,5 +1,6 @@
 import { afterEach, expect, test } from "bun:test";
 import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
 import * as os from "node:os";
 import * as path from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "@oh-my-pi/pi-coding-agent";
@@ -261,4 +262,104 @@ test("moving cwd during an inspection without a lifecycle event cannot return st
 	release.resolve();
 	expect(await turn).toBeUndefined();
 	expect(f.footer.get("beads")).toBeUndefined();
+});
+
+test("missing Git keeps global visibility while refusing guessed project policy and all guidance", () => {
+	for (const visibility of ["always", "never"] as const) {
+		const root = mkdtempSync(path.join(os.tmpdir(), "omp-beads-missing-git-"));
+		directories.push(root);
+		const project = path.join(root, "project");
+		const cwd = path.join(project, "nested");
+		const home = path.join(root, "home");
+		const agentDirectory = path.join(home, "agent");
+		const emptyPath = path.join(root, "empty-path");
+		mkdirSync(cwd, { recursive: true });
+		mkdirSync(emptyPath);
+		execFileSync("git", ["init", "--quiet", project], {
+			env: { ...process.env, HOME: home, PI_CODING_AGENT_DIR: agentDirectory, XDG_CONFIG_HOME: path.join(home, ".config"), GIT_CONFIG_GLOBAL: path.join(home, ".gitconfig"), GIT_CONFIG_NOSYSTEM: "1" },
+		});
+		mkdirSync(path.join(project, ".omp"));
+		const policyPath = path.join(project, ".omp", "codesook-omp.json");
+		const policyBytes = JSON.stringify({ version: 1, display: { beads: { visibility: visibility === "always" ? "never" : "always" } }, behavior: { beads: { policy: "off" } } });
+		writeFileSync(policyPath, policyBytes);
+		const extensionPath = path.join(import.meta.dir, "index.ts");
+		const code = `
+			import assert from "node:assert/strict";
+			import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+			import { homedir } from "node:os";
+			import * as path from "node:path";
+			import beadsExtension from ${JSON.stringify(extensionPath)};
+			import { CODESOOK_OMP_CONFIG_PATH } from "@codesook/omp-shared-display/config-store";
+			import { CHANNEL } from "@codesook/omp-shared-display/client";
+			const root = ${JSON.stringify(root)};
+			assert.equal(homedir(), ${JSON.stringify(home)});
+			for (const value of [homedir(), process.env.PI_CODING_AGENT_DIR, CODESOOK_OMP_CONFIG_PATH, path.join(homedir(), ".pi", "agent"), path.join(homedir(), ".config", "omp")]) assert.ok(value.startsWith(root + path.sep), value);
+			mkdirSync(path.dirname(CODESOOK_OMP_CONFIG_PATH), { recursive: true });
+			writeFileSync(CODESOOK_OMP_CONFIG_PATH, JSON.stringify({ version: 1, display: { beads: { visibility: ${JSON.stringify(visibility)} } }, behavior: { beads: { policy: "auto" } } }));
+			const hooks = new Map();
+			let command, footer, component, rendered;
+			const notifications = [], snapshots = [], listeners = new Map();
+			const events = {
+				on(channel, handler) {
+					const group = listeners.get(channel) ?? new Set();
+					listeners.set(channel, group); group.add(handler);
+					return () => group.delete(handler);
+				},
+				emit(channel, message) {
+					if (channel === CHANNEL && message.kind === "snapshot") snapshots.push(message);
+					for (const listener of [...(listeners.get(channel) ?? [])]) listener(message);
+				},
+			};
+			const context = { cwd: ${JSON.stringify(cwd)}, hasUI: true, ui: {
+				setStatus(_key, text) { footer = text; },
+				notify(text, level) { notifications.push({ text, level }); },
+				custom(factory) {
+					const completion = Promise.withResolvers();
+					component = factory({ requestRender() { rendered(); } }, { fg(_color, text) { return text; }, bold(text) { return text; } }, {}, completion.resolve);
+					return completion.promise;
+				},
+			} };
+			const pi = {
+				on(name, handler) { hooks.set(name, handler); },
+				registerCommand(_name, value) { command = value; },
+				events, exec() { throw new Error("Beads inspection must not run without a resolved Integration Project"); },
+			};
+			beadsExtension(pi);
+			await hooks.get("session_start")({}, context);
+			const native = footer ?? null;
+			const original = Object.freeze(["Repository still requires tracking", "Other plugin"]);
+			const guidance = await hooks.get("before_agent_start")({ systemPrompt: original }, context);
+			assert.equal(guidance, undefined);
+			assert.deepEqual(original, ["Repository still requires tracking", "Other plugin"]);
+			events.emit(CHANNEL, { protocol: 1, kind: "host", epoch: "host", active: true });
+			assert.equal(footer, undefined);
+			const shared = snapshots.at(-1).sequence;
+			const ready = Promise.withResolvers();
+			rendered = ready.resolve;
+			const status = command.handler("status", context);
+			assert.ok(component.render(500).join("\\n").includes("Loading"));
+			await ready.promise;
+			const detail = component.render(500).join("\\n");
+			component.handleInput("\\r");
+			await status;
+			await command.handler("auto", context);
+			assert.equal(notifications.at(-1).level, "error");
+			assert.equal(readFileSync(${JSON.stringify(policyPath)}, "utf8"), ${JSON.stringify(policyBytes)});
+			assert.equal(existsSync(path.join(context.cwd, ".omp", "codesook-omp.json")), false);
+			await hooks.get("session_shutdown")({}, context);
+			console.log(JSON.stringify({ native, shared, detail }));
+		`;
+		const child = Bun.spawnSync([process.execPath, "--eval", code], {
+			cwd: path.resolve(import.meta.dir, ".."),
+			env: { ...process.env, HOME: home, PI_CODING_AGENT_DIR: agentDirectory, PATH: emptyPath },
+			timeout: 10_000,
+		});
+		expect(child.exitCode, child.stderr.toString()).toBe(0);
+		const result = JSON.parse(child.stdout.toString()) as { native: string | null; shared: unknown; detail: string };
+		expect(result.native).toBe(visibility === "always" ? "Beads: error" : null);
+		expect(result.shared).toEqual(visibility === "always" ? { frames: [["Beads: error"]] } : null);
+		expect(result.detail).toContain(`Visibility: ${visibility}`);
+		expect(result.detail).toContain("Cannot resolve Integration Project");
+		expect(result.detail).toContain("Git availability");
+	}
 });

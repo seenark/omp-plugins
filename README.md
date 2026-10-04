@@ -114,6 +114,8 @@ The unified dialog stages global values and project overrides; inherit removes a
 
 Both integrations fail closed when Git cannot inspect the Integration Project, including missing Git, permission errors, and unsafe repository ownership. Repair the reported Git error before enabling guidance or saving project settings. The operating-directory fallback applies only when Git confirms that the directory is outside a repository; inspection errors never select a child directory as a new policy root.
 
+When Beads cannot resolve project scope, valid global visibility still controls persistent error display: `always` shows the error, while `never` keeps it hidden. This display-only fallback never permits guidance or reads a guessed project settings file; read-only status remains available.
+
 Permitted ready integrations append CodeGraph-first guidance with an explicit resolved `projectPath`, preserving prior prompt entries and allowing grep/read for missing or stale source. Off suppresses only this plugin's instructions. Visibility defaults to ready; always shows all states, never hides persistent status only. CodeGraph uses Shared Display when its host is active, otherwise the native footer, never both. Refresh runs on startup, before turns, commands, settings changes, and session switches; no idle polling.
 
 See [CodeGraph package documentation](packages/codegraph/README.md) for installation, native MCP configuration, and the shared policy/client interfaces.

@@ -30,6 +30,8 @@ The **Integration Project** is the nearest Git working tree, or the current dire
 
 Git must successfully inspect project scope. Missing Git, permission failures, and unsafe ownership produce actionable errors and disable plugin guidance rather than bypassing shared policy. Only Git's confirmed non-repository result permits the current-directory fallback.
 
+If project scope cannot be resolved, valid global visibility still applies to error display. `always` shows the error; `never` hides persistent display but keeps read-only status available. Invalid global configuration is preserved and uses the display default without granting permission. No guessed project settings are read.
+
 Readiness requires the CLI, successful workspace discovery, and successful database access. A `.beads` directory or location result alone is insufficient. Status distinguishes uninitialized workspaces, missing prerequisites, database/inspection/configuration errors, readiness, and policy suppression. External initialization becomes visible on the next refresh without setup or generated project files.
 
 ## Policy and visibility
