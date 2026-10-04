@@ -10,6 +10,7 @@
   ],
   "scripts": {
     "check:types": "tsc -p tsconfig.json --noEmit",
+    "test": "bun test",
     "pack:check": "bun ../../scripts/check-package-files.ts"
   },
   "exports": {

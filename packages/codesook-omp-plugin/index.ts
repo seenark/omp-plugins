@@ -686,12 +686,14 @@ export function loadSettingsDraft(projectPath: string, configPath = CODESOOK_OMP
 	const integration = readIntegrationSettings("codegraph", projectPath, configPath);
 	const policy = asRecord(integration.project.value.behavior.codegraph).policy as IntegrationPolicy | undefined;
 	const visibility = asRecord(integration.project.value.display.codegraph).visibility as IntegrationVisibility | undefined;
+	const projectPolicy = policy === "auto" || policy === "off" ? policy : "inherit";
+	const projectVisibility = visibility === "ready" || visibility === "always" || visibility === "never" ? visibility : "inherit";
 	loaded.draft.projectIntegration = {
 		path: projectPath,
-		policy: policy === "auto" || policy === "off" ? policy : "inherit",
-		visibility: visibility === "ready" || visibility === "always" || visibility === "never" ? visibility : "inherit",
-		initialPolicy: policy === "auto" || policy === "off" ? policy : "inherit",
-		initialVisibility: visibility === "ready" || visibility === "always" || visibility === "never" ? visibility : "inherit",
+		policy: projectPolicy,
+		visibility: projectVisibility,
+		initialPolicy: projectPolicy,
+		initialVisibility: projectVisibility,
 	};
 	return { ...loaded, errors: integration.errors };
 }

@@ -30,6 +30,8 @@ Effective source order appends CodeGraph when a persisted order omits it, includ
 
 The versioned channel adds `{ protocol: 1, kind: "host", epoch: string, active: boolean }` presence messages. Hosts announce session startup, enabled-state changes, shutdown, and reply to late producers. Snapshot requests alone never establish availability. Replay requests must match the announced active epoch; the host accepts only current-epoch snapshots with newer source revisions. No polling is involved.
 
+Source revisions remain monotonic across publisher disposal and reconnection on the same EventBus. This lets a producer recreate its publisher after the host has already switched sessions without its new segment being rejected as stale. Revision storage is scoped to the bus lifetime and garbage-collected with it.
+
 Producers needing a native footer fallback should subscribe to availability changes and read the getter after subscribing. Use Shared Display only while `hostAvailable` is true; clear the fallback when it becomes true to avoid duplicate status. Producers do not own Shared Display widgets or animation timers.
 
 ## Frame assets

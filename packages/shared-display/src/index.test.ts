@@ -65,6 +65,30 @@ function makeHostHarness(enabled = true, hasUI = true, order = DEFAULT_SHARED_DI
 }
 
 describe("Shared Display host presence", () => {
+	it("renders a reconnected producer after a host-first session switch", () => {
+		const host = makeHostHarness();
+		try {
+			host.load();
+			host.start();
+			const previous = connectSharedDisplay(host.events, "headroom");
+			for (const state of ["starting", "online", "compressed", "online", "previous"]) {
+				previous.publish({ frames: [[`Headroom ${state}`]] });
+			}
+			expect(host.rows()).toEqual(["Headroom previous"]);
+			host.switchSession();
+			expect(previous.hostAvailable).toBe(true);
+			expect(host.rows()).toEqual(["Headroom previous"]);
+			previous.dispose();
+			const current = connectSharedDisplay(host.events, "headroom");
+			expect(current.hostAvailable).toBe(true);
+			current.publish({ frames: [["Headroom current"]] });
+			expect(host.rows()).toEqual(["Headroom current"]);
+			current.dispose();
+		} finally {
+			host.close();
+		}
+	});
+
 	for (const producerFirst of [true, false]) {
 		it(`replays CodeGraph with ${producerFirst ? "producer" : "host"} loaded first and clears disposed segments`, () => {
 			const host = makeHostHarness();

@@ -178,15 +178,20 @@ const NO_EVENTS_PUBLISHER: SharedDisplayPublisher = {
 	dispose() {},
 };
 
+// Keep source revisions monotonic across reconnects; the bus lifetime bounds storage via GC.
+const revisionsByBus = new WeakMap<SharedDisplayEvents, Map<DisplaySource, number>>();
+
 /** Connect one producer to the versioned EventBus seam. */
 export function connectSharedDisplay(
 	events: SharedDisplayEvents | undefined,
 	source: DisplaySource,
 ): SharedDisplayPublisher {
 	if (events === undefined) return NO_EVENTS_PUBLISHER;
+	const sourceRevisions = revisionsByBus.get(events) ?? new Map<DisplaySource, number>();
+	revisionsByBus.set(events, sourceRevisions);
 
 	let disposed = false;
-	let revision = 0;
+	let revision = sourceRevisions.get(source) ?? 0;
 	let sequence: FrameSequence | null = null;
 	let hostEpoch: string | undefined;
 	let hostAvailable = false;
@@ -236,14 +241,16 @@ export function connectSharedDisplay(
 		},
 		publish(next) {
 			if (disposed || (next !== null && !isValidFrameSequence(next))) return;
-			revision += 1;
+			revision = (sourceRevisions.get(source) ?? 0) + 1;
+			sourceRevisions.set(source, revision);
 			sequence = next === null ? null : copyFrameSequence(next);
 			if (hostEpoch !== undefined) emitSnapshot(hostEpoch);
 		},
 		dispose() {
 			if (disposed) return;
 			sequence = null;
-			revision += 1;
+			revision = (sourceRevisions.get(source) ?? 0) + 1;
+			sourceRevisions.set(source, revision);
 			if (hostEpoch !== undefined) emitSnapshot(hostEpoch);
 			disposed = true;
 			unsubscribe();

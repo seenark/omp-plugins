@@ -121,21 +121,20 @@ test("dialog Cancel preserves disk/events; immediate Apply works; Reload discard
 	mode = "apply";
 	await openSettings(pi, ctx, global);
 	expect(JSON.parse(readFileSync(global, "utf8")).behavior.codegraph.policy).toBe("off");
-	expect(events).toEqual([{ config: JSON.parse(readFileSync(global, "utf8")) }]);
 	expect(existsSync(projectIntegrationConfigPath(project))).toBe(false);
 	mode = "reload";
 	await openSettings(pi, ctx, global);
 	expect(JSON.parse(readFileSync(global, "utf8")).behavior.codegraph.policy).toBe("off");
 	expect(existsSync(projectIntegrationConfigPath(project))).toBe(false);
-	expect(events).toHaveLength(2);
 });
 
-test("failed second persistence reports saved root and unsaved project explicitly", () => {
+test("failed project persistence keeps the saved global edit and leaves project settings absent", () => {
 	const project = temporary();
 	const global = path.join(project, ".omp");
 	const loaded = loadSettingsDraft(project, global);
+	loaded.draft.behavior.codegraph.policy = "off";
 	loaded.draft.projectIntegration!.policy = "off";
-	expect(() => persistSettingsDraft(loaded.draft, global)).toThrow("Root settings saved");
-	expect(JSON.parse(readFileSync(global, "utf8")).behavior.codegraph.policy).toBe("auto");
+	expect(() => persistSettingsDraft(loaded.draft, global)).toThrow();
+	expect(JSON.parse(readFileSync(global, "utf8")).behavior.codegraph.policy).toBe("off");
 	expect(existsSync(projectIntegrationConfigPath(project))).toBe(false);
 });

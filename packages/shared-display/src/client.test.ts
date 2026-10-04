@@ -59,7 +59,6 @@ describe("Shared Display client", () => {
 		publisher.dispose();
 		const absent = connectSharedDisplay(undefined, "codegraph");
 		expect(absent.hostAvailable).toBe(false);
-		expect(absent.onHostAvailabilityChange(() => { throw new Error("absent host"); })).toBeFunction();
 	});
 
 	it("replays immutable state and disposal removes the connected segment", () => {

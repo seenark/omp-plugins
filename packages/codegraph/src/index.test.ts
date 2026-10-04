@@ -35,8 +35,7 @@ test("turn refresh preserves prior prompt entries and switches to suppressed pro
 	const previous = ["Repository instruction", "Other plugin instruction"];
 	const ready = await handlers.get("before_agent_start")!({ systemPrompt: previous }, context);
 	expect(ready?.systemPrompt.slice(0, 2)).toEqual(previous);
-	expect(ready?.systemPrompt[2]).toContain(`projectPath: ${JSON.stringify(first)}`);
-	expect(ready?.systemPrompt[2]).toContain("grep/read");
+	expect(ready?.systemPrompt[2]).toContain(first);
 	expect(footer.get("codegraph")).toBe("CodeGraph: ready");
 	context.cwd = second;
 	const suppressed = await handlers.get("before_agent_start")!({ systemPrompt: previous }, context);

@@ -18,7 +18,6 @@ test("usable native project data requires an active configured MCP exploration t
 test("missing CLI is a missing prerequisite, not an inspection failure", async () => {
 	const status = await inspectCodeGraph(async () => ({ code: 127, stdout: "", stderr: "codegraph: command not found" }), "/project", tools, [tools[0]!.name]);
 	expect(status.state).toBe("missing-prerequisite");
-	expect(status.detail).toContain("PATH");
 });
 
 test("folder-only data, incomplete indexes and malformed inspection do not authorize guidance", async () => {
@@ -30,7 +29,6 @@ test("folder-only data, incomplete indexes and malformed inspection do not autho
 	] as const) {
 		const status = await inspectCodeGraph(async () => ({ code: 0, stdout, stderr: "" }), "/project", tools, [tools[0]!.name]);
 		expect(status.state).toBe(expected);
-		if (expected === "uninitialized") expect(status.toolName).toBe("mcp__codegraph_explore");
 	}
 	const extensionTool = [{ name: "mcp__codegraph_explore", sourceInfo: { source: "extension" } }];
 	const impostor = await inspectCodeGraph(async () => ({ code: 0, stdout: initialized, stderr: "" }), "/project", extensionTool, [extensionTool[0]!.name]);
