@@ -20,7 +20,7 @@ Root install loads unified settings plus default Headroom and Prompt Border feat
 ## Requirements
 
 - Bun 1.4.0 or newer
-- OMP 18.1.16 or newer
+- OMP 18.3.1 or newer
 
 ```sh
 bun --version
