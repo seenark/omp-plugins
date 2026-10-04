@@ -67,7 +67,7 @@ bun packages/theme-catppuccin/bin/install.js
 /headroom [status|on|off|health|stats|init [config|glyphs|all]]
 /caveman [status|off|lite|full|ultra|wenyan-lite|wenyan-full|wenyan-ultra]
 /codegraph [status|auto|off]
-/beads [status|auto|off]
+/beads [init|status|auto|off]
 /prompt-border [status|<style> [layout]|layout <layout>|reset|rail toggle|glyphs debug [frames|demo|on|off]]
 ```
 
@@ -122,7 +122,9 @@ See [CodeGraph package documentation](packages/codegraph/README.md) for installa
 
 ### Beads project integration
 
-Beads detects a usable existing native Tool Workspace through the installed `bd` CLI. Discovery respects ancestor lookup, environment overrides, redirects, and worktree sharing; a folder or location result alone is not readiness. Status identifies the Integration Project, Tool Workspace, database, policy, and errors. The plugin does not initialize, install tools, generate agent instructions, provision servers, or synchronize data.
+Beads detects a usable existing native Tool Workspace through the installed `bd` CLI. Discovery respects ancestor lookup, environment overrides, redirects, and worktree sharing; a folder or location result alone is not readiness. Status identifies the Integration Project, Tool Workspace, database, policy, and errors. `/beads init` reuses existing usable workspaces first. New initialization offers standard/team or personal stealth mode, with supported Git hooks opt-in and off by default; Esc in either choice cancels the entire operation. Agent generation is always skipped. Initialization preserves policy, including off, and does not authorize issue operations, install tools, provision servers, or add automatic remote push/sync.
+
+New data belongs to the Integration Project. Linked-worktree initialization uses a one-command native `BEADS_DIR` target, then verifies ordinary discovery without the override; existing native shared/redirected/environment-selected workspaces remain unchanged. Partial data, native backend failures, invalid settings, and remote-history refusals are never bypassed. Native Beads 1.3.1 standard init makes a Git commit, including staged or auto-staged user files. The plugin refuses unsafe staged entries and dirty setup/root Markdown files before invoking it; explicit stealth preserves the index. See the package documentation for the safety boundary and native hook behavior.
 
 Global `behavior.beads.policy` (`auto`/`off`) and `display.beads.visibility` (`ready`/`always`/`never`) use the same settings envelope and staged project overrides as CodeGraph, independently. Invalid configuration fails closed and remains unchanged. Beads depends on Shared Display's 1.2.0 client/settings contracts, not on an active host or the CodeGraph plugin.
 
@@ -139,7 +141,7 @@ See [Beads package documentation](packages/beads/README.md) for independent inst
 - Prompt Border owns the prompt editor, Context Rail, attachment band, and spinner overrides; it does not publish Shared Display sources.
 - Root settings detects Ponytail and OMP feature presence through `omp plugin list --json`; it never unloads or loads plugins.
 - CodeGraph owns native project-data inspection, permitted runtime guidance, read-only status, and exclusive Shared Display/footer routing.
-- Beads owns native workspace/database inspection, on-demand runtime guidance, read-only status, and exclusive Shared Display/footer routing.
+- Beads owns explicit consent-based initialization, native workspace/database inspection, on-demand runtime guidance, read-only status, and exclusive Shared Display/footer routing.
 
 Ponytail and Caveman producers publish complete frame sequences and never create producer-side animation timers or fallback widgets. Native status visibility is independent from custom Shared Display visibility.
 

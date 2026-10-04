@@ -35,7 +35,7 @@ export async function inspectBeads(execute: BeadsExecute, cwd: string): Promise<
 				return { ...scope, state: "missing-prerequisite", detail: "Beads CLI is missing or not executable. Ensure bd is executable in PATH." };
 			}
 			if ((isRecord(data) && data.error === "no_beads_directory") || /^(?:Error: )?no beads database found(?:\r?\n|$)/imu.test(diagnostic)) {
-				return { ...scope, state: "uninitialized", initialized: false, detail: "No initialized Beads workspace. Initialize explicitly with bd init; this plugin never initializes projects." };
+				return { ...scope, state: scope.workspacePath ? "error" : "uninitialized", initialized: false, detail: scope.workspacePath ? "Native Beads workspace exists, but its database is not usable. Inspect or repair it with bd; initialization will not replace existing data." : "No initialized Beads workspace. Run /beads init for explicit mode and hook choices, or initialize directly with bd init." };
 			}
 			const missingBackend = /\bdolt(?: binary| executable)?(?: is)? (?:not (?:found|installed)|missing)|exec: ["']?dolt["']?: executable file not found|(?:dial (?:tcp|unix)[^\n]*|connect:) connection refused/iu.test(diagnostic);
 			return {
