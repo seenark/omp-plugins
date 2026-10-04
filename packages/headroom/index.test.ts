@@ -3,7 +3,10 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import type { ExtensionAPI } from "@oh-my-pi/pi-coding-agent";
-import { CHANNEL } from "@codesook/omp-shared-display/client";
+import sharedDisplayExtension, {
+	DEFAULT_SHARED_DISPLAY_CONFIG,
+	writeSharedDisplayConfig,
+} from "@codesook/omp-shared-display";
 
 type Handler = (event: unknown, ctx: unknown) => unknown | Promise<unknown>;
 
@@ -29,52 +32,57 @@ function makeEventBus(messages: unknown[]): EventBus {
 }
 
 describe("Headroom Shared Display producer", () => {
-	it("publishes headroom snapshots without owning a widget or Ponytail command", async () => {
+	it("replays Headroom into a late host and removes its segment on shutdown", async () => {
 		const root = fs.mkdtempSync(path.join(os.tmpdir(), "omp-headroom-index-"));
 		try {
 			const configPath = path.join(root, "config.json");
+			fs.writeFileSync(configPath, JSON.stringify({ display: { glyphDirectory: root } }));
+			const hostConfigPath = path.join(root, "shared-display.json");
+			writeSharedDisplayConfig({ ...DEFAULT_SHARED_DISPLAY_CONFIG, order: ["headroom"] }, hostConfigPath);
 			const messages: unknown[] = [];
 			const events = makeEventBus(messages);
 			const handlers = new Map<string, Handler>();
-			const commands = new Map<string, { handler: (args: string, ctx: unknown) => unknown | Promise<unknown> }>();
 			const pi = {
 				events,
 				on(event: string, handler: Handler) {
 					handlers.set(event, handler);
 				},
-				registerCommand(name: string, command: { handler: (args: string, ctx: unknown) => unknown | Promise<unknown> }) {
-					commands.set(name, command);
-				},
+				registerCommand() {},
 				logger: { warn() {}, info() {}, error() {} },
 			};
 			const { default: headroomExtension } = await import(`./index.ts?headroom=${Date.now()}`);
 			headroomExtension(pi as unknown as ExtensionAPI, { configPath, env: { PI_HEADROOM_ENABLED: "0" } });
-			expect([...commands.keys()]).toEqual(["headroom"]);
-			expect(handlers.has("session_start")).toBe(true);
-			expect(handlers.has("session_shutdown")).toBe(true);
 
+			let widget: { render(width: number): readonly string[] } | undefined;
 			const context = {
 				hasUI: true,
 				ui: {
 					theme: { symbol: () => "·" },
 					notify() {},
 					custom: undefined,
+					setStatus() {},
+					setWidget(_key: string, factory: ((tui: { requestComponentRender(): void }) => { render(width: number): readonly string[] }) | undefined) {
+						widget = factory?.({ requestComponentRender() {} });
+					},
 				},
 				model: undefined,
 				getContextUsage: () => undefined,
+				sessionManager: { getBranch: () => [] },
+				setInterval() { throw new Error("Static Headroom status must not start a timer"); },
+				clearTimer() {},
 			};
 			await handlers.get("session_start")?.({}, context);
-			const ready = messages.find((message): message is { kind?: string; source?: string } => typeof message === "object" && message !== null && "kind" in message && (message as { kind?: unknown }).kind === "ready");
-			expect(ready).toMatchObject({ kind: "ready", source: "headroom" });
-
-			events.emit(CHANNEL, { protocol: 1, kind: "request", source: "headroom", epoch: "headroom-test" });
-			const snapshot = messages.find((message): message is { kind?: string; source?: string; sequence?: unknown } => typeof message === "object" && message !== null && (message as { kind?: unknown }).kind === "snapshot");
-			expect(snapshot).toMatchObject({ kind: "snapshot", source: "headroom", epoch: "headroom-test" });
-			expect((snapshot as { sequence?: { frames?: unknown[] } }).sequence?.frames).toBeInstanceOf(Array);
-			expect(messages.some(message => typeof message === "object" && message !== null && (message as { kind?: unknown }).kind === "ready" && (message as { source?: unknown }).source === "ponytail")).toBe(false);
-
+			expect(widget).toBeUndefined();
+			const hostHandlers = new Map<string, Handler>();
+			sharedDisplayExtension({
+				events,
+				on(event: string, handler: Handler) { hostHandlers.set(event, handler); },
+			} as unknown as ExtensionAPI, { configPath: hostConfigPath });
+			await hostHandlers.get("session_start")?.({}, context);
+			expect(widget?.render(14)).toEqual(["· Headroom off"]);
 			await handlers.get("session_shutdown")?.({}, context);
-			expect(messages.at(-1)).toMatchObject({ kind: "snapshot", source: "headroom", sequence: null });
+			expect(widget).toBeUndefined();
+			await hostHandlers.get("session_shutdown")?.({}, context);
 		} finally {
 			fs.rmSync(root, { recursive: true, force: true });
 		}

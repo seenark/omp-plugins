@@ -10,11 +10,29 @@
         "@oh-my-pi/pi-tui": ">=18.3.1",
       },
     },
+    "packages/beads": {
+      "name": "@codesook/omp-beads",
+      "version": "1.0.0",
+      "dependencies": {
+        "@codesook/omp-shared-display": "^1.2.0",
+      },
+      "devDependencies": {
+        "@codesook/omp-shared-display": "workspace:*",
+        "@oh-my-pi/pi-coding-agent": "18.3.1",
+        "@oh-my-pi/pi-tui": "18.3.1",
+        "bun-types": "latest",
+        "typescript": "latest",
+      },
+      "peerDependencies": {
+        "@oh-my-pi/pi-coding-agent": ">=18.3.1",
+        "@oh-my-pi/pi-tui": ">=18.3.1",
+      },
+    },
     "packages/caveman": {
       "name": "@codesook/omp-caveman",
       "version": "1.0.0",
       "dependencies": {
-        "@codesook/omp-shared-display": "^1.0.0",
+        "@codesook/omp-shared-display": "^1.1.0",
       },
       "devDependencies": {
         "@codesook/omp-shared-display": "workspace:*",
@@ -28,6 +46,24 @@
         "@oh-my-pi/pi-tui": ">=18.2.8",
       },
     },
+    "packages/codegraph": {
+      "name": "@codesook/omp-codegraph",
+      "version": "1.0.0",
+      "dependencies": {
+        "@codesook/omp-shared-display": "^1.2.0",
+      },
+      "devDependencies": {
+        "@codesook/omp-shared-display": "workspace:*",
+        "@oh-my-pi/pi-coding-agent": "18.3.1",
+        "@oh-my-pi/pi-tui": "18.3.1",
+        "bun-types": "latest",
+        "typescript": "latest",
+      },
+      "peerDependencies": {
+        "@oh-my-pi/pi-coding-agent": ">=18.3.1",
+        "@oh-my-pi/pi-tui": ">=18.3.1",
+      },
+    },
     "packages/codesook-omp-plugin": {
       "name": "@codesook/omp-plugin-settings",
       "version": "1.0.0",
@@ -35,7 +71,7 @@
         "@codesook/omp-caveman": "^1.0.0",
         "@codesook/omp-headroom": "^2.0.0",
         "@codesook/omp-prompt-border-style": "^2.0.0",
-        "@codesook/omp-shared-display": "^1.0.0",
+        "@codesook/omp-shared-display": "^1.2.0",
       },
       "devDependencies": {
         "@codesook/omp-caveman": "workspace:*",
@@ -56,7 +92,7 @@
       "name": "@codesook/omp-headroom",
       "version": "2.0.0",
       "dependencies": {
-        "@codesook/omp-shared-display": "^1.0.0",
+        "@codesook/omp-shared-display": "^1.1.0",
       },
       "devDependencies": {
         "@codesook/omp-shared-display": "workspace:*",
@@ -92,7 +128,7 @@
     },
     "packages/shared-display": {
       "name": "@codesook/omp-shared-display",
-      "version": "1.0.0",
+      "version": "1.2.0",
       "devDependencies": {
         "@oh-my-pi/pi-coding-agent": "18.2.8",
         "@oh-my-pi/pi-tui": "18.2.8",
@@ -121,7 +157,11 @@
 
     "@babel/types": ["@babel/types@7.29.8", "", { "dependencies": { "@babel/helper-string-parser": "^7.29.7", "@babel/helper-validator-identifier": "^7.29.7" } }, "sha512-Vj1jF3cPfxg7OAfoI7QnVKLoILlm2JF9pnVHrX8qx7AHMiYWT+NDAA7jChlNgRS4WTLc/fD1lXLmPixluj+3Gg=="],
 
+    "@codesook/omp-beads": ["@codesook/omp-beads@workspace:packages/beads"],
+
     "@codesook/omp-caveman": ["@codesook/omp-caveman@workspace:packages/caveman"],
+
+    "@codesook/omp-codegraph": ["@codesook/omp-codegraph@workspace:packages/codegraph"],
 
     "@codesook/omp-headroom": ["@codesook/omp-headroom@workspace:packages/headroom"],
 

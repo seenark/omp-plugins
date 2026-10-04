@@ -35,7 +35,7 @@ describe("Caveman config", () => {
 			});
 			writeJson(legacyPath, { defaultLevel: "ultra", showStatus: false });
 
-			const loaded = await loadCavemanConfig({ homeDirectory: home, seedAssets: false });
+			const loaded = await loadCavemanConfig({ homeDirectory: home, legacyConfigPath: legacyPath, seedAssets: false });
 
 			expect(loaded.config).toEqual({
 				defaultLevel: "lite",
@@ -66,7 +66,7 @@ describe("Caveman config", () => {
 			mkdirSync(path.dirname(legacyPath), { recursive: true });
 			writeFileSync(legacyPath, "{invalid\n", "utf8");
 
-			const loaded = await loadCavemanConfig({ homeDirectory: home, seedAssets: false });
+			const loaded = await loadCavemanConfig({ homeDirectory: home, legacyConfigPath: legacyPath, seedAssets: false });
 
 			expect(loaded.config.defaultLevel).toBe("lite");
 			expect(existsSync(packagePath)).toBe(false);
@@ -86,7 +86,7 @@ describe("Caveman config", () => {
 			writeJson(packagePath, { defaultLevel: "full", nativeVisible: true, display: { visible: false } });
 			writeJson(legacyPath, { defaultLevel: "ultra", showStatus: false });
 
-			const loaded = await loadCavemanConfig({ homeDirectory: home, seedAssets: false });
+			const loaded = await loadCavemanConfig({ homeDirectory: home, legacyConfigPath: legacyPath, seedAssets: false });
 			const root = JSON.parse(readFileSync(rootPath, "utf8"));
 
 			expect(loaded.config.defaultLevel).toBe("full");

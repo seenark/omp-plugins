@@ -22,6 +22,15 @@ import {
 } from "@codesook/omp-shared-display/config-store";
 import { parseFrameSequenceAsset } from "@codesook/omp-shared-display/client";
 import {
+	integrationConfigErrors,
+	prepareProjectIntegrationSettings,
+	projectIntegrationConfigPath,
+	readIntegrationSettings,
+	resolveIntegrationProject,
+	type IntegrationPolicy,
+	type IntegrationVisibility,
+} from "@codesook/omp-shared-display/project-integrations";
+import {
 	loadPackagedPonytailSequence,
 	isDisplaySource,
 	normalizeSharedDisplayConfig,
@@ -145,7 +154,7 @@ const LEGACY_PROMPT_BORDER_CONFIG_PATH = path.join(
 	"config.json",
 );
 
-const PROJECT_FEATURES = ["shared-display", "caveman", "headroom", "prompt-border-style"] as const;
+const PROJECT_FEATURES = ["shared-display", "caveman", "headroom", "prompt-border-style", "codegraph", "beads"] as const;
 type ProjectFeature = (typeof PROJECT_FEATURES)[number];
 
 const DEFAULT_PROJECT_FEATURES: Record<ProjectFeature, boolean> = {
@@ -153,6 +162,8 @@ const DEFAULT_PROJECT_FEATURES: Record<ProjectFeature, boolean> = {
 	caveman: false,
 	headroom: true,
 	"prompt-border-style": true,
+	codegraph: false,
+	beads: false,
 };
 
 const STANDALONE_FEATURE_PACKAGES: Record<ProjectFeature, string> = {
@@ -160,6 +171,8 @@ const STANDALONE_FEATURE_PACKAGES: Record<ProjectFeature, string> = {
 	caveman: "@codesook/omp-caveman",
 	headroom: "@codesook/omp-headroom",
 	"prompt-border-style": "@codesook/omp-prompt-border-style",
+	codegraph: "@codesook/omp-codegraph",
+	beads: "@codesook/omp-beads",
 };
 
 const SHARED_LAYOUTS = ["horizontal", "vertical"] as const satisfies readonly SharedDisplayLayout[];
@@ -197,8 +210,17 @@ export type PluginPresence = {
 	projectFeatures: Record<ProjectFeature, boolean>;
 };
 
+type ProjectIntegrationDraft = {
+	policy: IntegrationPolicy | "inherit";
+	visibility: IntegrationVisibility | "inherit";
+	initialPolicy: IntegrationPolicy | "inherit";
+	initialVisibility: IntegrationVisibility | "inherit";
+};
+
 export type UnifiedSettingsDraft = {
 	display: {
+		codegraph: { visibility: IntegrationVisibility };
+		beads: { visibility: IntegrationVisibility };
 		sharedDisplay: SharedDisplayConfig;
 		caveman: Pick<CavemanConfig, "nativeVisible" | "display">;
 		headroom: HeadroomConfig["display"];
@@ -209,6 +231,8 @@ export type UnifiedSettingsDraft = {
 		contextRail: ContextRailConfig;
 	};
 	behavior: {
+		codegraph: { policy: IntegrationPolicy | undefined };
+		beads: { policy: IntegrationPolicy | undefined };
 		caveman: Pick<CavemanConfig, "defaultLevel">;
 		headroom: {
 			enabled: boolean;
@@ -221,6 +245,11 @@ export type UnifiedSettingsDraft = {
 			timeoutMs: number;
 			proxyTokenFile: string;
 		};
+	};
+	projectIntegration?: {
+		path: string;
+		codegraph: ProjectIntegrationDraft;
+		beads: ProjectIntegrationDraft;
 	};
 };
 
@@ -354,6 +383,8 @@ function createDraft(raw: unknown, legacy: LegacySources = {}): UnifiedSettingsD
 	const source = asRecord(raw);
 	const display = asRecord(source.display);
 	const behavior = asRecord(source.behavior);
+	const codegraphPolicy = asRecord(behavior.codegraph).policy;
+	const beadsPolicy = asRecord(behavior.beads).policy;
 	const legacyShared = display.sharedDisplay === undefined ? asRecord(legacy.sharedDisplay) : {};
 	const sharedRaw = mergeRecords(legacyShared, display.sharedDisplay);
 	const sharedDisplay = normalizeSharedDisplayConfig(sharedRaw);
@@ -403,6 +434,8 @@ function createDraft(raw: unknown, legacy: LegacySources = {}): UnifiedSettingsD
 
 	return {
 		display: {
+			codegraph: { visibility: (asRecord(display.codegraph).visibility ?? "ready") as IntegrationVisibility },
+			beads: { visibility: (asRecord(display.beads).visibility ?? "ready") as IntegrationVisibility },
 			sharedDisplay,
 			caveman: { nativeVisible: caveman.nativeVisible, display: clone(caveman.display) },
 			headroom: clone(headroom.display),
@@ -413,6 +446,8 @@ function createDraft(raw: unknown, legacy: LegacySources = {}): UnifiedSettingsD
 			contextRail: clone(prompt.contextRail),
 		},
 		behavior: {
+			codegraph: { policy: behavior.codegraph !== undefined && !isRecord(behavior.codegraph) ? undefined : codegraphPolicy === undefined ? "auto" : codegraphPolicy === "auto" || codegraphPolicy === "off" ? codegraphPolicy : undefined },
+			beads: { policy: behavior.beads !== undefined && !isRecord(behavior.beads) ? undefined : beadsPolicy === undefined ? "auto" : beadsPolicy === "auto" || beadsPolicy === "off" ? beadsPolicy : undefined },
 			caveman: { defaultLevel: caveman.defaultLevel },
 			headroom: {
 				enabled: headroom.enabled,
@@ -454,6 +489,8 @@ export function draftToRootSections(draft: UnifiedSettingsDraft): {
 	};
 	return {
 		display: {
+			codegraph: { ...draft.display.codegraph },
+			beads: { ...draft.display.beads },
 			sharedDisplay: {
 				enabled: shared.enabled,
 				layout: shared.layout,
@@ -497,6 +534,8 @@ export function draftToRootSections(draft: UnifiedSettingsDraft): {
 			},
 		},
 		behavior: {
+			codegraph: { ...draft.behavior.codegraph },
+			beads: { ...draft.behavior.beads },
 			caveman: { defaultLevel: draft.behavior.caveman.defaultLevel },
 			headroom: { ...draft.behavior.headroom, autoStart: false },
 		},
@@ -600,7 +639,7 @@ function loadDraftFromDisk(configPath = CODESOOK_OMP_CONFIG_PATH): {
 	legacySources: readonly LegacySource[];
 } {
 	const config = readCodesookOmpConfig(configPath);
-	const legacy = config.valid ? loadLegacySources(config.value) : { sources: {}, migrated: [] };
+	const legacy = config.valid && configPath === CODESOOK_OMP_CONFIG_PATH ? loadLegacySources(config.value) : { sources: {}, migrated: [] };
 	return {
 		config,
 		draft: createDraft(config.valid ? config.value : undefined, legacy.sources),
@@ -631,8 +670,12 @@ export function persistDraftToRoot(
 	configPath = CODESOOK_OMP_CONFIG_PATH,
 	legacySources: readonly LegacySource[] = [],
 ): CodesookOmpConfig {
+	const validation = validateDraft(draft);
+	if (validation) throw new Error(validation);
 	const current = readCodesookOmpConfig(configPath);
 	if (current.exists && !current.valid) throw new Error(`Invalid Codesook OMP config: ${configPath}`);
+	const integrationErrors = (["codegraph", "beads"] as const).flatMap(integration => integrationConfigErrors(integration, current, configPath));
+	if (integrationErrors.length) throw new Error(integrationErrors.join("\n"));
 	const sections = draftToRootSections(draft);
 	const next = clone(current.value) as CodesookOmpConfig & Record<string, unknown>;
 	next.display = mergeRecords(next.display, sections.display);
@@ -649,6 +692,64 @@ export function persistDraftToRoot(
 	writeCodesookOmpConfig(next, configPath);
 	removeMigratedLegacySources(legacySources);
 	return next;
+}
+
+/** Load a staged draft for one Integration Project; reading never creates project defaults. */
+export function loadSettingsDraft(projectPath: string, configPath = CODESOOK_OMP_CONFIG_PATH) {
+	const loaded = loadDraftFromDisk(configPath);
+	const projectDraft = (integration: "codegraph" | "beads"): { draft: ProjectIntegrationDraft; errors: readonly string[] } => {
+		const settings = readIntegrationSettings(integration, projectPath, configPath);
+		const policy = asRecord(settings.project.value.behavior[integration]).policy;
+		const visibility = asRecord(settings.project.value.display[integration]).visibility;
+		const projectPolicy = policy === "auto" || policy === "off" ? policy : "inherit";
+		const projectVisibility = visibility === "ready" || visibility === "always" || visibility === "never" ? visibility : "inherit";
+		return {
+			draft: { policy: projectPolicy, visibility: projectVisibility, initialPolicy: projectPolicy, initialVisibility: projectVisibility },
+			errors: settings.errors,
+		};
+	};
+	const codegraph = projectDraft("codegraph");
+	const beads = projectDraft("beads");
+	loaded.draft.projectIntegration = { path: projectPath, codegraph: codegraph.draft, beads: beads.draft };
+	return { ...loaded, errors: [...new Set([...codegraph.errors, ...beads.errors])] };
+}
+
+/** Preflight both documents before the first write; only edited project fields are persisted. */
+export function persistSettingsDraft(
+	draft: UnifiedSettingsDraft,
+	configPath = CODESOOK_OMP_CONFIG_PATH,
+	legacySources: readonly LegacySource[] = [],
+): CodesookOmpConfig {
+	const validation = validateDraft(draft);
+	if (validation) throw new Error(validation);
+	const project = draft.projectIntegration;
+	let projectConfig: CodesookOmpConfig | undefined;
+	if (project) {
+		for (const integration of ["codegraph", "beads"] as const) {
+			const settings = readIntegrationSettings(integration, project.path, configPath);
+			if (settings.errors.length) throw new Error(settings.errors.join("\n"));
+			const staged = project[integration];
+			if (staged.policy !== staged.initialPolicy || staged.visibility !== staged.initialVisibility) {
+				const prepared = prepareProjectIntegrationSettings(integration, project.path, {
+					policy: staged.policy !== staged.initialPolicy ? staged.policy : undefined,
+					visibility: staged.visibility !== staged.initialVisibility ? staged.visibility : undefined,
+				});
+				projectConfig ??= clone(settings.project.value);
+				projectConfig.display[integration] = prepared.display[integration];
+				projectConfig.behavior[integration] = prepared.behavior[integration];
+			}
+		}
+	}
+	const config = persistDraftToRoot(draft, configPath, legacySources);
+	if (project && projectConfig) {
+		const projectConfigPath = projectIntegrationConfigPath(project.path);
+		try {
+			writeCodesookOmpConfig(projectConfig, projectConfigPath);
+		} catch (error) {
+			throw new Error(`Root settings saved to ${configPath}, but project settings were not saved to ${projectConfigPath}: ${error instanceof Error ? error.message : String(error)}. Live-change event was not emitted. Repair the project path and Reload before applying again.`);
+		}
+	}
+	return config;
 }
 type InitAsset = { path: string; content: string };
 
@@ -792,6 +893,11 @@ function initializePluginConfig(ctx: ExtensionContext): void {
 
 
 function validateDraft(draft: UnifiedSettingsDraft): string | undefined {
+	for (const integration of ["codegraph", "beads"] as const) {
+		const label = integration === "codegraph" ? "CodeGraph" : "Beads";
+		if (draft.behavior[integration].policy !== "auto" && draft.behavior[integration].policy !== "off") return `${label} policy must be auto or off. Repair invalid configuration before Apply.`;
+		if (!["ready", "always", "never"].includes(draft.display[integration].visibility)) return `${label} visibility must be ready, always, or never.`;
+	}
 	const sharedErrors = validateSharedDisplayConfig(clone(draft.display.sharedDisplay));
 	if (sharedErrors.length > 0) return sharedErrors[0];
 	const cavemanError = validateCavemanConfig({
@@ -954,10 +1060,20 @@ function settingsItems(
 			warning: featureWarning(presence, feature),
 			description: "OMP lifecycle state is informational; this surface does not unload or load extensions.",
 		})),
+		...(["codegraph", "beads"] as const).flatMap(integration => [
+			{ id: `section:${integration}`, label: `${integration === "codegraph" ? "CodeGraph" : "Beads"} Integration`, currentValue: "", heading: true },
+			selectItem(`${integration}.policy`, "Global policy", behavior[integration].policy ?? "invalid", ["auto", "off"], "Allow automatic runtime guidance, or suppress it. Never initializes a project.", featureWarning(presence, integration)),
+			selectItem(`${integration}.visibility`, "Global visibility", draft.display[integration].visibility, ["ready", "always", "never"], "Visibility is independent of policy and plugin lifecycle."),
+			...(draft.projectIntegration ? [
+				{ id: `${integration}.project`, label: "Integration Project", currentValue: draft.projectIntegration.path, description: "Nearest Git working tree; outside Git, current directory. Project overrides affect integrations only." },
+				selectItem(`${integration}.projectPolicy`, "Project policy", draft.projectIntegration[integration].policy, ["inherit", "auto", "off"], "Shared override in .omp/codesook-omp.json; inherit uses global policy."),
+				selectItem(`${integration}.projectVisibility`, "Project visibility", draft.projectIntegration[integration].visibility, ["inherit", "ready", "always", "never"], "Shared override; inherit uses global visibility."),
+			] : []),
+		]),
 		{ id: "section:shared", label: "Shared Display", currentValue: "", heading: true },
 		boolItem("shared.enabled", "Enabled", shared.enabled, "Enable shared host composition and widget.", sharedWarning),
 		selectItem("shared.layout", "Layout", shared.layout, SHARED_LAYOUTS, "Horizontal or vertical source composition.", sharedWarning),
-		textItem("shared.order", "Source order", shared.order.join(","), "Comma-separated ponytail,caveman,headroom order.", sharedWarning),
+		textItem("shared.order", "Source order", shared.order.join(","), "Comma-separated ponytail,caveman,headroom,codegraph,beads order.", sharedWarning),
 		selectItem("shared.placement", "Placement", shared.widgetPlacement, SHARED_PLACEMENTS, "Widget placement relative to editor.", sharedWarning),
 		textItem("shared.separator", "Separator", shared.horizontalSeparator, "One-line separator for horizontal layout.", sharedWarning),
 		numberItem("shared.gap", "Vertical gap", shared.verticalGapRows, "Blank rows between vertical sources, 0-10.", sharedWarning),
@@ -1037,6 +1153,14 @@ function trackTextSubmenus(
 function updateDraft(draft: UnifiedSettingsDraft, id: string, value: string): void {
 	const bool = value === "true";
 	switch (id) {
+		case "codegraph.policy": if (value === "auto" || value === "off") draft.behavior.codegraph.policy = value; return;
+		case "codegraph.visibility": if (value === "ready" || value === "always" || value === "never") draft.display.codegraph.visibility = value; return;
+		case "codegraph.projectPolicy": if (draft.projectIntegration && (value === "inherit" || value === "auto" || value === "off")) draft.projectIntegration.codegraph.policy = value; return;
+		case "codegraph.projectVisibility": if (draft.projectIntegration && (value === "inherit" || value === "ready" || value === "always" || value === "never")) draft.projectIntegration.codegraph.visibility = value; return;
+		case "beads.policy": if (value === "auto" || value === "off") draft.behavior.beads.policy = value; return;
+		case "beads.visibility": if (value === "ready" || value === "always" || value === "never") draft.display.beads.visibility = value; return;
+		case "beads.projectPolicy": if (draft.projectIntegration && (value === "inherit" || value === "auto" || value === "off")) draft.projectIntegration.beads.policy = value; return;
+		case "beads.projectVisibility": if (draft.projectIntegration && (value === "inherit" || value === "ready" || value === "always" || value === "never")) draft.projectIntegration.beads.visibility = value; return;
 		case "shared.enabled": draft.display.sharedDisplay.enabled = bool; return;
 		case "shared.layout": if (SHARED_LAYOUTS.includes(value as SharedDisplayLayout)) draft.display.sharedDisplay.layout = value as SharedDisplayLayout; return;
 		case "shared.order": draft.display.sharedDisplay.order = value.split(",").map(item => item.trim()).filter(isDisplaySource); return;
@@ -1153,21 +1277,22 @@ async function showStatus(pi: ExtensionAPI, ctx: ExtensionContext): Promise<void
 	);
 }
 
-async function openSettings(pi: ExtensionAPI, ctx: ExtensionContext): Promise<void> {
+export async function openSettings(pi: ExtensionAPI, ctx: ExtensionContext, configPath = CODESOOK_OMP_CONFIG_PATH): Promise<void> {
 	if (!ctx.hasUI || typeof ctx.ui.custom !== "function") {
 		ctx.ui.notify("Codesook OMP Plugin settings require an interactive UI.", "warning");
 		return;
 	}
-	const [{ presence, error: presenceError }, loaded] = await Promise.all([detectPresence(pi), Promise.resolve(loadDraftFromDisk())]);
+	const projectPath = await resolveIntegrationProject(ctx.cwd);
+	const [{ presence, error: presenceError }, loaded] = await Promise.all([detectPresence(pi), Promise.resolve(loadSettingsDraft(projectPath, configPath))]);
 	let draft = loaded.draft;
 	let legacySources = loaded.legacySources;
-	let error = loaded.config.exists && !loaded.config.valid ? `Invalid root config: ${CODESOOK_OMP_CONFIG_PATH}` : presenceError;
+	let error = loaded.errors.join("\n") || presenceError;
 	await ctx.ui.custom<void>(
 		(tui, theme, _keybindings, done) => {
 			let list: SettingsList;
 			let closed = false;
 			let textSubmenuOpen = false;
-			let valueSubmenuOpen = false;
+			let confirmingApply = false;
 			const trackedItems = (): SettingItem[] =>
 				trackTextSubmenus(
 					settingsItems(draft, presence),
@@ -1184,8 +1309,8 @@ async function openSettings(pi: ExtensionAPI, ctx: ExtensionContext): Promise<vo
 				done(undefined);
 			};
 			const refresh = (): void => list.setItems(trackedItems());
-			const apply = async (confirmed: boolean): Promise<void> => {
-				if (closed || !confirmed) return;
+			const apply = async (): Promise<void> => {
+				if (closed) return;
 				const validation = validateDraft(draft);
 				if (validation) {
 					error = validation;
@@ -1193,7 +1318,7 @@ async function openSettings(pi: ExtensionAPI, ctx: ExtensionContext): Promise<vo
 					return;
 				}
 				try {
-					const config = persistDraftToRoot(draft, CODESOOK_OMP_CONFIG_PATH, legacySources);
+					const config = persistSettingsDraft(draft, configPath, legacySources);
 					try {
 						pi.events.emit(CODESOOK_OMP_CONFIG_CHANGED, { config });
 					} catch (eventError) {
@@ -1208,10 +1333,10 @@ async function openSettings(pi: ExtensionAPI, ctx: ExtensionContext): Promise<vo
 				}
 			};
 			const reload = (): void => {
-				const next = loadDraftFromDisk();
+				const next = loadSettingsDraft(projectPath, configPath);
 				draft = next.draft;
 				legacySources = next.legacySources;
-				error = next.config.exists && !next.config.valid ? `Invalid root config: ${CODESOOK_OMP_CONFIG_PATH}` : undefined;
+				error = next.errors.join("\n") || undefined;
 				refresh();
 				tui.requestRender();
 			};
@@ -1219,36 +1344,38 @@ async function openSettings(pi: ExtensionAPI, ctx: ExtensionContext): Promise<vo
 				render(width: number): readonly string[] {
 					const rows = [
 						theme.fg("accent", theme.bold("Codesook OMP Plugin Settings")),
-						theme.fg("dim", `Root: ${CODESOOK_OMP_CONFIG_PATH}`),
+						theme.fg("dim", `Root: ${configPath}`),
+						theme.fg("dim", `Project: ${projectIntegrationConfigPath(projectPath)}`),
 						...(error ? [theme.fg("error", `Error: ${error}`)] : []),
-						...list.render(width),
+						...(confirmingApply ? [
+							"",
+							theme.fg("accent", theme.bold("Apply Codesook OMP settings?")),
+							"Write root and edited project settings; notify loaded extensions.",
+							"",
+							theme.fg("dim", "Enter apply · Esc keep editing"),
+						] : list.render(width)),
 					];
 					return rows;
 				},
 				handleInput(data: string): void {
+					if (confirmingApply) {
+						if (isEscape(data)) {
+							confirmingApply = false;
+							tui.requestRender();
+						} else if (isEnter(data) || isShiftEnter(data)) {
+							confirmingApply = false;
+							void apply();
+						}
+						return;
+					}
 					const selected = list.getSelectedItem();
-					if (valueSubmenuOpen) {
-						list.handleInput(data);
-						if (isEnter(data) || isEscape(data)) valueSubmenuOpen = false;
-						tui.requestRender();
-						return;
-					}
 					if (isShiftEnter(data) && !textSubmenuOpen) {
-						void apply(true);
-						return;
-					}
-					if (selected?.values !== undefined && isEnter(data)) {
-						valueSubmenuOpen = true;
-						list.handleInput(data);
-						tui.requestRender();
+						void apply();
 						return;
 					}
 					if (selected?.id === APPLY_ACTION_ID && isEnter(data)) {
-						if (typeof ctx.ui.confirm === "function") {
-							void ctx.ui.confirm("Apply Codesook OMP settings?", "Write root config atomically and notify loaded extensions of live changes.").then(confirmed => apply(confirmed));
-						} else {
-							void apply(true);
-						}
+						confirmingApply = true;
+						tui.requestRender();
 						return;
 					}
 					if (selected?.id === STATUS_ACTION_ID && isEnter(data)) {
