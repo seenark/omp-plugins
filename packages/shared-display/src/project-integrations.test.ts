@@ -42,6 +42,74 @@ test("Git working trees own policy, including nested repositories; outside Git u
 	expect(await resolveIntegrationProject(spacedRepository)).toBe(realpathSync(spacedRepository));
 });
 
+test("Git inspection failures cannot bypass a repository's shared off policy", () => {
+	const root = realpathSync(temporary());
+	const source = `
+		import { strict as assert } from "node:assert";
+		import { mkdirSync, writeFileSync, readFileSync } from "node:fs";
+		import * as os from "node:os";
+		import * as path from "node:path";
+		import { execFileSync } from "node:child_process";
+		import { CODESOOK_OMP_CONFIG_PATH } from ${JSON.stringify(path.resolve(import.meta.dir, "config-store.ts"))};
+		import { resolveIntegrationProject, readIntegrationSettings, projectIntegrationConfigPath } from ${JSON.stringify(path.resolve(import.meta.dir, "project-integrations.ts"))};
+		const root = ${JSON.stringify(root)};
+		assert.equal(os.homedir(), path.join(root, "home"));
+		for (const location of [CODESOOK_OMP_CONFIG_PATH, process.env.PI_CODING_AGENT_DIR, path.join(os.homedir(), ".pi", "agent")]) {
+			assert.ok(location.startsWith(root + path.sep), location);
+		}
+		const repository = path.join(root, "repository with spaces");
+		const child = path.join(repository, "child");
+		mkdirSync(child, { recursive: true });
+		execFileSync(${JSON.stringify(Bun.which("git"))}, ["init", "-q", repository]);
+		const policyPath = projectIntegrationConfigPath(repository);
+		mkdirSync(path.dirname(policyPath));
+		const bytes = JSON.stringify({version:1,display:{},behavior:{beads:{policy:"off"},codegraph:{policy:"off"}}});
+		writeFileSync(policyPath, bytes);
+		const outside = path.join(root, "outside");
+		mkdirSync(outside);
+		const probe = \`
+			import { resolveIntegrationProject, readIntegrationSettings } from ${JSON.stringify(path.resolve(import.meta.dir, "project-integrations.ts"))};
+			try {
+				const project = await resolveIntegrationProject(process.argv[1]);
+				console.log(JSON.stringify({ project, policy: readIntegrationSettings("beads", project).policy }));
+			} catch (error) {
+				console.log(JSON.stringify({ error: error.message }));
+			}
+		\`;
+		for (const scenario of [
+			{ cwd: child, extra: { PATH: path.join(root, "no-git") }, failure: true },
+			{ cwd: child, extra: { GIT_TEST_ASSUME_DIFFERENT_OWNER: "1" }, failure: true },
+			{ cwd: outside, extra: {}, failure: false },
+		]) {
+			const process = Bun.spawnSync([${JSON.stringify(process.execPath)}, "-e", probe, scenario.cwd], { cwd: root, env: { ...processEnvironment, ...scenario.extra } });
+			assert.equal(process.exitCode, 0, process.stderr.toString());
+			const result = JSON.parse(process.stdout.toString());
+			if (scenario.failure) {
+				assert.ok(result.error, "Git failure fell back to " + result.project + " and enabled policy " + result.policy);
+			} else {
+				assert.equal(result.project, outside);
+				assert.equal(result.policy, "auto");
+			}
+		}
+		assert.equal(readFileSync(policyPath, "utf8"), bytes);
+		console.log("Git failures reject; confirmed outside-Git scope remains supported");
+	`;
+	const home = path.join(root, "home");
+	const processEnvironment = {
+		HOME: home,
+		PI_CODING_AGENT_DIR: path.join(home, ".omp", "agent"),
+		XDG_CONFIG_HOME: path.join(home, ".config"),
+		PATH: "/usr/bin:/bin",
+		LC_ALL: "C",
+	};
+	const child = Bun.spawnSync([process.execPath, "-e", `const processEnvironment = ${JSON.stringify(processEnvironment)};${source}`], {
+		cwd: root,
+		env: processEnvironment,
+	});
+	if (child.exitCode !== 0) throw new Error(child.stderr.toString());
+	expect(child.exitCode).toBe(0);
+});
+
 test("invalid global permission fails closed despite valid project override and survives writes", () => {
 	const project = temporary();
 	const global = path.join(project, "global.json");

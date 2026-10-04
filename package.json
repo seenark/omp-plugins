@@ -41,6 +41,11 @@
         "description": "Use initialized CodeGraph projects through configured MCP tools.",
         "default": false,
         "extensions": ["./packages/codegraph/src/index.ts"]
+      },
+      "beads": {
+        "description": "On-demand Beads guidance for usable initialized workspaces.",
+        "default": false,
+        "extensions": ["./packages/beads/src/index.ts"]
       }
     }
   },
@@ -54,10 +59,11 @@
     "publish:shared-display": "bun run verify && bun publish --cwd packages/shared-display --access public",
     "publish:caveman": "bun run verify && bun publish --cwd packages/caveman --access public",
     "publish:codegraph": "bun run verify && bun publish --cwd packages/codegraph --access public",
+    "publish:beads": "bun run verify && bun publish --cwd packages/beads --access public",
     "publish:headroom": "bun run verify && bun publish --cwd packages/headroom --access public",
     "publish:prompt-border-style": "bun run verify && bun publish --cwd packages/prompt-border-style --access public",
     "publish:settings": "bun run verify && bun publish --cwd packages/codesook-omp-plugin --access public",
     "publish:theme-catppuccin": "bun run verify && bun publish --cwd packages/theme-catppuccin --access public",
-    "publish:all": "bun run verify && bun publish --cwd packages/shared-display --access public && bun publish --cwd packages/caveman --access public && bun publish --cwd packages/codegraph --access public && bun publish --cwd packages/headroom --access public && bun publish --cwd packages/prompt-border-style --access public && bun publish --cwd packages/codesook-omp-plugin --access public && bun publish --cwd packages/theme-catppuccin --access public"
+    "publish:all": "bun run verify && bun publish --cwd packages/shared-display --access public && bun publish --cwd packages/caveman --access public && bun publish --cwd packages/codegraph --access public && bun publish --cwd packages/beads --access public && bun publish --cwd packages/headroom --access public && bun publish --cwd packages/prompt-border-style --access public && bun publish --cwd packages/codesook-omp-plugin --access public && bun publish --cwd packages/theme-catppuccin --access public"
   }
 }

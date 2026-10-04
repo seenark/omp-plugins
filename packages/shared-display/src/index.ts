@@ -67,7 +67,7 @@ const WIDGET_KEY = "codesook-shared-display";
 const DEFAULT_HORIZONTAL_SEPARATOR = "  ";
 const DEFAULT_PONYTAIL_TEMPLATE = "{activity} {glyph} ponytail: {modeIcon}{mode}";
 const DEFAULT_PONYTAIL_DIRECTORY = "~/.config/codesook-omp/ponytail";
-const SOURCE_ORDER: readonly DisplaySource[] = ["ponytail", "caveman", "headroom", "codegraph"];
+const SOURCE_ORDER: readonly DisplaySource[] = ["ponytail", "caveman", "headroom", "codegraph", "beads"];
 const PONYTAIL_MODES = ["off", "lite", "full", "ultra", "review"] as const;
 const PONYTAIL_MODE_ICONS: Record<PonytailMode, string> = {
 	off: "",
@@ -145,6 +145,7 @@ export function normalizeSharedDisplayConfig(raw: unknown): SharedDisplayConfig 
 		normalized.order = [...new Set(source.order.filter(isDisplaySource))];
 	}
 	if (!normalized.order.includes("codegraph")) normalized.order.push("codegraph");
+	if (!normalized.order.includes("beads")) normalized.order.push("beads");
 	if (source.widgetPlacement === "aboveEditor" || source.widgetPlacement === "belowEditor") {
 		normalized.widgetPlacement = source.widgetPlacement;
 	}
@@ -907,7 +908,7 @@ export function sharedDisplaySettingsItems(
 			submenu: (current, done) => inputSubmenu(current, done),
 			changed: draft.order.join(",") !== DEFAULT_SHARED_DISPLAY_CONFIG.order.join(","),
 			description:
-				"Comma-separated source order: ponytail, caveman, headroom, codegraph. Unknown names and duplicates are discarded. Omitted CodeGraph is appended; its integration visibility controls whether it appears.",
+				"Comma-separated source order: ponytail, caveman, headroom, codegraph, beads. Unknown names and duplicates are discarded. Omitted integrations are appended; integration visibility controls whether they appear.",
 		},
 		{
 			id: "widgetPlacement",

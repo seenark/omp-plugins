@@ -1,7 +1,7 @@
 export const CHANNEL = "codesook/shared-display/v1";
 export const SHARED_DISPLAY_CHANNEL = CHANNEL;
 
-export type DisplaySource = "ponytail" | "caveman" | "headroom" | "codegraph";
+export type DisplaySource = "ponytail" | "caveman" | "headroom" | "codegraph" | "beads";
 export type BlockFrame = readonly string[];
 export type FrameSequence = {
 	readonly frames: readonly BlockFrame[];
@@ -55,7 +55,7 @@ export type SharedDisplayMessage =
 	| SharedDisplayHostMessage
 	| SharedDisplaySnapshotMessage;
 
-const SOURCES: readonly DisplaySource[] = ["ponytail", "caveman", "headroom", "codegraph"];
+const SOURCES: readonly DisplaySource[] = ["ponytail", "caveman", "headroom", "codegraph", "beads"];
 
 function isRecord(value: unknown): value is Record<string, unknown> {
 	return typeof value === "object" && value !== null && !Array.isArray(value);

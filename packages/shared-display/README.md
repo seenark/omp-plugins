@@ -1,6 +1,6 @@
 # @codesook/omp-shared-display
 
-Opt-in OMP extension that owns `codesook-shared-display` widget and versioned EventBus snapshot protocol for Ponytail, Caveman, Headroom, and CodeGraph producers. Default source order preserves that sequence.
+Opt-in OMP extension that owns `codesook-shared-display` widget and versioned EventBus snapshot protocol for Ponytail, Caveman, Headroom, CodeGraph, and Beads producers. Default source order preserves that sequence. Beads source support requires version 1.2.0 or newer.
 
 Side-effect-free client and root config helpers:
 
@@ -17,7 +17,7 @@ Shared Display presentation persists in `display.sharedDisplay` inside:
 
 Legacy `~/.config/codesook-omp/shared-display/config.json` migrates once when root section is missing. `/shared-display` command is removed; root `/codesook-omp-plugin` settings owns persisted presentation. Producers remain safe when host/EventBus is absent.
 
-Effective source order appends CodeGraph when a persisted order omits it, including orders saved before CodeGraph support. Existing producers keep their configured relative order and omissions. CodeGraph's integration visibility controls whether its segment appears; removing it from source order does not hide it.
+Effective source order appends CodeGraph and Beads when a persisted order omits them, including orders saved before integration support. Existing producers keep their configured relative order and omissions. Each integration's visibility controls whether its segment appears; removing it from source order does not hide it. The side-effect-free client never loads the display host or another integration.
 
 ## Host presence
 

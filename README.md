@@ -12,9 +12,10 @@ Standalone [oh-my-pi](https://github.com/can1357/oh-my-pi) extensions in one Bun
 | `@codesook/omp-shared-display` | `shared-display` | no | `packages/shared-display/src/index.ts` |
 | `@codesook/omp-caveman` | `caveman` | no | `packages/caveman/src/index.ts` |
 | `@codesook/omp-codegraph` | `codegraph` | no | `packages/codegraph/src/index.ts` |
+| `@codesook/omp-beads` | `beads` | no | `packages/beads/src/index.ts` |
 | `@codesook/omp-theme-catppuccin` | theme package | — | `packages/theme-catppuccin/bin/install.js` |
 
-Root install loads unified settings plus default Headroom and Prompt Border features. Shared Display, Caveman, and CodeGraph remain opt-in.
+Root install loads unified settings plus default Headroom and Prompt Border features. Shared Display, Caveman, CodeGraph, and Beads remain opt-in.
 
 ## Requirements
 
@@ -33,6 +34,7 @@ omp plugin install github:seenark/omp-plugins
 omp plugin install 'github:seenark/omp-plugins[headroom,prompt-border-style]'
 omp plugin install 'github:seenark/omp-plugins[shared-display,caveman]'
 omp plugin install 'github:seenark/omp-plugins[codegraph]'
+omp plugin install 'github:seenark/omp-plugins[beads]'
 omp plugin install 'github:seenark/omp-plugins[*]'
 ```
 
@@ -47,6 +49,7 @@ omp plugin install "$PWD/packages/prompt-border-style"
 omp plugin install "$PWD/packages/shared-display"
 omp plugin install "$PWD/packages/caveman"
 omp plugin install "$PWD/packages/codegraph"
+omp plugin install "$PWD/packages/beads"
 ```
 
 Install Catppuccin themes:
@@ -64,12 +67,13 @@ bun packages/theme-catppuccin/bin/install.js
 /headroom [status|on|off|health|stats|init [config|glyphs|all]]
 /caveman [status|off|lite|full|ultra|wenyan-lite|wenyan-full|wenyan-ultra]
 /codegraph [status|auto|off]
+/beads [status|auto|off]
 /prompt-border [status|<style> [layout]|layout <layout>|reset|rail toggle|glyphs debug [frames|demo|on|off]]
 ```
 
-Root settings owns persisted configuration. Feature commands own session behavior; CodeGraph policy commands explicitly write shared project policy. Feature `config` commands and `/shared-display` are removed. Status commands open focused read-only overlays; Enter/Esc closes. `/codesook-omp-plugin init config` creates the v1 global config only when absent and seeds only missing glyph files.
+Root settings owns persisted configuration. Feature commands own session behavior; CodeGraph and Beads policy commands explicitly write shared project policy. Feature `config` commands and `/shared-display` are removed. Status commands open focused read-only overlays; Enter/Esc closes. `/codesook-omp-plugin init config` creates the v1 global config only when absent and seeds only missing glyph files.
 
-`/codesook-omp-plugin` edits a draft. Shift+Enter applies directly. Bare Enter on Apply asks confirmation. Reload discards draft; Cancel leaves persisted and live state unchanged.
+`/codesook-omp-plugin` edits a draft. Shift+Enter applies directly. Bare Enter on Apply opens confirmation inside the same focused overlay without saving. Enter confirms; Esc declines and returns to the unchanged draft without writes or live-change events. Reload discards draft; Cancel leaves persisted and live state unchanged.
 
 ## Configuration and migration
 
@@ -108,9 +112,24 @@ Global defaults use `behavior.codegraph.policy` (`auto`/`off`) and `display.code
 
 The unified dialog stages global values and project overrides; inherit removes an override. Invalid policy is reported, preserved, and fails closed. Unknown fields survive writes. Detection, Reload, and Cancel create no project settings; explicit Apply or policy commands may write them, never commit them.
 
+Both integrations fail closed when Git cannot inspect the Integration Project, including missing Git, permission errors, and unsafe repository ownership. Repair the reported Git error before enabling guidance or saving project settings. The operating-directory fallback applies only when Git confirms that the directory is outside a repository; inspection errors never select a child directory as a new policy root.
+
+When Beads cannot resolve project scope, valid global visibility still controls persistent error display: `always` shows the error, while `never` keeps it hidden. This display-only fallback never permits guidance or reads a guessed project settings file; read-only status remains available.
+
 Permitted ready integrations append CodeGraph-first guidance with an explicit resolved `projectPath`, preserving prior prompt entries and allowing grep/read for missing or stale source. Off suppresses only this plugin's instructions. Visibility defaults to ready; always shows all states, never hides persistent status only. CodeGraph uses Shared Display when its host is active, otherwise the native footer, never both. Refresh runs on startup, before turns, commands, settings changes, and session switches; no idle polling.
 
 See [CodeGraph package documentation](packages/codegraph/README.md) for installation, native MCP configuration, and the shared policy/client interfaces.
+
+### Beads project integration
+
+Beads detects a usable existing native Tool Workspace through the installed `bd` CLI. Discovery respects ancestor lookup, environment overrides, redirects, and worktree sharing; a folder or location result alone is not readiness. Status identifies the Integration Project, Tool Workspace, database, policy, and errors. The plugin does not initialize, install tools, generate agent instructions, provision servers, or synchronize data.
+
+Global `behavior.beads.policy` (`auto`/`off`) and `display.beads.visibility` (`ready`/`always`/`never`) use the same settings envelope and staged project overrides as CodeGraph, independently. Invalid configuration fails closed and remains unchanged. Beads depends on Shared Display's 1.2.0 client/settings contracts, not on an active host or the CodeGraph plugin.
+
+Ready, permitted Beads guidance authorizes issue operations only after an explicit user request and within its scope. Availability alone never enables automatic issue tracking for unrelated work. Off removes only plugin guidance, not CLI access, data, or existing repository obligations. Status remains a read-only overlay even with hidden persistent display. Host-active display uses one shared segment; otherwise it uses the native footer. Refresh follows startup, turns, commands, settings changes, and project switches without polling.
+
+See [Beads package documentation](packages/beads/README.md) for independent installation and operation.
+
 
 ## Implemented ownership
 
@@ -120,6 +139,7 @@ See [CodeGraph package documentation](packages/codegraph/README.md) for installa
 - Prompt Border owns the prompt editor, Context Rail, attachment band, and spinner overrides; it does not publish Shared Display sources.
 - Root settings detects Ponytail and OMP feature presence through `omp plugin list --json`; it never unloads or loads plugins.
 - CodeGraph owns native project-data inspection, permitted runtime guidance, read-only status, and exclusive Shared Display/footer routing.
+- Beads owns native workspace/database inspection, on-demand runtime guidance, read-only status, and exclusive Shared Display/footer routing.
 
 Ponytail and Caveman producers publish complete frame sequences and never create producer-side animation timers or fallback widgets. Native status visibility is independent from custom Shared Display visibility.
 
@@ -140,6 +160,7 @@ Package publication is dependency ordered:
 bun run publish:shared-display
 bun run publish:caveman
 bun run publish:codegraph
+bun run publish:beads
 bun run publish:headroom
 bun run publish:prompt-border-style
 bun run publish:settings

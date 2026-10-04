@@ -158,6 +158,30 @@ describe("Shared Display source composition", () => {
 		}
 	});
 
+	it("keeps Beads and CodeGraph independent with a persisted legacy order", () => {
+		const host = makeHostHarness(true, true, ["headroom", "caveman"]);
+		try {
+			host.load();
+			host.start();
+			connectSharedDisplay(host.events, "headroom").publish({ frames: [["H"]] });
+			connectSharedDisplay(host.events, "caveman").publish({ frames: [["C"]] });
+			const codegraph = connectSharedDisplay(host.events, "codegraph");
+			const beads = connectSharedDisplay(host.events, "beads");
+			codegraph.publish({ frames: [["CodeGraph ready"]] });
+			beads.publish({ frames: [["Beads ready"]] });
+			expect(host.rows()).toEqual(["H  C  CodeGraph ready  Beads ready"]);
+			beads.publish(null);
+			expect(host.rows()).toEqual(["H  C  CodeGraph ready"]);
+			beads.publish({ frames: [["Beads suppressed"]] });
+			codegraph.dispose();
+			expect(host.rows()).toEqual(["H  C  Beads suppressed"]);
+			beads.dispose();
+			expect(host.rows()).toEqual(["H  C"]);
+		} finally {
+			host.close();
+		}
+	});
+
 	it("appends CodeGraph after existing producers without changing their order", () => {
 		const snapshots = new Map([
 			["codegraph", { frames: [["G"]] }],
