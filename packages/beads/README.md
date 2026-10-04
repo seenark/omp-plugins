@@ -32,6 +32,8 @@ Git must successfully inspect project scope. Missing Git, permission failures, a
 
 If project scope cannot be resolved, valid global visibility still applies to error display. `always` shows the error; `never` hides persistent display but keeps read-only status available. Invalid global configuration is preserved and uses the display default without granting permission. No guessed project settings are read.
 
+Detailed scope-error status reports the Integration Project and policy as unresolved, with guidance disabled, and identifies the operating directory separately. It does not misclassify valid global configuration as invalid or present the operating directory as a resolved project root.
+
 Readiness requires the CLI, successful workspace discovery, and successful database access. A `.beads` directory or location result alone is insufficient. Status distinguishes uninitialized workspaces, missing prerequisites, database/inspection/configuration errors, readiness, and policy suppression. External initialization becomes visible on the next refresh without setup or generated project files.
 
 ## Policy and visibility

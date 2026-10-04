@@ -8,7 +8,8 @@ import { inspectBeads, type BeadsInspection } from "./status";
 export type BeadsOptions = { globalConfigPath?: string };
 export type BeadsStatus = Omit<BeadsInspection, "state"> & {
 	state: BeadsInspection["state"] | "suppressed";
-	integrationProject: string;
+	integrationProject?: string;
+	operatingDirectory?: string;
 	policy?: IntegrationPolicy;
 	policySource: string;
 	visibility: IntegrationVisibility;
@@ -18,10 +19,11 @@ export type BeadsStatus = Omit<BeadsInspection, "state"> & {
 export function formatBeadsStatus(status: BeadsStatus): string {
 	return [
 		`Beads: ${status.state}`,
-		`Integration Project: ${status.integrationProject}`,
+		`Integration Project: ${status.integrationProject ?? "unresolved"}`,
+		...(status.operatingDirectory ? [`Operating Directory: ${status.operatingDirectory}`] : []),
 		`Tool Workspace: ${status.workspacePath ?? "not resolved"}`,
 		`Database: ${status.databasePath ?? "not resolved"}`,
-		`Policy: ${status.policy ?? "invalid (guidance disabled)"} (${status.policySource})`,
+		`Policy: ${status.policy ?? (status.policySource === "unresolved" ? "unresolved (guidance disabled)" : "invalid (guidance disabled)")} (${status.policySource})`,
 		`Visibility: ${status.visibility}`,
 		status.detail,
 		...status.errors,
@@ -70,7 +72,7 @@ export default function beadsExtension(pi: ExtensionAPI, options: BeadsOptions =
 			const global = readCodesookOmpConfig(options.globalConfigPath);
 			const display = global.valid && isRecord(global.value.display.beads) ? global.value.display.beads : undefined;
 			const visibility = display?.visibility;
-			status = { state: "error", initialized: false, integrationProject: cwd, policySource: "unresolved", visibility: visibility === "always" || visibility === "never" ? visibility : "ready", errors: [], detail: error instanceof Error ? error.message : String(error) };
+			status = { state: "error", initialized: false, operatingDirectory: cwd, policySource: "unresolved", visibility: visibility === "always" || visibility === "never" ? visibility : "ready", errors: [], detail: error instanceof Error ? error.message : String(error) };
 		}
 		syncDisplay();
 		return status;
