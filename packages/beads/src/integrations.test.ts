@@ -73,7 +73,7 @@ function fixture(initialized: Record<Integration, boolean>) {
 				const result = await hook({ systemPrompt: prompt }, context);
 				if (result) prompt = result.systemPrompt;
 			}
-			expect(prompt.slice(0, previous.length)).toEqual(previous);
+			expect(prompt.slice(0, previous.length)).toEqual([...previous]);
 			expect(previous).toEqual(["Repository safety rules", "Other plugin instructions"]);
 			// Workspace-specific entries distinguish guidance without pinning prose or forwarding calls.
 			expect(prompt.slice(previous.length).map(entry => {
