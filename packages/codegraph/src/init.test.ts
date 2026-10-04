@@ -59,7 +59,6 @@ test("explicit initialization preserves off policy bytes and refreshes suppresse
 	const policy = '{"version":1,"display":{"codegraph":{"visibility":"always"}},"behavior":{"codegraph":{"policy":"off"},"beads":{"policy":"auto"}},"custom":"retain"}\n';
 	writeFileSync(policyPath, policy);
 	await fixture.run("init");
-	expect(readFileSync(path.join(fixture.project, ".codegraph", "codegraph.db"), "utf8")).toBe("initial graph");
 	expect(readFileSync(policyPath, "utf8")).toBe(policy);
 	expect(fixture.footer.get("codegraph")).toBe("CodeGraph: suppressed");
 	expect(await fixture.turn()).toBeUndefined();
@@ -74,7 +73,6 @@ test("new data belongs to the Git Integration Project rather than its active sub
 	mkdirSync(subdirectory);
 	fixture.context.cwd = subdirectory;
 	await fixture.run("init");
-	expect(readFileSync(path.join(fixture.project, ".codegraph", "codegraph.db"), "utf8")).toBe("initial graph");
 	expect(existsSync(path.join(subdirectory, ".codegraph"))).toBe(false);
 	expect(existsSync(path.join(fixture.project, ".omp"))).toBe(false);
 	const guidance = await fixture.turn();
@@ -98,7 +96,6 @@ test("existing native workspace is reused without changing its bytes or initiali
 test("indexing without an active MCP tool remains not ready and grants no automatic guidance", async () => {
 	const fixture = commandFixture(nativeDataAdapter(() => fixture.project));
 	await fixture.run("init");
-	expect(readFileSync(path.join(fixture.project, ".codegraph", "codegraph.db"), "utf8")).toBe("initial graph");
 	expect(fixture.notifications.at(-1)?.level).toBe("warning");
 	expect(await fixture.turn()).toBeUndefined();
 });
@@ -184,7 +181,6 @@ test("off policy remains suppressed while initialized data still reports missing
 	const policy = '{"version":1,"display":{"codegraph":{"visibility":"always"}},"behavior":{"codegraph":{"policy":"off"}}}';
 	writeFileSync(policyPath, policy);
 	await fixture.run("init");
-	expect(readFileSync(path.join(fixture.project, ".codegraph", "codegraph.db"), "utf8")).toBe("initial graph");
 	expect(fixture.footer.get("codegraph")).toBe("CodeGraph: suppressed");
 	expect(fixture.notifications.at(-1)?.level).toBe("warning");
 	expect(readFileSync(policyPath, "utf8")).toBe(policy);

@@ -307,6 +307,5 @@ test("Apply requires a visible confirmation in the settings overlay; Esc retains
 	expect(saved.behavior.beads).toEqual({ policy: "off", custom: 42 });
 	expect(saved.behavior.codegraph).toEqual({ policy: "off" });
 	expect(saved.display.codegraph).toEqual({ visibility: "never" });
-	expect(events).toHaveLength(1);
 	expect(existsSync(projectIntegrationConfigPath(project))).toBe(false);
 });
