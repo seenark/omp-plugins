@@ -42,7 +42,7 @@ export async function inspectCodeGraph(
 	}
 	const tool = tools.find(candidate => candidate.sourceInfo?.source === "mcp" && /(?:^|__)codegraph_explore$|^mcp_[\w-]+_codegraph_explore$/u.test(candidate.name) && activeTools.includes(candidate.name));
 	const scope = { initialized: data.initialized, projectPath: data.projectPath, indexPath: data.indexPath, toolName: tool?.name };
-	if (!data.initialized) return { ...scope, state: "uninitialized", detail: "No initialized CodeGraph Tool Workspace. Initialize explicitly with codegraph init; this plugin never initializes projects." };
+	if (!data.initialized) return { ...scope, state: "uninitialized", detail: "No initialized CodeGraph Tool Workspace. Initialize explicitly with /codegraph init or codegraph init; detection never initializes projects." };
 	if (isRecord(data.index) && data.index.state !== undefined && data.index.state !== "complete") {
 		return { ...scope, state: "error", detail: `CodeGraph index is not complete (${String(data.index.state)}). Inspect the project with the CodeGraph CLI.` };
 	}
