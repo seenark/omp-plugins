@@ -59,13 +59,15 @@ export {
 	type FrameSequence,
 	type SharedDisplayEvents,
 	type SharedDisplayPublisher,
+	type SharedDisplayHostMessage,
+	type SharedDisplayMessage,
 } from "./client.ts";
 
 const WIDGET_KEY = "codesook-shared-display";
 const DEFAULT_HORIZONTAL_SEPARATOR = "  ";
 const DEFAULT_PONYTAIL_TEMPLATE = "{activity} {glyph} ponytail: {modeIcon}{mode}";
 const DEFAULT_PONYTAIL_DIRECTORY = "~/.config/codesook-omp/ponytail";
-const SOURCE_ORDER: readonly DisplaySource[] = ["ponytail", "caveman", "headroom"];
+const SOURCE_ORDER: readonly DisplaySource[] = ["ponytail", "caveman", "headroom", "codegraph"];
 const PONYTAIL_MODES = ["off", "lite", "full", "ultra", "review"] as const;
 const PONYTAIL_MODE_ICONS: Record<PonytailMode, string> = {
 	off: "",
@@ -142,6 +144,7 @@ export function normalizeSharedDisplayConfig(raw: unknown): SharedDisplayConfig 
 	if (Array.isArray(source.order)) {
 		normalized.order = [...new Set(source.order.filter(isDisplaySource))];
 	}
+	if (!normalized.order.includes("codegraph")) normalized.order.push("codegraph");
 	if (source.widgetPlacement === "aboveEditor" || source.widgetPlacement === "belowEditor") {
 		normalized.widgetPlacement = source.widgetPlacement;
 	}
@@ -698,16 +701,25 @@ function safeEmit(events: SharedDisplayEvents | undefined, data: unknown): void 
 	}
 }
 
+function announceHost(runtime: HostRuntime, active = runtime.config.enabled && runtime.ctx?.hasUI === true): void {
+	if (runtime.epoch === undefined) return;
+	safeEmit(runtime.events, { protocol: 1, kind: "host", epoch: runtime.epoch, active });
+}
+
 function handleHostMessage(runtime: HostRuntime, data: unknown): void {
 	const message = parseSharedDisplayMessage(data);
 	if (message === undefined) return;
 	if (message.kind === "ready") {
 		if (runtime.epoch !== undefined) {
-			safeEmit(runtime.events, { protocol: 1, kind: "request", epoch: runtime.epoch, source: message.source });
+			announceHost(runtime);
+			if (runtime.config.enabled && runtime.ctx?.hasUI) {
+				safeEmit(runtime.events, { protocol: 1, kind: "request", epoch: runtime.epoch, source: message.source });
+			}
 		}
 		return;
 	}
-	if (message.kind !== "snapshot" || runtime.epoch === undefined || message.epoch !== runtime.epoch) return;
+	if (message.kind !== "snapshot" || !runtime.config.enabled || !runtime.ctx?.hasUI ||
+		runtime.epoch === undefined || message.epoch !== runtime.epoch) return;
 	const previousRevision = runtime.revisions.get(message.source) ?? 0;
 	if (message.revision <= previousRevision) return;
 	runtime.revisions.set(message.source, message.revision);
@@ -764,7 +776,7 @@ function installWrapper(runtime: HostRuntime, ctx: HostContext): void {
 }
 
 function requestSnapshots(runtime: HostRuntime): void {
-	if (runtime.epoch === undefined) return;
+	if (runtime.epoch === undefined || !runtime.config.enabled || !runtime.ctx?.hasUI) return;
 	safeEmit(runtime.events, { protocol: 1, kind: "request", epoch: runtime.epoch });
 }
 
@@ -775,6 +787,8 @@ function resetSnapshots(runtime: HostRuntime): void {
 
 function startSession(runtime: HostRuntime, context: unknown): void {
 	const ctx = context as HostContext;
+	announceHost(runtime, false);
+	runtime.publisher?.dispose();
 	teardownWrapper(runtime);
 	runtime.capturedNativeText = undefined;
 	clearWidget(runtime);
@@ -784,7 +798,7 @@ function startSession(runtime: HostRuntime, context: unknown): void {
 	runtime.ctx = ctx;
 	runtime.config = loadSharedDisplayConfig(runtime.configPath);
 	runtime.epoch = randomUUID();
-	runtime.publisher?.dispose();
+	announceHost(runtime);
 	runtime.publisher = connectSharedDisplay(runtime.events, "ponytail");
 	runtime.ponytailStatus = resolvePonytailSessionStatus(ctx.sessionManager?.getBranch() ?? []);
 	runtime.publisher.publish(
@@ -828,9 +842,9 @@ function endAgent(runtime: HostRuntime, event: unknown): void {
 }
 
 function shutdown(runtime: HostRuntime): void {
+	announceHost(runtime, false);
 	teardownWrapper(runtime);
 	if (runtime.publisher !== undefined) {
-		runtime.publisher.publish(null);
 		runtime.publisher.dispose();
 		runtime.publisher = undefined;
 	}
@@ -838,6 +852,7 @@ function shutdown(runtime: HostRuntime): void {
 	runtime.active = false;
 	runtime.animationOriginMs = undefined;
 	runtime.epoch = undefined;
+	runtime.ctx = undefined;
 	resetSnapshots(runtime);
 	runtime.unsubscribe?.();
 	runtime.unsubscribe = undefined;
@@ -892,7 +907,7 @@ export function sharedDisplaySettingsItems(
 			submenu: (current, done) => inputSubmenu(current, done),
 			changed: draft.order.join(",") !== DEFAULT_SHARED_DISPLAY_CONFIG.order.join(","),
 			description:
-				"Comma-separated source order: ponytail, caveman, headroom. Unknown names and duplicates are discarded; blank shows no sources.",
+				"Comma-separated source order: ponytail, caveman, headroom, codegraph. Unknown names and duplicates are discarded. Omitted CodeGraph is appended; its integration visibility controls whether it appears.",
 		},
 		{
 			id: "widgetPlacement",
@@ -1029,13 +1044,16 @@ export function updateSharedDisplayDraft(
 }
 
 function applySharedDisplayRuntime(runtime: HostRuntime, next: SharedDisplayConfig): void {
+	const wasEnabled = runtime.config.enabled;
 	teardownWrapper(runtime);
 	clearWidget(runtime);
-	runtime.config = cloneSharedDisplayConfig(next);
+	runtime.config = normalizeSharedDisplayConfig(next);
+	if (runtime.config.enabled !== wasEnabled) announceHost(runtime);
 	runtime.publisher?.publish(
 		runtime.config.enabled ? ponytailFrameSequence(runtime.ponytailStatus, runtime.config) : null,
 	);
 	if (runtime.ctx?.hasUI && runtime.config.enabled) installWrapper(runtime, runtime.ctx);
+	if (runtime.config.enabled && !wasEnabled) requestSnapshots(runtime);
 	syncWidget(runtime);
 }
 

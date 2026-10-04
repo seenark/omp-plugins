@@ -1,7 +1,7 @@
 export const CHANNEL = "codesook/shared-display/v1";
 export const SHARED_DISPLAY_CHANNEL = CHANNEL;
 
-export type DisplaySource = "ponytail" | "caveman" | "headroom";
+export type DisplaySource = "ponytail" | "caveman" | "headroom" | "codegraph";
 export type BlockFrame = readonly string[];
 export type FrameSequence = {
 	readonly frames: readonly BlockFrame[];
@@ -14,6 +14,8 @@ export interface SharedDisplayEvents {
 }
 
 export interface SharedDisplayPublisher {
+	readonly hostAvailable: boolean;
+	onHostAvailabilityChange(handler: (active: boolean) => void): () => void;
 	publish(sequence: FrameSequence | null): void;
 	dispose(): void;
 }
@@ -31,6 +33,13 @@ export type SharedDisplayRequestMessage = {
 	readonly source?: DisplaySource;
 };
 
+export type SharedDisplayHostMessage = {
+	readonly protocol: 1;
+	readonly kind: "host";
+	readonly epoch: string;
+	readonly active: boolean;
+};
+
 export type SharedDisplaySnapshotMessage = {
 	readonly protocol: 1;
 	readonly kind: "snapshot";
@@ -43,9 +52,10 @@ export type SharedDisplaySnapshotMessage = {
 export type SharedDisplayMessage =
 	| SharedDisplayReadyMessage
 	| SharedDisplayRequestMessage
+	| SharedDisplayHostMessage
 	| SharedDisplaySnapshotMessage;
 
-const SOURCES: readonly DisplaySource[] = ["ponytail", "caveman", "headroom"];
+const SOURCES: readonly DisplaySource[] = ["ponytail", "caveman", "headroom", "codegraph"];
 
 function isRecord(value: unknown): value is Record<string, unknown> {
 	return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -101,6 +111,10 @@ export function parseSharedDisplayMessage(value: unknown): SharedDisplayMessage 
 		return value.source === undefined
 			? { protocol: 1, kind: "request", epoch: value.epoch }
 			: { protocol: 1, kind: "request", epoch: value.epoch, source: value.source };
+	}
+	if (value.kind === "host") {
+		if (!validEpoch(value.epoch) || typeof value.active !== "boolean") return undefined;
+		return { protocol: 1, kind: "host", epoch: value.epoch, active: value.active };
 	}
 	if (value.kind === "snapshot") {
 		if (!validEpoch(value.epoch) || !isDisplaySource(value.source) || !validRevision(value.revision)) {
@@ -158,6 +172,8 @@ function copyPublishedSequence(sequence: FrameSequence | null): FrameSequence | 
 }
 
 const NO_EVENTS_PUBLISHER: SharedDisplayPublisher = {
+	hostAvailable: false,
+	onHostAvailabilityChange() { return () => {}; },
 	publish() {},
 	dispose() {},
 };
@@ -172,10 +188,18 @@ export function connectSharedDisplay(
 	let disposed = false;
 	let revision = 0;
 	let sequence: FrameSequence | null = null;
-	let requestedEpoch: string | undefined;
+	let hostEpoch: string | undefined;
+	let hostAvailable = false;
+	const availabilityHandlers = new Set<(active: boolean) => void>();
+
+	const setHostAvailable = (active: boolean): void => {
+		if (hostAvailable === active) return;
+		hostAvailable = active;
+		for (const handler of availabilityHandlers) handler(active);
+	};
 
 	const emitSnapshot = (epoch: string): void => {
-		if (disposed) return;
+		if (disposed || !hostAvailable || revision === 0) return;
 		events.emit(CHANNEL, {
 			protocol: 1,
 			kind: "snapshot",
@@ -189,9 +213,14 @@ export function connectSharedDisplay(
 	const unsubscribe = events.on(CHANNEL, data => {
 		if (disposed) return;
 		const message = parseSharedDisplayMessage(data);
-		if (message?.kind !== "request") return;
+		if (message?.kind === "host") {
+			if (!message.active && hostEpoch !== undefined && message.epoch !== hostEpoch) return;
+			hostEpoch = message.epoch;
+			setHostAvailable(message.active);
+			return;
+		}
+		if (message?.kind !== "request" || !hostAvailable || message.epoch !== hostEpoch) return;
 		if (message.source !== undefined && message.source !== source) return;
-		requestedEpoch = message.epoch;
 		emitSnapshot(message.epoch);
 	});
 
@@ -199,19 +228,28 @@ export function connectSharedDisplay(
 	events.emit(CHANNEL, { protocol: 1, kind: "ready", source });
 
 	return {
+		get hostAvailable() { return hostAvailable; },
+		onHostAvailabilityChange(handler) {
+			if (disposed) return () => {};
+			availabilityHandlers.add(handler);
+			return () => availabilityHandlers.delete(handler);
+		},
 		publish(next) {
 			if (disposed || (next !== null && !isValidFrameSequence(next))) return;
 			revision += 1;
 			sequence = next === null ? null : copyFrameSequence(next);
-			if (requestedEpoch !== undefined) emitSnapshot(requestedEpoch);
+			if (hostEpoch !== undefined) emitSnapshot(hostEpoch);
 		},
 		dispose() {
 			if (disposed) return;
+			sequence = null;
+			revision += 1;
+			if (hostEpoch !== undefined) emitSnapshot(hostEpoch);
 			disposed = true;
 			unsubscribe();
-			sequence = null;
-			requestedEpoch = undefined;
-			revision = 0;
+			availabilityHandlers.clear();
+			hostAvailable = false;
+			hostEpoch = undefined;
 		},
 	};
 }
