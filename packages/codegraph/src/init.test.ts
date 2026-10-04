@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from "bun:test";
-import { existsSync, mkdtempSync, mkdirSync, readFileSync, readlinkSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, lstatSync, mkdtempSync, mkdirSync, readFileSync, readlinkSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -11,7 +11,7 @@ afterEach(() => { for (const directory of directories.splice(0)) rmSync(director
 
 type Result = { code: number; stdout: string; stderr: string };
 type Execute = (command: string, args: string[], options: { cwd: string }) => Promise<Result>;
-function commandFixture(execute: Execute, active = false) {
+function commandFixture(execute: Execute, active = false, toolDiscoveryError?: Error) {
 	const directory = mkdtempSync(path.join(os.tmpdir(), "omp-codegraph-init-"));
 	directories.push(directory);
 	const project = path.join(directory, "project");
@@ -26,7 +26,10 @@ function commandFixture(execute: Execute, active = false) {
 		on: (name: string, handler: typeof beforeTurn) => { if (name === "before_agent_start") beforeTurn = handler; },
 		events: { on: () => () => {}, emit: () => {} },
 		exec: execute,
-		getAllTools: () => active ? [{ name: "mcp__codegraph_explore", sourceInfo: { source: "mcp" } }] : [],
+		getAllTools: () => {
+			if (toolDiscoveryError) throw toolDiscoveryError;
+			return active ? [{ name: "mcp__codegraph_explore", sourceInfo: { source: "mcp" } }] : [];
+		},
 		getActiveTools: () => active ? ["mcp__codegraph_explore"] : [],
 	} as unknown as ExtensionAPI;
 	const context = { cwd: project, hasUI: false, ui: {
@@ -285,4 +288,40 @@ test("initialization from a Git subdirectory preserves partial data at the actua
 	expect(existsSync(path.join(fixture.context.cwd, ".codegraph"))).toBe(false);
 	expect(fixture.notifications.at(-1)?.level).toBe("error");
 	expect(await fixture.turn()).toBeUndefined();
+});
+
+test("inspection exceptions respect global error visibility without inferring project policy or granting guidance", async () => {
+	for (const [visibility, expectedFooter] of [["always", "CodeGraph: error"], ["never", undefined]] as const) {
+		const fixture = commandFixture(nativeDataAdapter(() => fixture.project), true, new Error("Tool discovery unavailable"));
+		const globalPath = path.join(fixture.directory, "global.json");
+		const config = JSON.stringify({ version: 1, display: { codegraph: { visibility } }, behavior: { codegraph: { policy: "auto" } } });
+		writeFileSync(globalPath, config);
+		await fixture.run("init");
+		expect(fixture.footer.get("codegraph")).toBe(expectedFooter);
+		expect(fixture.notifications.at(-1)?.level).toBe("error");
+		expect(existsSync(path.join(fixture.project, ".codegraph"))).toBe(false);
+		expect(existsSync(path.join(fixture.project, ".omp"))).toBe(false);
+		expect(readFileSync(globalPath, "utf8")).toBe(config);
+		expect(await fixture.turn()).toBeUndefined();
+	}
+});
+
+test("invalid global visibility and unreadable global configuration fail closed without overwriting either", async () => {
+	for (const config of [
+		'{"version":2,"display":{"codegraph":{"visibility":"always"}},"behavior":{}}',
+		'{"version":1,"display":{"codegraph":{"visibility":"invalid"}},"behavior":{}}',
+		undefined,
+	]) {
+		const fixture = commandFixture(nativeDataAdapter(() => fixture.project), true, new Error("Tool discovery unavailable"));
+		const globalPath = path.join(fixture.directory, "global.json");
+		if (config === undefined) mkdirSync(globalPath);
+		else writeFileSync(globalPath, config);
+		await fixture.run("init");
+		expect(fixture.footer.get("codegraph")).toBeUndefined();
+		expect(fixture.notifications.at(-1)?.level).toBe("error");
+		expect(existsSync(path.join(fixture.project, ".codegraph"))).toBe(false);
+		if (config !== undefined) expect(readFileSync(globalPath, "utf8")).toBe(config);
+		else expect(lstatSync(globalPath).isDirectory()).toBe(true);
+		expect(await fixture.turn()).toBeUndefined();
+	}
 });

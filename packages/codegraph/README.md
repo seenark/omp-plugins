@@ -76,6 +76,8 @@ Permitted ready integrations append guidance to existing system-prompt entries. 
 - `always`: show the current state, including suppression, uninitialized data, missing prerequisites, and errors.
 - `never`: hide persistent status without disabling guidance or status inspection.
 
+When project resolution or runtime inspection fails unexpectedly, status remains an error and guidance is disabled. The error display uses only valid global visibility; invalid or unreadable global settings fall back to `ready`. Detailed status labels an unresolved Integration Project with its operating directory instead of claiming that project resolution succeeded. Configuration remains unchanged.
+
 An enabled Shared Display host with a UI session receives the status segment. Otherwise, CodeGraph uses OMP's native footer. It never uses both at once. Depending on the shared client/policy package does not load the host extension.
 
 Detection refreshes at session startup and switches, before each user turn, on commands, and on settings changes. External initialization and configuration edits appear at the next refresh. There is no plugin polling timer or background watcher.

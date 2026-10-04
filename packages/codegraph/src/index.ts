@@ -3,7 +3,7 @@ import * as path from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "@oh-my-pi/pi-coding-agent";
 import { matchesKey, truncateToWidth, type Component } from "@oh-my-pi/pi-tui";
 import { connectSharedDisplay, type SharedDisplayPublisher } from "@codesook/omp-shared-display/client";
-import { CODESOOK_OMP_CONFIG_CHANGED, isRecord } from "@codesook/omp-shared-display/config-store";
+import { CODESOOK_OMP_CONFIG_CHANGED, isRecord, readCodesookOmpConfig } from "@codesook/omp-shared-display/config-store";
 import { readIntegrationSettings, resolveIntegrationProject, setProjectIntegrationPolicy, type IntegrationPolicy, type IntegrationVisibility } from "@codesook/omp-shared-display/project-integrations";
 import { inspectCodeGraph, type CodeGraphInspection } from "./status";
 
@@ -32,11 +32,11 @@ function ensureNoExistingDatabase(indexPath: string): void {
 export function formatCodeGraphStatus(status: CodeGraphStatus): string {
 	return [
 		`CodeGraph: ${status.state}`,
-		`Integration Project: ${status.integrationProject}`,
+		status.policySource === "unresolved" ? `Integration Project: unresolved (operating directory: ${status.integrationProject})` : `Integration Project: ${status.integrationProject}`,
 		`Tool Workspace: ${status.projectPath ?? "not resolved"}`,
 		`Project data: ${status.indexPath ?? "not resolved"}`,
 		`Project inspection: ${status.inspectionState}`,
-		`Policy: ${status.policy ?? "invalid (guidance disabled)"} (${status.policySource})`,
+		`Policy: ${status.policy ?? (status.policySource === "unresolved" ? "unresolved (guidance disabled)" : "invalid (guidance disabled)")} (${status.policySource})`,
 		`Visibility: ${status.visibility}`,
 		`Exploration MCP tool: ${status.toolName ?? (status.projectPath ? "missing or inactive" : "not assessed")}`,
 		status.detail,
@@ -83,7 +83,9 @@ export default function codegraphExtension(pi: ExtensionAPI, options: CodeGraphO
 			};
 		} catch (error) {
 			if (version !== refreshVersion || stopped) return undefined;
-			status = { state: "error", inspectionState: "error", initialized: false, integrationProject: ctx.cwd, policySource: "unresolved", visibility: "ready", errors: [], detail: error instanceof Error ? error.message : String(error) };
+			const global = readCodesookOmpConfig(options.globalConfigPath);
+			const visibility = global.valid && isRecord(global.value.display.codegraph) ? global.value.display.codegraph.visibility : undefined;
+			status = { state: "error", inspectionState: "error", initialized: false, integrationProject: ctx.cwd, policySource: "unresolved", visibility: visibility === "always" || visibility === "never" ? visibility : "ready", errors: [], detail: error instanceof Error ? error.message : String(error) };
 		}
 		syncDisplay();
 		return status;
