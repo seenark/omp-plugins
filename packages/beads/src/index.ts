@@ -1,4 +1,4 @@
-import { lstatSync, readdirSync } from "node:fs";
+import { lstatSync, readdirSync, realpathSync } from "node:fs";
 import * as path from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "@oh-my-pi/pi-coding-agent";
 import { matchesKey, truncateToWidth, type Component } from "@oh-my-pi/pi-tui";
@@ -126,35 +126,36 @@ export default function beadsExtension(pi: ExtensionAPI, options: BeadsOptions =
 			let current = await refresh(ctx);
 			if (!current) throw new Error("Project changed during inspection; run /beads init again.");
 			if (!current.integrationProject || current.errors.length || (current.workspaceState !== "ready" && current.workspaceState !== "uninitialized")) throw new Error(formatBeadsStatus(current));
+			const project = realpathSync(current.integrationProject);
+			let stealth = false;
+			let installHooks = false;
+			if (current.workspaceState === "uninitialized") {
+				const ensureEmpty = (): void => {
+					if (current!.workspacePath || existsForInitialization(path.join(project, ".beads"))) throw new Error("Existing Beads data is not usable. Inspect or repair it with bd before initialization; no data will be replaced.");
+					if (process.env.BEADS_DIR || process.env.BEADS_DB) throw new Error("The native BEADS_DIR/BEADS_DB override has no usable workspace. Repair or unset the override before creating data in the Integration Project; the plugin will not redirect or ignore it.");
+				};
+				ensureEmpty();
+				if (!ctx.hasUI || typeof ctx.ui.select !== "function") throw new Error("Run /beads init in interactive OMP to choose mode and approve hooks, or use bd init directly with --skip-agents and --skip-hooks.");
+				const modes = ["Standard/team", "Stealth (personal, no Git hooks)"];
+				const mode = await ctx.ui.select(`Initialize Beads: ${project}`, modes);
+				if (mode === undefined) { ctx.ui.notify("Beads initialization cancelled; no files changed.", "info"); return; }
+				if (!modes.includes(mode)) throw new Error("Unknown Beads initialization mode; no files changed.");
+				stealth = mode === modes[1];
+				const hookChoices = stealth ? ["No hooks (stealth mode)"] : ["No hooks", "Install supported Git hooks"];
+				const hooks = await ctx.ui.select("Beads Git hooks (Esc cancels initialization)", hookChoices);
+				if (hooks === undefined) { ctx.ui.notify("Beads initialization cancelled; no files changed.", "info"); return; }
+				if (!hookChoices.includes(hooks)) throw new Error("Unknown Git-hook choice; no files changed.");
+				installHooks = !stealth && hooks === hookChoices[1];
+				if (ctx.cwd !== cwd) throw new Error("Project changed during initialization choices; run /beads init again.");
+				current = await refresh(ctx);
+				if (!current || !current.integrationProject || realpathSync(current.integrationProject) !== project || current.errors.length || (current.workspaceState !== "ready" && current.workspaceState !== "uninitialized")) throw new Error(current ? formatBeadsStatus(current) : "Project changed during inspection; run /beads init again.");
+				if (current.workspaceState === "uninitialized") ensureEmpty();
+			}
 			if (current.workspaceState === "ready") {
 				ctx.ui.notify(`Reusing existing Beads workspace; data and hooks unchanged.\n${formatBeadsStatus(current)}`, "info");
 				return;
 			}
-			const project = current.integrationProject;
-			const ensureEmpty = (): void => {
-				if (current!.workspacePath || existsForInitialization(path.join(project, ".beads"))) throw new Error("Existing Beads data is not usable. Inspect or repair it with bd before initialization; no data will be replaced.");
-				if (process.env.BEADS_DIR || process.env.BEADS_DB) throw new Error("The native BEADS_DIR/BEADS_DB override has no usable workspace. Repair or unset the override before creating data in the Integration Project; the plugin will not redirect or ignore it.");
-			};
-			ensureEmpty();
-			if (!ctx.hasUI || typeof ctx.ui.select !== "function") throw new Error("Run /beads init in interactive OMP to choose mode and approve hooks, or use bd init directly with --skip-agents and --skip-hooks.");
-			const modes = ["Standard/team", "Stealth (personal, no Git hooks)"];
-			const mode = await ctx.ui.select(`Initialize Beads: ${project}`, modes);
-			if (mode === undefined) { ctx.ui.notify("Beads initialization cancelled; no files changed.", "info"); return; }
-			if (!modes.includes(mode)) throw new Error("Unknown Beads initialization mode; no files changed.");
-			const stealth = mode === modes[1];
-			const hookChoices = stealth ? ["No hooks (stealth mode)"] : ["No hooks", "Install supported Git hooks"];
-			const hooks = await ctx.ui.select("Beads Git hooks (Esc cancels initialization)", hookChoices);
-			if (hooks === undefined) { ctx.ui.notify("Beads initialization cancelled; no files changed.", "info"); return; }
-			if (!hookChoices.includes(hooks)) throw new Error("Unknown Git-hook choice; no files changed.");
-			if (ctx.cwd !== cwd) throw new Error("Project changed during initialization choices; run /beads init again.");
-			current = await refresh(ctx);
-			if (!current || current.integrationProject !== project || current.errors.length || (current.workspaceState !== "ready" && current.workspaceState !== "uninitialized")) throw new Error(current ? formatBeadsStatus(current) : "Project changed during inspection; run /beads init again.");
-			if (current.workspaceState === "ready") {
-				ctx.ui.notify(`Reusing existing Beads workspace; data and hooks unchanged.\n${formatBeadsStatus(current)}`, "info");
-				return;
-			}
-			ensureEmpty();
-			const git = await pi.exec("git", ["rev-parse", "--is-inside-work-tree"], { cwd: project, timeout: 5000 });
+			const git = await pi.exec("env", ["LC_ALL=C", "LANG=C", "git", "rev-parse", "--is-inside-work-tree"], { cwd: project, timeout: 5000 });
 			const outsideGit = git.code === 128 && /^fatal: not a git repository(?: |\r?\n|$)/u.test(git.stderr.trim());
 			if (git.code !== 0 && !outsideGit) throw new Error(`Cannot inspect Git before Beads initialization: ${git.stderr || git.stdout}`);
 			let linkedWorktree = false;
@@ -186,14 +187,14 @@ export default function beadsExtension(pi: ExtensionAPI, options: BeadsOptions =
 			}
 			const args = ["init", "--skip-agents", "--non-interactive", "--sandbox", "--init-if-missing"];
 			if (stealth) args.push("--stealth");
-			if (stealth || hooks === hookChoices[0]) args.push("--skip-hooks");
+			if (!installHooks) args.push("--skip-hooks");
 			if (ctx.cwd !== cwd) throw new Error("Project changed before initialization; run /beads init again.");
 			// Native bd defaults new worktree data to the main tree; scope only this new-init child to the Integration Project.
 			const result = await pi.exec(linkedWorktree ? "env" : "bd", linkedWorktree ? [`BEADS_DIR=${path.join(project, ".beads")}`, "bd", ...args] : args, { cwd: project, timeout: 120_000 });
 			const after = await refresh(ctx);
 			const diagnostic = [result.stdout, result.stderr].filter(text => text.trim()).join("\n").trim();
 			if (result.code !== 0) throw new Error(`bd init refused or failed (exit ${result.code}). ${diagnostic}\n${after ? formatBeadsStatus(after) : "Project changed; run /beads status."}`);
-			if (!after || after.integrationProject !== project || after.workspaceState !== "ready" || after.errors.length) throw new Error(`bd init completed, but resulting workspace is not ready. ${diagnostic}\n${after ? formatBeadsStatus(after) : "Project changed; run /beads status."}`);
+			if (!after || !after.integrationProject || realpathSync(after.integrationProject) !== project || after.workspaceState !== "ready" || after.errors.length) throw new Error(`bd init completed, but resulting workspace is not ready. ${diagnostic}\n${after ? formatBeadsStatus(after) : "Project changed; run /beads status."}`);
 			ctx.ui.notify(`Beads workspace initialized; project policy unchanged. Issue operations still require an explicit request.\n${formatBeadsStatus(after)}${result.stderr.trim() ? `\nNative diagnostics:\n${result.stderr.trim()}` : ""}`, result.stderr.trim() ? "warning" : "info");
 		} catch (error) {
 			await refresh(ctx);

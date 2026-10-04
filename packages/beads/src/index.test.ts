@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from "bun:test";
-import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -26,6 +26,15 @@ function fixture() {
 	const workspace = path.join(root, "redirected", ".beads");
 	mkdirSync(project);
 	mkdirSync(workspace, { recursive: true });
+	const gitEnvironment = {
+		...Object.fromEntries(Object.entries(process.env).filter(([name]) => !name.startsWith("GIT_"))),
+		HOME: path.join(root, "git-home"), PI_CODING_AGENT_DIR: path.join(root, "git-agent"), PI_SESSION_DIR: path.join(root, "git-sessions"),
+		XDG_CONFIG_HOME: path.join(root, "git-config"), XDG_CACHE_HOME: path.join(root, "git-cache"), XDG_DATA_HOME: path.join(root, "git-data"),
+		TMPDIR: path.join(root, "git-tmp"), BUN_INSTALL_CACHE_DIR: path.join(root, "git-bun-cache"),
+		GIT_CONFIG_GLOBAL: path.join(root, "git-global"), GIT_CONFIG_SYSTEM: path.join(root, "git-system"), GIT_CONFIG_NOSYSTEM: "1", LC_ALL: "C", LANG: "C",
+	};
+	for (const directory of [gitEnvironment.HOME, gitEnvironment.PI_CODING_AGENT_DIR, gitEnvironment.PI_SESSION_DIR, gitEnvironment.XDG_CONFIG_HOME, gitEnvironment.XDG_CACHE_HOME, gitEnvironment.XDG_DATA_HOME, gitEnvironment.TMPDIR, gitEnvironment.BUN_INSTALL_CACHE_DIR]) mkdirSync(directory, { recursive: true });
+	const git = (...args: string[]) => execFileSync("git", args, { cwd: project, encoding: "utf8", env: gitEnvironment });
 	const handlers = new Map<string, Hook>();
 	const commands = new Map<string, Command>();
 	const footer = new Map<string, string | undefined>();
@@ -49,7 +58,13 @@ function fixture() {
 		on: (name: string, handler: Hook) => { handlers.set(name, handler); },
 		registerCommand: (name: string, command: Command) => { commands.set(name, command); },
 		events,
-		exec: (command: string, args: readonly string[], options: { cwd: string }) => execute(command, args, options.cwd),
+		exec: (command: string, args: readonly string[], options: { cwd: string }) => {
+			if (command === "env") {
+				const executable = args.findIndex(value => value === "git" || value === "bd");
+				return execute(args[executable]!, args.slice(executable + 1), options.cwd);
+			}
+			return execute(command, args, options.cwd);
+		},
 	} as unknown as ExtensionAPI;
 	let overlay: Component | undefined;
 	let select = async (_title: string, _options: readonly string[]): Promise<string | undefined> => undefined;
@@ -77,7 +92,7 @@ function fixture() {
 		writeFileSync(path.join(target, ".omp", "codesook-omp.json"), JSON.stringify(value));
 	};
 	return {
-		root, project, workspace, context, events, footer, notifications, hook, settings,
+		root, project, workspace, context, events, footer, notifications, hook, settings, git,
 		command: (args: string) => commands.get("beads")!.handler(args, context),
 		setExecute: (replacement: typeof execute) => { execute = replacement; },
 		setSelect: (replacement: typeof select) => { select = replacement; },
@@ -261,7 +276,8 @@ test("missing Git keeps global visibility while refusing guessed project policy 
 		mkdirSync(cwd, { recursive: true });
 		mkdirSync(emptyPath);
 		const childEnvironment = {
-			...process.env, HOME: home, PI_CODING_AGENT_DIR: agentDirectory, PI_SESSION_DIR: path.join(root, "sessions"),
+			...Object.fromEntries(Object.entries(process.env).filter(([name]) => !name.startsWith("GIT_"))),
+			HOME: home, PI_CODING_AGENT_DIR: agentDirectory, PI_SESSION_DIR: path.join(root, "sessions"),
 			XDG_CONFIG_HOME: path.join(home, ".config"), XDG_CACHE_HOME: path.join(root, "cache"), XDG_DATA_HOME: path.join(root, "data"),
 			TMPDIR: path.join(root, "tmp"), BUN_INSTALL_CACHE_DIR: path.join(root, "bun-cache"),
 			GIT_CONFIG_GLOBAL: path.join(home, ".gitconfig"), GIT_CONFIG_SYSTEM: path.join(root, "git-system"), GIT_CONFIG_NOSYSTEM: "1",
@@ -405,7 +421,7 @@ test("cancelling either initialization choice preserves policy, hooks, agent fil
 test("standard initialization refuses native Git auto-commit hazards without changing user index or files", async () => {
 	for (const unsafe of ["staged", "dirty-agent", "exclusion-shaped-markdown"]) {
 		const f = fixture();
-		const git = (...args: string[]) => execFileSync("git", args, { cwd: f.project, encoding: "utf8" });
+		const git = f.git;
 		git("init", "--quiet");
 		git("config", "user.name", "Test");
 		git("config", "user.email", "test@example.invalid");
@@ -436,6 +452,33 @@ test("standard initialization refuses native Git auto-commit hazards without cha
 		expect(readFileSync(userFile, "utf8")).toBe("user changes must not be committed");
 		if (unsafe === "exclusion-shaped-markdown") expect(readFileSync(exclusion, "utf8")).toBe("filename must not exclude real agent changes");
 	}
+});
+
+test("initializing through a directory alias reports the same project ready after native Git creation", async () => {
+	const f = fixture();
+	const alias = path.join(f.root, "project-alias");
+	symlinkSync(f.project, alias, "dir");
+	f.context.cwd = alias;
+	f.settings({ version: 1, display: { beads: { visibility: "always" } }, behavior: { beads: { policy: "off" } }, custom: "preserve" });
+	const policy = path.join(f.project, ".omp", "codesook-omp.json");
+	const before = readFileSync(policy);
+	let initialized = false;
+	f.setSelect(async (_title, choices) => choices[0]);
+	f.setExecute(async (command, args) => {
+		if (command === "git") {
+			try { return { code: 0, stdout: f.git(...args), stderr: "" }; }
+			catch (error) { const failure = error as { status: number; stdout: string; stderr: string }; return { code: failure.status, stdout: String(failure.stdout), stderr: String(failure.stderr) }; }
+		}
+		if (args[0] === "init") { f.git("init", "--quiet"); initialized = true; return { code: 0, stdout: "", stderr: "" }; }
+		if (!initialized) return { code: 1, stderr: "", stdout: '{"error":"no_beads_directory"}' };
+		if (args[0] === "where") return { code: 0, stderr: "", stdout: JSON.stringify({ path: path.join(realpathSync(f.project), ".beads") }) };
+		return { code: 0, stderr: "", stdout: '{"count":0}' };
+	});
+	await f.command("init");
+	expect(f.notifications.at(-1)?.level).toBe("info");
+	expect(f.footer.get("beads")).toBe("Beads: suppressed");
+	expect(readFileSync(policy)).toEqual(before);
+	expect(await f.hook("before_agent_start", ["Repository"])).toBeUndefined();
 });
 
 test("changing project while choosing initialization cannot write either project's data or policy", async () => {
