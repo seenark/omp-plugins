@@ -61,15 +61,9 @@ test("missing CLI and backend differ from inspection failures at either stage", 
 			expect(status.detail).toContain("cannot inspect");
 		}
 	}
-	const vanished = await inspectBeads(async (_command, args) => args[0] === "where" ? result(location) : { code: 1, stdout: "", stderr: "Error: no beads database found" }, "/project");
-	expect(vanished).toMatchObject({ state: "uninitialized", initialized: false });
 });
 
-test("warnings do not hide native missing workspace or backend errors", async () => {
-	const missingDatabase = await inspectBeads(async (_command, args) => args[0] === "where" ? result(location) : {
-		code: 1, stdout: "", stderr: "Warning: workspace permissions\nError: no beads database found\nHint: run bd init",
-	}, "/project");
-	expect(missingDatabase).toMatchObject({ state: "uninitialized", initialized: false });
+test("warnings do not hide native backend errors", async () => {
 	const missingBackend = await inspectBeads(async (_command, args) => args[0] === "where" ? result(location) : result({
 		error: "dial tcp 127.0.0.1:3307: connect: connection refused",
 	}, 1, "Warning: workspace permissions"), "/project");

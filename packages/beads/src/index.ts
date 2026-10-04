@@ -1,3 +1,5 @@
+import { lstatSync, readdirSync } from "node:fs";
+import * as path from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "@oh-my-pi/pi-coding-agent";
 import { matchesKey, truncateToWidth, type Component } from "@oh-my-pi/pi-tui";
 import { connectSharedDisplay, type SharedDisplayPublisher } from "@codesook/omp-shared-display/client";
@@ -8,6 +10,7 @@ import { inspectBeads, type BeadsInspection } from "./status";
 export type BeadsOptions = { globalConfigPath?: string };
 export type BeadsStatus = Omit<BeadsInspection, "state"> & {
 	state: BeadsInspection["state"] | "suppressed";
+	workspaceState: BeadsInspection["state"];
 	integrationProject?: string;
 	operatingDirectory?: string;
 	policy?: IntegrationPolicy;
@@ -30,7 +33,14 @@ export function formatBeadsStatus(status: BeadsStatus): string {
 	].join("\n");
 }
 
-/** On-demand guidance only: no initialization, issue operations or tool registration. */
+function existsForInitialization(file: string): boolean {
+	try { lstatSync(file); return true; } catch (error) {
+		if (isRecord(error) && error.code === "ENOENT") return false;
+		throw error;
+	}
+}
+
+/** On-demand guidance and explicit initialization; no issue operations or tool registration. */
 export default function beadsExtension(pi: ExtensionAPI, options: BeadsOptions = {}): void {
 	let status: BeadsStatus | undefined;
 	let activeContext: ExtensionContext | undefined;
@@ -60,6 +70,7 @@ export default function beadsExtension(pi: ExtensionAPI, options: BeadsOptions =
 			if (version !== refreshVersion || stopped || ctx.cwd !== cwd) return undefined;
 			status = {
 				...inspected,
+				workspaceState: inspected.state,
 				state: settings.errors.length > 0 ? "error" : settings.policy === "off" ? "suppressed" : inspected.state,
 				integrationProject,
 				policy: settings.policy,
@@ -72,7 +83,7 @@ export default function beadsExtension(pi: ExtensionAPI, options: BeadsOptions =
 			const global = readCodesookOmpConfig(options.globalConfigPath);
 			const display = global.valid && isRecord(global.value.display.beads) ? global.value.display.beads : undefined;
 			const visibility = display?.visibility;
-			status = { state: "error", initialized: false, operatingDirectory: cwd, policySource: "unresolved", visibility: visibility === "always" || visibility === "never" ? visibility : "ready", errors: [], detail: error instanceof Error ? error.message : String(error) };
+			status = { state: "error", workspaceState: "error", initialized: false, operatingDirectory: cwd, policySource: "unresolved", visibility: visibility === "always" || visibility === "never" ? visibility : "ready", errors: [], detail: error instanceof Error ? error.message : String(error) };
 		}
 		syncDisplay();
 		return status;
@@ -109,14 +120,95 @@ export default function beadsExtension(pi: ExtensionAPI, options: BeadsOptions =
 			return component;
 		}, { overlay: true });
 	};
+	const initialize = async (ctx: ExtensionContext): Promise<void> => {
+		const cwd = ctx.cwd;
+		try {
+			let current = await refresh(ctx);
+			if (!current) throw new Error("Project changed during inspection; run /beads init again.");
+			if (!current.integrationProject || current.errors.length || (current.workspaceState !== "ready" && current.workspaceState !== "uninitialized")) throw new Error(formatBeadsStatus(current));
+			if (current.workspaceState === "ready") {
+				ctx.ui.notify(`Reusing existing Beads workspace; data and hooks unchanged.\n${formatBeadsStatus(current)}`, "info");
+				return;
+			}
+			const project = current.integrationProject;
+			const ensureEmpty = (): void => {
+				if (current!.workspacePath || existsForInitialization(path.join(project, ".beads"))) throw new Error("Existing Beads data is not usable. Inspect or repair it with bd before initialization; no data will be replaced.");
+				if (process.env.BEADS_DIR || process.env.BEADS_DB) throw new Error("The native BEADS_DIR/BEADS_DB override has no usable workspace. Repair or unset the override before creating data in the Integration Project; the plugin will not redirect or ignore it.");
+			};
+			ensureEmpty();
+			if (!ctx.hasUI || typeof ctx.ui.select !== "function") throw new Error("Run /beads init in interactive OMP to choose mode and approve hooks, or use bd init directly with --skip-agents and --skip-hooks.");
+			const modes = ["Standard/team", "Stealth (personal, no Git hooks)"];
+			const mode = await ctx.ui.select(`Initialize Beads: ${project}`, modes);
+			if (mode === undefined) { ctx.ui.notify("Beads initialization cancelled; no files changed.", "info"); return; }
+			if (!modes.includes(mode)) throw new Error("Unknown Beads initialization mode; no files changed.");
+			const stealth = mode === modes[1];
+			const hookChoices = stealth ? ["No hooks (stealth mode)"] : ["No hooks", "Install supported Git hooks"];
+			const hooks = await ctx.ui.select("Beads Git hooks (Esc cancels initialization)", hookChoices);
+			if (hooks === undefined) { ctx.ui.notify("Beads initialization cancelled; no files changed.", "info"); return; }
+			if (!hookChoices.includes(hooks)) throw new Error("Unknown Git-hook choice; no files changed.");
+			if (ctx.cwd !== cwd) throw new Error("Project changed during initialization choices; run /beads init again.");
+			current = await refresh(ctx);
+			if (!current || current.integrationProject !== project || current.errors.length || (current.workspaceState !== "ready" && current.workspaceState !== "uninitialized")) throw new Error(current ? formatBeadsStatus(current) : "Project changed during inspection; run /beads init again.");
+			if (current.workspaceState === "ready") {
+				ctx.ui.notify(`Reusing existing Beads workspace; data and hooks unchanged.\n${formatBeadsStatus(current)}`, "info");
+				return;
+			}
+			ensureEmpty();
+			const git = await pi.exec("git", ["rev-parse", "--is-inside-work-tree"], { cwd: project, timeout: 5000 });
+			const outsideGit = git.code === 128 && /^fatal: not a git repository(?: |\r?\n|$)/u.test(git.stderr.trim());
+			if (git.code !== 0 && !outsideGit) throw new Error(`Cannot inspect Git before Beads initialization: ${git.stderr || git.stdout}`);
+			let linkedWorktree = false;
+			if (!outsideGit) {
+				const [directory, common] = await Promise.all([
+					pi.exec("git", ["rev-parse", "--absolute-git-dir"], { cwd: project, timeout: 5000 }),
+					pi.exec("git", ["rev-parse", "--path-format=absolute", "--git-common-dir"], { cwd: project, timeout: 5000 }),
+				]);
+				const gitDirectory = directory.stdout.replace(/\r?\n$/u, "");
+				const commonDirectory = common.stdout.replace(/\r?\n$/u, "");
+				if (directory.code !== 0 || common.code !== 0 || !path.isAbsolute(gitDirectory) || !path.isAbsolute(commonDirectory)) throw new Error(`Cannot inspect native Git worktree scope: ${directory.stderr || common.stderr || "Git did not return absolute directories."}`);
+				linkedWorktree = gitDirectory !== commonDirectory;
+			}
+			if (!stealth) {
+				// bd 1.3.1 auto-stages setup files even with --skip-agents, then commits the whole index.
+				// ponytail: guard root Markdown because native agents.file can come from global config; narrow when bd exposes a config query without a database.
+				const setupPaths = [".claude/settings.json", ".agents", ".codex", ".cursor", ".gitignore"];
+				const markdown = readdirSync(project).filter(file => /\.md$/iu.test(file));
+				if (outsideGit) {
+					if ([...setupPaths, ...markdown].some(file => existsForInitialization(path.join(project, file)))) throw new Error("Native bd init would commit existing setup or Markdown files when creating Git. Save these files in Git first, or choose stealth after initializing Git. No files changed.");
+				} else {
+					const staged = await pi.exec("git", ["--no-optional-locks", "diff", "--cached", "--name-only", "-z"], { cwd: project, timeout: 5000 });
+					if (staged.code !== 0) throw new Error(`Cannot inspect staged files: ${staged.stderr || staged.stdout}`);
+					if (staged.stdout) throw new Error("Native bd init would commit your staged files. Commit or unstage them first, or choose stealth. No files changed.");
+					const dirty = await pi.exec("git", ["--literal-pathspecs", "--no-optional-locks", "status", "--porcelain=v1", "--untracked-files=all", "-z", "--", ...setupPaths, ...markdown], { cwd: project, timeout: 5000 });
+					if (dirty.code !== 0) throw new Error(`Cannot inspect files native bd init may commit: ${dirty.stderr || dirty.stdout}`);
+					if (dirty.stdout) throw new Error("Native bd init may stage and commit existing setup or root Markdown changes even with --skip-agents. Commit these files first, or choose stealth. No files changed.");
+				}
+			}
+			const args = ["init", "--skip-agents", "--non-interactive", "--sandbox", "--init-if-missing"];
+			if (stealth) args.push("--stealth");
+			if (stealth || hooks === hookChoices[0]) args.push("--skip-hooks");
+			if (ctx.cwd !== cwd) throw new Error("Project changed before initialization; run /beads init again.");
+			// Native bd defaults new worktree data to the main tree; scope only this new-init child to the Integration Project.
+			const result = await pi.exec(linkedWorktree ? "env" : "bd", linkedWorktree ? [`BEADS_DIR=${path.join(project, ".beads")}`, "bd", ...args] : args, { cwd: project, timeout: 120_000 });
+			const after = await refresh(ctx);
+			const diagnostic = [result.stdout, result.stderr].filter(text => text.trim()).join("\n").trim();
+			if (result.code !== 0) throw new Error(`bd init refused or failed (exit ${result.code}). ${diagnostic}\n${after ? formatBeadsStatus(after) : "Project changed; run /beads status."}`);
+			if (!after || after.integrationProject !== project || after.workspaceState !== "ready" || after.errors.length) throw new Error(`bd init completed, but resulting workspace is not ready. ${diagnostic}\n${after ? formatBeadsStatus(after) : "Project changed; run /beads status."}`);
+			ctx.ui.notify(`Beads workspace initialized; project policy unchanged. Issue operations still require an explicit request.\n${formatBeadsStatus(after)}${result.stderr.trim() ? `\nNative diagnostics:\n${result.stderr.trim()}` : ""}`, result.stderr.trim() ? "warning" : "info");
+		} catch (error) {
+			await refresh(ctx);
+			ctx.ui.notify(error instanceof Error ? error.message : String(error), "error");
+		}
+	};
 	pi.registerCommand("beads", {
-		description: "Inspect Beads integration or set project guidance policy: status|auto|off",
+		description: "Initialize Beads, inspect integration or set project guidance policy: init|status|auto|off",
 		handler: async (args, ctx) => {
 			const operation = args.trim().toLowerCase() || "status";
 			if (operation === "status") { await showStatus(ctx); return; }
+			if (operation === "init") { await initialize(ctx); return; }
 			if (operation !== "auto" && operation !== "off") {
 				await refresh(ctx);
-				ctx.ui.notify("Usage: /beads [status|auto|off]. Initialize explicitly with the bd CLI; this plugin does not initialize projects.", "warning");
+				ctx.ui.notify("Usage: /beads [init|status|auto|off].", "warning");
 				return;
 			}
 			try {
