@@ -1,6 +1,6 @@
 # CodeGraph integration for OMP
 
-`@codesook/omp-codegraph` detects existing CodeGraph project data and adds runtime exploration guidance. It works independently of the root settings extension and Shared Display host.
+`@codesook/omp-codegraph` detects existing CodeGraph project data, supports explicit native initialization, and adds runtime exploration guidance. It works independently of the root settings extension and Shared Display host.
 
 ## Installation
 
@@ -23,15 +23,30 @@ Requires OMP 18.3.1 or newer and an installed `codegraph` CLI. Configure CodeGra
 }
 ```
 
-The configured exploration MCP tool must be active, not merely listed. The plugin does not install CodeGraph, initialize or index projects, configure MCP, register duplicate tools, or write repository agent instructions. Initialize a project explicitly with the CodeGraph CLI if needed.
+The configured exploration MCP tool must be active, not merely listed. The plugin does not install CodeGraph or missing prerequisites, configure MCP, run the agent installer, register duplicate tools, or write repository agent instructions. Loading the plugin and normal detection never initialize projects.
 
 ## Commands
 
 - `/codegraph` or `/codegraph status`: read-only status overlay, including the Integration Project, native Tool Workspace, data location, effective policy, and prerequisites. Enter/Esc closes the overlay.
+- `/codegraph init`: explicitly prepare native project data and its initial graph, or reuse an existing native Tool Workspace without rebuilding it. Initialization preserves project policy.
 - `/codegraph auto`: persist project permission for automatic guidance when ready.
 - `/codegraph off`: persist project suppression of this plugin's guidance.
 
-There is no plugin initializer in this package. Policy commands do not change plugin lifecycle, MCP activation, repository instructions, or tool data. Off affects only this plugin's guidance; other instructions can still request CodeGraph.
+Policy commands do not change plugin lifecycle, MCP activation, repository instructions, or tool data. Off affects only this plugin's guidance; other instructions can still request CodeGraph.
+
+### Explicit initialization
+
+`/codegraph init` inspects CodeGraph's native workspace selection first. An applicable existing Tool Workspace is reused, even when an ancestor or `CODEGRAPH_DIR` places it outside the Integration Project. No existing workspace is reinitialized, deleted, or rebuilt merely to initialize the integration.
+
+Before creating data in a different Integration Project scope, the plugin inspects that target with the native CLI too. This prevents initialization from a Git subdirectory from rebuilding partial database data at the working-tree root. Valid data found at the target is reused.
+
+When no initialized workspace applies, the plugin runs native `codegraph init <Integration Project> --yes`. Native initialization builds the initial graph; there is no second `index` call or forced rebuild. The CLI retains its target-safety checks. The plugin never passes force flags, repairs or removes partial data, installs prerequisites, or performs Git commits, pushes, or remote synchronization.
+
+If native inspection reports uninitialized data but the resolved workspace already contains a `codegraph.db` entry, initialization refuses rather than allowing native in-place rebuilding of a partial or schemaless database. This also preserves dangling database symlinks. Errors inspecting the database entry fail closed; inspect permissions and existing data manually. The plugin does not parse, migrate, repair, or delete the database.
+
+Initialization never writes global or project configuration. An off project remains a Suppressed Integration and the result explains that plugin runtime instructions remain suppressed. Missing or inactive MCP is not an indexing failure: usable data is reported as initialized but not ready. Detailed status also reports the underlying project inspection independently of policy suppression.
+
+The command refreshes status before and after the operation. Invalid configuration or failed inspection blocks initialization with an actionable error. Native refusals and initialization failures retain their error output; inspect the existing data or target permissions with the native CLI before retrying. An exit-success result without usable data is not reported as verified initialization. Configure and enable the CodeGraph MCP exploration tool yourself when project data is initialized but not ready.
 
 ## Scope and configuration
 
@@ -60,6 +75,8 @@ Permitted ready integrations append guidance to existing system-prompt entries. 
 - `ready`: show only permitted ready integrations.
 - `always`: show the current state, including suppression, uninitialized data, missing prerequisites, and errors.
 - `never`: hide persistent status without disabling guidance or status inspection.
+
+When project resolution or runtime inspection fails unexpectedly, status remains an error and guidance is disabled. The error display uses only valid global visibility; invalid or unreadable global settings fall back to `ready`. Detailed status labels an unresolved Integration Project with its operating directory instead of claiming that project resolution succeeded. Configuration remains unchanged.
 
 An enabled Shared Display host with a UI session receives the status segment. Otherwise, CodeGraph uses OMP's native footer. It never uses both at once. Depending on the shared client/policy package does not load the host extension.
 

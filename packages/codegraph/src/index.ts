@@ -1,13 +1,16 @@
+import { lstatSync } from "node:fs";
+import * as path from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "@oh-my-pi/pi-coding-agent";
 import { matchesKey, truncateToWidth, type Component } from "@oh-my-pi/pi-tui";
 import { connectSharedDisplay, type SharedDisplayPublisher } from "@codesook/omp-shared-display/client";
-import { CODESOOK_OMP_CONFIG_CHANGED } from "@codesook/omp-shared-display/config-store";
+import { CODESOOK_OMP_CONFIG_CHANGED, isRecord, readCodesookOmpConfig } from "@codesook/omp-shared-display/config-store";
 import { readIntegrationSettings, resolveIntegrationProject, setProjectIntegrationPolicy, type IntegrationPolicy, type IntegrationVisibility } from "@codesook/omp-shared-display/project-integrations";
 import { inspectCodeGraph, type CodeGraphInspection } from "./status";
 
 export type CodeGraphOptions = { globalConfigPath?: string };
 export type CodeGraphStatus = Omit<CodeGraphInspection, "state"> & {
 	state: CodeGraphInspection["state"] | "suppressed";
+	inspectionState: CodeGraphInspection["state"];
 	integrationProject: string;
 	policy?: IntegrationPolicy;
 	policySource: string;
@@ -15,13 +18,25 @@ export type CodeGraphStatus = Omit<CodeGraphInspection, "state"> & {
 	errors: readonly string[];
 };
 
+function ensureNoExistingDatabase(indexPath: string): void {
+	const database = path.join(indexPath, "codegraph.db");
+	try {
+		lstatSync(database);
+	} catch (error) {
+		if (isRecord(error) && error.code === "ENOENT") return;
+		throw error;
+	}
+	throw new Error(`Existing native database ${database} is not initialized. Inspect the partial or invalid setup manually; initialization will not rebuild it in place`);
+}
+
 export function formatCodeGraphStatus(status: CodeGraphStatus): string {
 	return [
 		`CodeGraph: ${status.state}`,
-		`Integration Project: ${status.integrationProject}`,
+		status.policySource === "unresolved" ? `Integration Project: unresolved (operating directory: ${status.integrationProject})` : `Integration Project: ${status.integrationProject}`,
 		`Tool Workspace: ${status.projectPath ?? "not resolved"}`,
 		`Project data: ${status.indexPath ?? "not resolved"}`,
-		`Policy: ${status.policy ?? "invalid (guidance disabled)"} (${status.policySource})`,
+		`Project inspection: ${status.inspectionState}`,
+		`Policy: ${status.policy ?? (status.policySource === "unresolved" ? "unresolved (guidance disabled)" : "invalid (guidance disabled)")} (${status.policySource})`,
 		`Visibility: ${status.visibility}`,
 		`Exploration MCP tool: ${status.toolName ?? (status.projectPath ? "missing or inactive" : "not assessed")}`,
 		status.detail,
@@ -30,7 +45,7 @@ export function formatCodeGraphStatus(status: CodeGraphStatus): string {
 	].join("\n");
 }
 
-/** Runtime guidance only: no initialization, tool registration or tool activation. */
+/** Runtime guidance and explicit initialization; never registers or activates tools. */
 export default function codegraphExtension(pi: ExtensionAPI, options: CodeGraphOptions = {}): void {
 	let status: CodeGraphStatus | undefined;
 	let activeContext: ExtensionContext | undefined;
@@ -59,6 +74,7 @@ export default function codegraphExtension(pi: ExtensionAPI, options: CodeGraphO
 			status = {
 				...inspected,
 				state: settings.errors.length > 0 ? "error" : settings.policy === "off" ? "suppressed" : inspected.state,
+				inspectionState: inspected.state,
 				integrationProject,
 				policy: settings.policy,
 				policySource: settings.policySource,
@@ -67,7 +83,9 @@ export default function codegraphExtension(pi: ExtensionAPI, options: CodeGraphO
 			};
 		} catch (error) {
 			if (version !== refreshVersion || stopped) return undefined;
-			status = { state: "error", initialized: false, integrationProject: ctx.cwd, policySource: "unresolved", visibility: "ready", errors: [], detail: error instanceof Error ? error.message : String(error) };
+			const global = readCodesookOmpConfig(options.globalConfigPath);
+			const visibility = global.valid && isRecord(global.value.display.codegraph) ? global.value.display.codegraph.visibility : undefined;
+			status = { state: "error", inspectionState: "error", initialized: false, integrationProject: ctx.cwd, policySource: "unresolved", visibility: visibility === "always" || visibility === "never" ? visibility : "ready", errors: [], detail: error instanceof Error ? error.message : String(error) };
 		}
 		syncDisplay();
 		return status;
@@ -105,14 +123,60 @@ export default function codegraphExtension(pi: ExtensionAPI, options: CodeGraphO
 			return component;
 		}, { overlay: true });
 	};
+	const initialize = async (ctx: ExtensionContext): Promise<void> => {
+		const before = await refresh(ctx);
+		if (!before) return;
+		let result: string;
+		let failed = false;
+		if (before.errors.length || before.inspectionState === "error" || !before.projectPath || !before.indexPath) {
+			result = "CodeGraph initialization was not attempted. Resolve the inspection or configuration error below, then run /codegraph init again.";
+			failed = true;
+		} else if (before.initialized) {
+			result = `Reused existing CodeGraph Tool Workspace: ${before.projectPath}. No data was reinitialized or rebuilt.`;
+		} else {
+			try {
+				ensureNoExistingDatabase(before.indexPath);
+				const target = before.integrationProject === before.projectPath ? before : await inspectCodeGraph(
+					(command, args, execOptions) => pi.exec(command, args, execOptions), before.integrationProject, pi.getAllTools(), pi.getActiveTools(),
+				);
+				if (target.state === "error" || !target.indexPath || !target.projectPath) throw new Error(target.detail);
+				if (target.initialized) {
+					result = `Reused existing CodeGraph Tool Workspace: ${target.projectPath}. No data was reinitialized or rebuilt.`;
+				} else {
+					ensureNoExistingDatabase(target.indexPath);
+					const initialized = await pi.exec("codegraph", ["init", before.integrationProject, "--yes"], { cwd: before.integrationProject });
+					failed = initialized.code !== 0;
+					result = failed
+						? `CodeGraph initialization failed (exit ${initialized.code}): ${(initialized.stderr || initialized.stdout).trim()}\nResolve the native CLI refusal or error before retrying. No safeguards were bypassed.`
+						: "Native CodeGraph initialization returned exit 0.";
+				}
+			} catch (error) {
+				failed = true;
+				result = `CodeGraph initialization failed: ${error instanceof Error ? error.message : String(error)}. Check the CLI, target permissions, and native CodeGraph setup before retrying.`;
+			}
+		}
+		const after = await refresh(ctx);
+		if (!after) return;
+		if (!failed && (!after.initialized || after.inspectionState === "error")) {
+			failed = true;
+			result += "\nInitialization and initial graph completion could not be verified. Inspect the project with the native CLI before retrying.";
+		}
+		if (!failed && after.initialized) result += "\nProject-data inspection verified usable initialized data.";
+		if (!failed && after.initialized && after.inspectionState !== "ready") {
+			result += "\nProject data is initialized, but the integration is not ready.";
+		}
+		if (after.policy === "off") result += "\nPolicy remains off; plugin runtime instructions remain suppressed.";
+		ctx.ui.notify(`${result}\n\n${formatCodeGraphStatus(after)}`, failed || after.state === "error" || after.inspectionState === "error" ? "error" : after.inspectionState === "missing-prerequisite" ? "warning" : "info");
+	};
 	pi.registerCommand("codegraph", {
-		description: "Inspect CodeGraph integration or set project guidance policy: status|auto|off",
+		description: "Initialize or inspect CodeGraph integration, or set project guidance policy: init|status|auto|off",
 		handler: async (args, ctx) => {
 			const operation = args.trim().toLowerCase() || "status";
 			if (operation === "status") { await showStatus(ctx); return; }
+			if (operation === "init") { await initialize(ctx); return; }
 			if (operation !== "auto" && operation !== "off") {
 				await refresh(ctx);
-				ctx.ui.notify("Usage: /codegraph [status|auto|off]. Initialize explicitly with the CodeGraph CLI; this plugin does not initialize projects.", "warning");
+				ctx.ui.notify("Usage: /codegraph [init|status|auto|off]. Initialization preserves project policy and existing tool data.", "warning");
 				return;
 			}
 			try {
