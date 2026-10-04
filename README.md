@@ -73,7 +73,7 @@ bun packages/theme-catppuccin/bin/install.js
 
 Root settings owns persisted configuration. Feature commands own session behavior; CodeGraph and Beads policy commands explicitly write shared project policy. Feature `config` commands and `/shared-display` are removed. Status commands open focused read-only overlays; Enter/Esc closes. `/codesook-omp-plugin init config` creates the v1 global config only when absent and seeds only missing glyph files.
 
-`/codesook-omp-plugin` edits a draft. Shift+Enter applies directly. Bare Enter on Apply asks confirmation. Reload discards draft; Cancel leaves persisted and live state unchanged.
+`/codesook-omp-plugin` edits a draft. Shift+Enter applies directly. Bare Enter on Apply opens confirmation inside the same focused overlay without saving. Enter confirms; Esc declines and returns to the unchanged draft without writes or live-change events. Reload discards draft; Cancel leaves persisted and live state unchanged.
 
 ## Configuration and migration
 
@@ -111,6 +111,8 @@ CodeGraph detects existing native Tool Workspaces without initializing, indexing
 Global defaults use `behavior.codegraph.policy` (`auto`/`off`) and `display.codegraph.visibility` (`ready`/`always`/`never`). Shared project overrides use the same v1 envelope in `<Integration Project>/.omp/codesook-omp.json`; project values win. The nearest Git working tree owns policy, or the operating directory outside Git. Native CodeGraph ancestor discovery and overrides can resolve a different Tool Workspace. Detailed status identifies both.
 
 The unified dialog stages global values and project overrides; inherit removes an override. Invalid policy is reported, preserved, and fails closed. Unknown fields survive writes. Detection, Reload, and Cancel create no project settings; explicit Apply or policy commands may write them, never commit them.
+
+Both integrations fail closed when Git cannot inspect the Integration Project, including missing Git, permission errors, and unsafe repository ownership. Repair the reported Git error before enabling guidance or saving project settings. The operating-directory fallback applies only when Git confirms that the directory is outside a repository; inspection errors never select a child directory as a new policy root.
 
 Permitted ready integrations append CodeGraph-first guidance with an explicit resolved `projectPath`, preserving prior prompt entries and allowing grep/read for missing or stale source. Off suppresses only this plugin's instructions. Visibility defaults to ready; always shows all states, never hides persistent status only. CodeGraph uses Shared Display when its host is active, otherwise the native footer, never both. Refresh runs on startup, before turns, commands, settings changes, and session switches; no idle polling.
 

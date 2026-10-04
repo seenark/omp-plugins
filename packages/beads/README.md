@@ -28,6 +28,8 @@ The package depends on `@codesook/omp-shared-display` 1.2.0 or newer for its cli
 
 The **Integration Project** is the nearest Git working tree, or the current directory outside Git. It owns shared policy. The **Tool Workspace** is selected by native Beads discovery and may differ: ancestor lookup, environment overrides, redirects, and shared worktree databases remain native CLI behavior. Detailed status identifies both scopes and the database location.
 
+Git must successfully inspect project scope. Missing Git, permission failures, and unsafe ownership produce actionable errors and disable plugin guidance rather than bypassing shared policy. Only Git's confirmed non-repository result permits the current-directory fallback.
+
 Readiness requires the CLI, successful workspace discovery, and successful database access. A `.beads` directory or location result alone is insufficient. Status distinguishes uninitialized workspaces, missing prerequisites, database/inspection/configuration errors, readiness, and policy suppression. External initialization becomes visible on the next refresh without setup or generated project files.
 
 ## Policy and visibility

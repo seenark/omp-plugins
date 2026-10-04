@@ -249,3 +249,64 @@ test("Beads presence follows optional standalone and umbrella lifecycle state in
 	expect(parsePluginList({ npm: [{ name: "omp-plugins", enabledFeatures: ["beads"] }] }).projectFeatures.beads).toBe(true);
 	expect(parsePluginList({ npm: [{ name: "omp-plugins" }] }).projectFeatures.beads).toBe(false);
 });
+
+test("Apply requires a visible confirmation in the settings overlay; Esc retains edits and only explicit Enter saves", async () => {
+	const project = temporary();
+	const global = path.join(project, "global.json");
+	const original = JSON.stringify({ version: 1, custom: "retain", display: { codegraph: { visibility: "never" } }, behavior: { codegraph: { policy: "off" }, beads: { policy: "auto", custom: 42 } } });
+	writeFileSync(global, original);
+	const events: unknown[] = [];
+	const pi = {
+		exec: async () => ({ code: 0, stdout: '{"npm":[]}', stderr: "" }),
+		events: { emit: (_channel: string, value: unknown) => events.push(value) },
+	} as unknown as Parameters<typeof openSettings>[0];
+	const ctx = {
+		cwd: project,
+		hasUI: true,
+		ui: {
+			custom: async (builder: (tui: unknown, theme: unknown, keybindings: unknown, done: () => void) => Component) => {
+				let closed = false;
+				const component = builder({ requestRender() {} }, { fg: (_color: string, value: string) => value, bold: (value: string) => value }, {}, () => { closed = true; });
+				const select = (label: string, occurrence = 1): void => {
+					let found = 0;
+					for (let index = 0; index < 150; index++) {
+						if (component.render(140).join("\n").includes(`> ${label}`) && ++found === occurrence) return;
+						component.handleInput?.("\x1b[B");
+					}
+					throw new Error(`Setting not reachable: ${label}`);
+				};
+				const unchanged = (): void => {
+					expect(closed).toBe(false);
+					expect(readFileSync(global, "utf8")).toBe(original);
+					expect(existsSync(projectIntegrationConfigPath(project))).toBe(false);
+					expect(events).toEqual([]);
+				};
+				select("Global policy", 2);
+				component.handleInput?.("\r");
+				select("Apply");
+				component.handleInput?.("\r");
+				unchanged();
+				const confirmation = component.render(140).join("\n");
+				expect(confirmation).toContain("Enter");
+				expect(confirmation).toContain("Esc");
+				component.handleInput?.("\x1b");
+				unchanged();
+				expect(component.render(140).join("\n")).toContain("> Apply");
+				component.handleInput?.("\r");
+				component.handleInput?.("\x1b[B");
+				expect(component.render(140).join("\n")).toBe(confirmation);
+				unchanged();
+				component.handleInput?.("\r");
+				expect(closed).toBe(true);
+			},
+		},
+	} as unknown as Parameters<typeof openSettings>[1];
+	await openSettings(pi, ctx, global);
+	const saved = JSON.parse(readFileSync(global, "utf8"));
+	expect(saved.custom).toBe("retain");
+	expect(saved.behavior.beads).toEqual({ policy: "off", custom: 42 });
+	expect(saved.behavior.codegraph).toEqual({ policy: "off" });
+	expect(saved.display.codegraph).toEqual({ visibility: "never" });
+	expect(events).toHaveLength(1);
+	expect(existsSync(projectIntegrationConfigPath(project))).toBe(false);
+});

@@ -1292,6 +1292,7 @@ export async function openSettings(pi: ExtensionAPI, ctx: ExtensionContext, conf
 			let list: SettingsList;
 			let closed = false;
 			let textSubmenuOpen = false;
+			let confirmingApply = false;
 			const trackedItems = (): SettingItem[] =>
 				trackTextSubmenus(
 					settingsItems(draft, presence),
@@ -1308,8 +1309,8 @@ export async function openSettings(pi: ExtensionAPI, ctx: ExtensionContext, conf
 				done(undefined);
 			};
 			const refresh = (): void => list.setItems(trackedItems());
-			const apply = async (confirmed: boolean): Promise<void> => {
-				if (closed || !confirmed) return;
+			const apply = async (): Promise<void> => {
+				if (closed) return;
 				const validation = validateDraft(draft);
 				if (validation) {
 					error = validation;
@@ -1346,22 +1347,35 @@ export async function openSettings(pi: ExtensionAPI, ctx: ExtensionContext, conf
 						theme.fg("dim", `Root: ${configPath}`),
 						theme.fg("dim", `Project: ${projectIntegrationConfigPath(projectPath)}`),
 						...(error ? [theme.fg("error", `Error: ${error}`)] : []),
-						...list.render(width),
+						...(confirmingApply ? [
+							"",
+							theme.fg("accent", theme.bold("Apply Codesook OMP settings?")),
+							"Write root and edited project settings; notify loaded extensions.",
+							"",
+							theme.fg("dim", "Enter apply · Esc keep editing"),
+						] : list.render(width)),
 					];
 					return rows;
 				},
 				handleInput(data: string): void {
+					if (confirmingApply) {
+						if (isEscape(data)) {
+							confirmingApply = false;
+							tui.requestRender();
+						} else if (isEnter(data) || isShiftEnter(data)) {
+							confirmingApply = false;
+							void apply();
+						}
+						return;
+					}
 					const selected = list.getSelectedItem();
 					if (isShiftEnter(data) && !textSubmenuOpen) {
-						void apply(true);
+						void apply();
 						return;
 					}
 					if (selected?.id === APPLY_ACTION_ID && isEnter(data)) {
-						if (typeof ctx.ui.confirm === "function") {
-							void ctx.ui.confirm("Apply Codesook OMP settings?", "Write root config atomically and notify loaded extensions of live changes.").then(confirmed => apply(confirmed));
-						} else {
-							void apply(true);
-						}
+						confirmingApply = true;
+						tui.requestRender();
 						return;
 					}
 					if (selected?.id === STATUS_ACTION_ID && isEnter(data)) {
