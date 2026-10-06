@@ -57,6 +57,20 @@ This protocol applies when ending a Beads implementation workflow. It is subordi
 - If a required sync or push is blocked, stop and report the exact command and error.
 <!-- END BEADS INTEGRATION -->
 
+## Agent skills
+
+### Issue tracker
+
+Use Beads (`bd`) for repository issues and specs. Before reading, publishing, or updating tickets, read `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+Use the five default triage labels. Before triaging or applying role labels, read `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Use single-context domain docs at root `CONTEXT.md` and `docs/adr/`. Before exploring the codebase, read `docs/agents/domain.md`.
+
 
 ## Build & Test
 

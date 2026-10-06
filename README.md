@@ -38,6 +38,13 @@ omp plugin install 'github:seenark/omp-plugins[beads]'
 omp plugin install 'github:seenark/omp-plugins[*]'
 ```
 
+### all features
+
+```sh
+omp plugin install 'github:seenark/omp-plugins[headroom,prompt-border-style,shared-display,caveman,codegraph,beads]'
+
+```
+
 Feature selectors are package names, not directories. Keep selectors quoted because `[` and `]` are special in many shells.
 
 Install one package from a checkout:
@@ -147,7 +154,6 @@ Global `behavior.beads.policy` (`auto`/`off`) and `display.beads.visibility` (`r
 Ready, permitted Beads guidance authorizes issue operations only after an explicit user request and within its scope. Availability alone never enables automatic issue tracking for unrelated work. Off removes only plugin guidance, not CLI access, data, or existing repository obligations. Status remains a read-only overlay even with hidden persistent display. Host-active display uses one shared segment; otherwise it uses the native footer. Refresh follows startup, turns, commands, settings changes, and project switches without polling.
 
 See [Beads package documentation](packages/beads/README.md) for independent installation and operation.
-
 
 ## Implemented ownership
 

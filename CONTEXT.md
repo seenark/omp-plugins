@@ -1,6 +1,6 @@
-# OMP Display and Context Rail
+# OMP Plugin Integrations and Display
 
-This context defines the plugin-owned Context Rail and Shared Display surfaces that complement OMP's native context display without changing OMP core.
+This context defines independent project integrations and plugin-owned display surfaces that complement OMP without changing OMP core.
 
 ## Language
 
@@ -137,6 +137,50 @@ _Avoid_: Lifecycle state
 **Plugin Lifecycle State**:
 OMP plugin-manager enablement reported by `omp plugin list --json`; changes apply on next OMP start and are informational in root settings.
 _Avoid_: Live unload, runtime toggle
+
+**Project Integration**:
+An independent association between a project and an external tool such as CodeGraph or Beads. A project may use neither integration, either integration, or both.
+_Avoid_: Plugin lifecycle state, combined integration
+
+**Initialized Integration**:
+A Project Integration whose project data has been initialized by its external tool, whether directly by the user or through an OMP plugin. Initialization does not imply that the tool or its plugin is currently available.
+_Avoid_: Installed tool, ready integration
+
+**Integration Visibility**:
+The user's presentation choice for a Project Integration's status. Visibility is independent of initialization and Plugin Lifecycle State.
+_Avoid_: Integration enablement, tool availability
+
+**Ready Integration**:
+A Project Integration whose project data is usable and whose required tool interface is available. Readiness permits an attempt to use the tool; it does not promise continuously verified external-service health.
+_Avoid_: Folder presence, installed plugin
+
+**Project Integration Policy**:
+The project's choice to allow automatic integration guidance or suppress it. Suppression preserves project data and independent tool access, without changing another integration.
+_Avoid_: Data deletion, plugin unload
+
+**Runtime Integration Instructions**:
+Transient instructions for a permitted, ready Project Integration in an OMP session. They are not shared repository instructions and do not require changes to AGENTS.md.
+_Avoid_: Generated agent file, persistent project instructions
+
+**Shared Project Policy**:
+A Project Integration Policy recorded with the project for collaborators to share. It does not imply that every collaborator has installed the associated OMP plugin.
+_Avoid_: Personal preference, global default
+
+**On-demand Beads Workflow**:
+Issue tracking through Beads for work that the user explicitly asks to track. Availability alone does not authorize the agent to create or modify issues for unrelated work.
+_Avoid_: Automatic issue tracking, mandatory task tracking
+
+**Integration Project**:
+The repository working tree that owns shared Project Integration Policy and new tool initialization. Outside a Git repository, the active directory is the Integration Project.
+_Avoid_: Tool Workspace, every subdirectory
+
+**Tool Workspace**:
+The initialized project data selected by an external tool for an Integration Project. Its location may differ from the Integration Project because tools have their own discovery and redirection rules.
+_Avoid_: Policy root, plugin installation
+
+**Suppressed Integration**:
+A Project Integration whose policy disallows plugin-provided runtime instructions. Suppression leaves independently configured tool access and existing repository instructions unchanged.
+_Avoid_: Tool prohibition, server disconnection
 
 **Read-only Status Overlay**:
 A focused TUI surface that starts with `Loading…`, renders async result or error, closes with Enter/Esc, and never captures prompt input or aborts active work.
