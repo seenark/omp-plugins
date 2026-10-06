@@ -42,6 +42,7 @@ The package manifest exposes `./index.ts` through `omp.extensions`.
 ## Commands
 
 ```text
+/headroom
 /headroom status
 /headroom on
 /headroom off
@@ -51,7 +52,13 @@ The package manifest exposes `./index.ts` through `omp.extensions`.
 /headroom init [config|glyphs|all]
 ```
 
-`/headroom status`, `/headroom health`, and `/headroom stats` open focused read-only overlays. Loading is immediate; Enter/Esc closes. `/headroom on` and `/headroom off` change compression for current session only. `/headroom token` opens an interactive token field, overwrites the configured token file, reloads the client, and checks proxy health immediately. The field is intentionally visible while typing. Never pass the token as a command argument. `/headroom health` checks external proxy reachability. Initialization creates root config sections and state glyph files, asking before overwriting.
+Bare `/headroom` opens a native action menu with English descriptions: status, session compression on/off, health, statistics, token input, and a file-initialization chooser. Closing the root menu leaves plugin state and files unchanged. Without interactive UI, the bare command prints help instead of running an action.
+
+`/headroom status`, `/headroom health`, and `/headroom stats` open focused read-only overlays. Loading is immediate; Enter/Esc closes. `/headroom on` and `/headroom off` change compression for the current session only. `/headroom token` opens a visible input field; saving replaces the configured token file, reloads the client, and checks proxy health immediately. Cancelling input preserves the existing token. Never pass the token as a command argument. `/headroom health` checks external proxy reachability.
+
+The menu's **Choose files to initialize** action opens a second choice for config, glyphs, or both. Cancelling that choice creates nothing. Explicit `/headroom init` still initializes **all** files; `/headroom init config`, `/headroom init glyphs`, and `/headroom init all` keep their direct behavior. Initialization asks before each existing file is overwritten. Declining one file skips only that file; other writes remain, including when a later file fails. Initialization is not transactional and does not install or start a proxy.
+
+Behavior change: bare `/headroom` now offers actions instead of opening status automatically. Use `/headroom status` for direct status access.
 
 Persisted settings are owned by root `/codesook-omp-plugin`; Headroom has no config dialog.
 

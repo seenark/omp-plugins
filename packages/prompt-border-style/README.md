@@ -23,6 +23,12 @@ omp --extension "$PWD/packages/prompt-border-style/src/main.ts"
 ## Commands
 
 ```text
+/prompt-border
+/prompt-border style
+/prompt-border layout
+/prompt-border rail
+/prompt-border glyphs
+/prompt-border glyphs debug
 /prompt-border status
 /prompt-border <style> [layout]
 /prompt-border layout <layout>
@@ -31,7 +37,13 @@ omp --extension "$PWD/packages/prompt-border-style/src/main.ts"
 /prompt-border glyphs debug <frames|demo|on|off>
 ```
 
-`/prompt-border status` opens focused read-only overlay; Loading/result/error is async and Enter/Esc closes. Bare `/prompt-border` settings form and `/prompt-border config` are removed. Root `/codesook-omp-plugin` owns persisted settings; behavior commands remain session-scoped.
+Bare `/prompt-border` opens a native menu with descriptions: show status, choose a border style or layout, reset the prompt border, choose a Context Rail action, or choose a glyph action. `/prompt-border style` first offers uniform borders or mixed and line borders, then a style choice. These shorter lists keep descriptions visible in compact terminals. `/prompt-border layout` opens layout choices directly. A style choice keeps the current layout; a layout choice keeps the current style. `/prompt-border rail` offers only the existing session toggle. `/prompt-border glyphs` leads to a debug action menu; `/prompt-border glyphs debug` opens that menu directly for frame reports, a demo widget, or enabling/disabling the debug working message.
+
+Canceling any menu leaves configuration, glyph assets, and the editor unchanged; configuration reads and migrations begin only after choosing an operation. Without an interactive UI, bare commands and these incomplete prefixes show English help and explicit syntax instead of selecting or applying a default.
+
+`/prompt-border status` opens a focused read-only overlay; Loading/result/error is async and Enter/Esc closes. The old settings form and `/prompt-border config` remain removed. Root `/codesook-omp-plugin` owns persisted settings; behavior commands remain session-scoped. Complete explicit commands retain their existing behavior.
+
+Behavior change: root and incomplete command prefixes now offer described native choices instead of requiring users to remember arguments.
 
 Styles:
 

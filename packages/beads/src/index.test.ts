@@ -73,7 +73,7 @@ function fixture() {
 		cwd: project,
 		hasUI: true,
 		ui: {
-			select: (title: string, options: readonly string[]) => select(title, options),
+			select: (title: string, options: readonly { label: string; description: string }[]) => select(title, options.map(option => option.label)),
 			setStatus: (key: string, text?: string) => {
 				footer.set(key, text);
 				for (const waiter of statusWaiters) waiter(text);

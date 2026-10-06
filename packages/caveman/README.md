@@ -23,6 +23,7 @@ The package is opt-in in the repository feature manifest. It requires OMP and pi
 Canonical levels: `off`, `lite`, `full`, `ultra`, `wenyan-lite`, `wenyan-full`, and `wenyan-ultra`. `full` is default for new session.
 
 ```text
+/caveman                         Choose status or a current-session level
 /caveman status                  Show focused read-only status overlay
 /caveman off|lite|full|ultra     Set current-session level
 /caveman wenyan-lite             Set current-session level
@@ -30,7 +31,11 @@ Canonical levels: `off`, `lite`, `full`, `ultra`, `wenyan-lite`, `wenyan-full`, 
 /caveman wenyan-ultra            Set current-session level
 ```
 
-Bare `/caveman` settings form and `/caveman config` are removed; root `/codesook-omp-plugin` owns persisted settings. Status overlay closes with Enter/Esc. Level commands append `caveman-level` session entry, so resume and branch operations recover newest valid entry.
+Bare `/caveman` opens a native menu for status and all seven canonical levels. Each level description explains its effect and current-session scope. `lite` trims filler while retaining normal grammar; `full` uses terse phrasing and drops articles; `ultra` minimizes wording while preserving meaning. The three `wenyan-*` levels apply increasing classical compression to Chinese responses while preserving the user's dominant language. `off` stops Caveman prompt injection for this session.
+
+Cancelling the menu does not load or migrate config, seed glyphs, or append a session entry. Without interactive UI, bare `/caveman` prints explicit command help instead of choosing a level. `/caveman status` still opens the read-only overlay, closed with Enter/Esc. Level choices and explicit level commands append a `caveman-level` session entry, so resume and branch operations recover the newest valid entry. They do not change the saved default.
+
+Behavior change: bare `/caveman` now offers an action menu, not a settings form. `/caveman config` remains removed; root `/codesook-omp-plugin` owns persisted settings.
 
 ## Configuration
 

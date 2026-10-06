@@ -13,7 +13,7 @@
     "scripts": {
         "check": "bun --bun tsc --noEmit",
         "check:types": "tsc -p tsconfig.json --noEmit",
-        "test": "bun test src/context-rail.test.ts src/main.test.ts",
+        "test": "bun test src/context-rail.test.ts src/main.test.ts src/command-menu.test.ts",
         "lint": "bun --bun tsc --noEmit",
         "build": "bun --bun tsc --noEmit",
         "pack:check": "bun ../../scripts/check-package-files.ts"

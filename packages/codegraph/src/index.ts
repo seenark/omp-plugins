@@ -169,9 +169,26 @@ export default function codegraphExtension(pi: ExtensionAPI, options: CodeGraphO
 		ctx.ui.notify(`${result}\n\n${formatCodeGraphStatus(after)}`, failed || after.state === "error" || after.inspectionState === "error" ? "error" : after.inspectionState === "missing-prerequisite" ? "warning" : "info");
 	};
 	pi.registerCommand("codegraph", {
-		description: "Initialize or inspect CodeGraph integration, or set project guidance policy: init|status|auto|off",
+		description: "Choose a CodeGraph action, or use init|status|auto|off",
 		handler: async (args, ctx) => {
-			const operation = args.trim().toLowerCase() || "status";
+			let operation = args.trim().toLowerCase();
+			if (!operation) {
+				if (!ctx.hasUI || typeof ctx.ui.select !== "function") {
+					ctx.ui.notify("CodeGraph commands:\n/codegraph status — Show read-only project status.\n/codegraph init — Initialize native project data and its initial graph, or reuse existing data; preserve policy.\n/codegraph auto — Enable project guidance when ready.\n/codegraph off — Disable only this plugin's project guidance.", "info");
+					return;
+				}
+				const choices = [
+					{ operation: "status", label: "Show status", description: "Open read-only project status; Enter or Esc closes it." },
+					{ operation: "init", label: "Initialize project data", description: "Initialize native data and its initial graph now, or reuse existing data; keep project policy." },
+					{ operation: "auto", label: "Enable project guidance", description: "Save project permission now for CodeGraph guidance when ready; leave data and tools unchanged." },
+					{ operation: "off", label: "Disable project guidance", description: "Save project suppression now for this plugin's guidance; leave data, tools, and other instructions unchanged." },
+				];
+				const selected = await ctx.ui.select("CodeGraph", choices);
+				if (selected === undefined) return;
+				const choice = choices.find(value => value.label === selected);
+				if (!choice) return;
+				operation = choice.operation;
+			}
 			if (operation === "status") { await showStatus(ctx); return; }
 			if (operation === "init") { await initialize(ctx); return; }
 			if (operation !== "auto" && operation !== "off") {

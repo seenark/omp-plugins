@@ -466,7 +466,7 @@ export const borderStyles: Record<BorderStyleName, PromptBorderGlyphs> = {
 
 const STYLE_NAMES = Object.keys(borderStyles) as BorderStyleName[];
 const LAYOUT_NAMES = ["full", "bottom", "sides", "top-bottom", "default"] as const;
-const PRIMARY_COMMAND_OPTIONS = [...STYLE_NAMES, "status", "layout", "reset", "rail", "glyphs"] as const;
+const PRIMARY_COMMAND_OPTIONS = [...STYLE_NAMES, "status", "style", "layout", "reset", "rail", "glyphs"] as const;
 const CONTEXT_RAIL_PLACEMENTS = ["inside", "above", "below"] as const satisfies readonly ContextRailPlacement[];
 const CONTEXT_RAIL_VISIBILITIES = ["always", "toggle", "collapse-while-typing"] as const satisfies readonly ContextRailVisibility[];
 const CONTEXT_RAIL_POINTERS = ["auto", "visible", "hidden"] as const satisfies readonly ContextRailPointer[];
@@ -498,6 +498,102 @@ const DEFAULT_SPINNER_GLYPH_FRAME_MS = 80;
 const HOST_SPINNER_FRAME_MS = 80;
 const LOADING_GLYPH_DEBUG_ROOT_OPTIONS = ["debug"] as const;
 const LOADING_GLYPH_DEBUG_ACTIONS = ["frames", "demo", "on", "off"] as const;
+const PROMPT_BORDER_MENU = [
+	{ label: "Show status", description: "Open a read-only overlay with the current prompt border and Context Rail settings.", command: "status" },
+	{ label: "Choose border style", description: "Choose uniform or mixed and line borders, then a style; keep the layout.", command: "style" },
+	{ label: "Choose border layout", description: "Choose which border edges to show next; keep the current style for this session.", command: "layout" },
+	{ label: "Reset prompt border", description: "Restore the built-in prompt editor now for this session; leave saved settings unchanged.", command: "reset" },
+	{ label: "Choose Context Rail action", description: "Choose the session-only Context Rail toggle next.", command: "rail" },
+	{ label: "Choose glyph action", description: "Choose a loading glyph debug action through another menu.", command: "glyphs" },
+] as const;
+const STYLE_DESCRIPTIONS: Record<BorderStyleName, string> = {
+	round: "Apply thin lines and rounded corners; keep the current layout.",
+	sharp: "Apply thin lines and square corners; keep the current layout.",
+	heavy: "Apply thick lines and square corners; keep the current layout.",
+	dashed: "Apply thin dashed lines and square corners; keep the current layout.",
+	"heavy-dashed": "Apply thick dashed lines and square corners; keep the current layout.",
+	"heavy-top": "Apply thick horizontal lines and thin sides; keep the current layout.",
+	double: "Apply double lines on every edge; keep the current layout.",
+	"double-top": "Apply double horizontal lines and thin sides; keep the current layout.",
+	"double-side": "Apply thin horizontal lines and double sides; keep the current layout.",
+	ascii: "Apply plus corners, hyphens and vertical bars; keep the current layout.",
+	block: "Apply block sides and triangle corners, no horizontal lines; keep the layout.",
+	vertical: "Apply thin sides with blank horizontal edges; keep the layout.",
+	"double-vertical": "Apply double sides with blank horizontal edges; keep the layout.",
+	horizontal: "Apply thin horizontal lines with blank sides; keep the layout.",
+	"double-horizontal": "Apply double horizontal lines with blank sides; keep the layout.",
+};
+const STYLE_GROUP_MENU = [
+	{
+		label: "Choose uniform borders",
+		description: "Choose a uniform border style next for this session; keep the layout.",
+		styles: ["round", "sharp", "heavy", "dashed", "heavy-dashed", "double", "ascii", "block"],
+	},
+	{
+		label: "Choose mixed and line borders",
+		description: "Choose mixed-weight or line styles next for this session; keep the layout.",
+		styles: ["heavy-top", "double-top", "double-side", "vertical", "double-vertical", "horizontal", "double-horizontal"],
+	},
+] as const;
+const LAYOUT_DESCRIPTIONS: Record<BorderLayoutName, string> = {
+	full: "Show all border edges with a separate bottom row; keep the current style.",
+	bottom: "Show side edges and a separate bottom row without the top line; keep the current style.",
+	sides: "Show side edges without top or bottom lines; keep the current style.",
+	"top-bottom": "Show top and bottom lines without side edges; keep the current style.",
+	default: "Use the host's merged bottom border layout with the current style.",
+};
+const GLYPH_DEBUG_MENU = [
+	{ label: "Show frame report", description: "Report loading glyph frames and timing now without enabling a demo.", command: "frames" },
+	{ label: "Show loading glyph demo", description: "Mount a loading glyph demo widget now for this session.", command: "demo" },
+	{ label: "Enable debug message", description: "Show loading glyph debug details in the working message now for this session.", command: "on" },
+	{ label: "Disable glyph debug", description: "Remove the loading glyph demo and debug working message now.", command: "off" },
+] as const;
+
+async function resolvePromptBorderMenu(args: string, ctx: { hasUI: boolean; ui: ExtensionUIContext }): Promise<string | undefined> {
+	let command = args.trim().toLowerCase().replace(/\s+/gu, " ");
+	if (!["", "style", "layout", "rail", "glyphs", "glyphs debug"].includes(command)) return args;
+	if (!ctx.hasUI) {
+		ctx.ui.notify(
+			"Prompt Border menus need an interactive UI. Show settings with /prompt-border status; apply a session style with /prompt-border <style> [layout]; change edges with /prompt-border layout <layout>; restore the built-in editor with /prompt-border reset; toggle the rail with /prompt-border rail toggle; inspect or enable glyph debugging with /prompt-border glyphs debug <frames|demo|on|off>.\n" +
+			`Styles: ${STYLE_NAMES.join(", ")}. Layouts: ${LAYOUT_NAMES.join(", ")}. Saved settings remain unchanged.`,
+			"info",
+		);
+		return undefined;
+	}
+	if (command === "") {
+		const selected = await ctx.ui.select("Prompt Border", PROMPT_BORDER_MENU.map(({ label, description }) => ({ label, description })));
+		if (selected === undefined) return undefined;
+		command = PROMPT_BORDER_MENU.find(option => option.label === selected)!.command;
+	}
+	if (command === "style") {
+		const selected = await ctx.ui.select("Choose border style group", STYLE_GROUP_MENU.map(({ label, description }) => ({ label, description })));
+		if (selected === undefined) return undefined;
+		const group = STYLE_GROUP_MENU.find(option => option.label === selected)!;
+		return ctx.ui.select("Choose border style", group.styles.map(label => ({ label, description: STYLE_DESCRIPTIONS[label] })));
+	}
+	if (command === "layout") {
+		const selected = await ctx.ui.select("Choose border layout", LAYOUT_NAMES.map(label => ({ label, description: LAYOUT_DESCRIPTIONS[label] })));
+		return selected === undefined ? undefined : `layout ${selected}`;
+	}
+	if (command === "rail") {
+		const selected = await ctx.ui.select("Choose Context Rail action", [
+			{ label: "Toggle Context Rail", description: "Show or hide a rail configured for toggling; otherwise enable or disable it for this session now." },
+		]);
+		return selected === undefined ? undefined : "rail toggle";
+	}
+	if (command === "glyphs") {
+		const selected = await ctx.ui.select("Choose glyph action", [
+			{ label: "Choose debug action", description: "Choose a loading glyph frame report, demo, or debug message action next." },
+		]);
+		if (selected === undefined) return undefined;
+		command = "glyphs debug";
+	}
+	if (command === "glyphs debug") {
+		const selected = await ctx.ui.select("Choose debug action", GLYPH_DEBUG_MENU.map(({ label, description }) => ({ label, description })));
+		return selected === undefined ? undefined : `glyphs debug ${GLYPH_DEBUG_MENU.find(option => option.label === selected)!.command}`;
+	}
+	return command;
+}
 const SPINNER_GLYPH_SLOTS = ["status", "activity"] as const satisfies readonly SpinnerType[];
 const CONFIG_DIRECTORY = path.join(os.homedir(), ".config", "codesook-omp", "prompt-border");
 export const CONFIG_PATH = CODESOOK_OMP_CONFIG_PATH;
@@ -3134,8 +3230,9 @@ export default function promptBorderStyle(pi: ExtensionAPI, configPath: PromptBo
 		description: "Control prompt border and context rail",
 		getArgumentCompletions: getPromptBorderArgumentCompletions,
 		handler: async (args, ctx) => {
-			if (!ctx.hasUI) return;
-			const action = parsePromptBorderArgs(args, activeBorder);
+			const command = await resolvePromptBorderMenu(args, ctx);
+			if (command === undefined || !ctx.hasUI) return;
+			const action = parsePromptBorderArgs(command, activeBorder);
 			if (action.kind === "status") {
 				await showPromptBorderStatus(ctx, configPath);
 				return;

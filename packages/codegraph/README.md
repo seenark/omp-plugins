@@ -27,12 +27,15 @@ The configured exploration MCP tool must be active, not merely listed. The plugi
 
 ## Commands
 
-- `/codegraph` or `/codegraph status`: read-only status overlay, including the Integration Project, native Tool Workspace, data location, effective policy, and prerequisites. Enter/Esc closes the overlay.
+- `/codegraph`: open the native action menu. Every choice describes its result: show status, initialize project data, enable project guidance, or disable project guidance. Esc cancels before inspection, policy writes, or native initialization. Without interactive UI, the root command prints explicit command help and performs no action.
+- `/codegraph status`: read-only status overlay, including the Integration Project, native Tool Workspace, data location, effective policy, and prerequisites. Enter/Esc closes the overlay.
 - `/codegraph init`: explicitly prepare native project data and its initial graph, or reuse an existing native Tool Workspace without rebuilding it. Initialization preserves project policy.
 - `/codegraph auto`: persist project permission for automatic guidance when ready.
 - `/codegraph off`: persist project suppression of this plugin's guidance.
 
 Policy commands do not change plugin lifecycle, MCP activation, repository instructions, or tool data. Off affects only this plugin's guidance; other instructions can still request CodeGraph.
+
+The root command now opens a description-bearing menu instead of opening status automatically. Complete explicit commands keep their existing behavior.
 
 ### Explicit initialization
 

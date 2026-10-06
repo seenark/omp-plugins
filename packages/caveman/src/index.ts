@@ -46,6 +46,16 @@ const COMMAND_LEVELS = [
 ] as const;
 const COMMAND_USAGE =
 	"Usage: /caveman [status|off|lite|full|ultra|wenyan-lite|wenyan-full|wenyan-ultra]";
+const CAVEMAN_MENU = [
+	{ command: "status", label: "Show status", description: "Open current level and display settings; leave session level unchanged." },
+	{ command: "off", label: "Off", description: "Stop Caveman rules this session; leave the saved default unchanged." },
+	{ command: "lite", label: "Lite", description: "Cut filler; keep normal grammar and your language this session." },
+	{ command: "full", label: "Full", description: "Use terse phrases; keep your language and technical content this session." },
+	{ command: "ultra", label: "Ultra", description: "Minimize words; keep meaning and your language this session." },
+	{ command: "wenyan-lite", label: "Wenyan lite", description: "Keep your language; light classical compression if Chinese this session." },
+	{ command: "wenyan-full", label: "Wenyan full", description: "Keep your language; full classical compression if Chinese this session." },
+	{ command: "wenyan-ultra", label: "Wenyan ultra", description: "Keep your language; maximum classical compression if Chinese this session." },
+] as const;
 
 export interface CavemanExtensionOptions {
 	configPath?: string;
@@ -313,14 +323,24 @@ export default function cavemanExtension(pi: ExtensionAPI, options: CavemanExten
 		description: COMMAND_USAGE,
 		getArgumentCompletions: commandCompletions,
 		handler: async (args, ctx) => {
-			const argument = args.trim().toLowerCase();
+			let argument = args.trim().toLowerCase();
+			if (!argument) {
+				if (!ctx.hasUI) {
+					reportInfo(pi, ctx, `${COMMAND_USAGE}\nUse status to inspect the current level, off to stop Caveman rules, or a named level to change only this session. All levels preserve your language; wenyan levels apply classical compression to Chinese responses.`);
+					return;
+				}
+				const choice = await ctx.ui.select("Caveman", CAVEMAN_MENU.map(({ label, description }) => ({ label, description })));
+				const selected = CAVEMAN_MENU.find(option => option.label === choice);
+				if (!selected) return;
+				argument = selected.command;
+			}
+			if (argument !== "status" && !CAVEMAN_LEVELS.includes(argument as CavemanLevel)) {
+				notifyError(pi, ctx, `Unknown Caveman command: ${argument}. ${COMMAND_USAGE}`);
+				return;
+			}
 			await loadConfig(ctx);
 			if (argument === "status") {
 				await showCavemanStatus(ctx, level, config, configPath);
-				return;
-			}
-			if (!CAVEMAN_LEVELS.includes(argument as CavemanLevel)) {
-				notifyError(pi, ctx, `Unknown Caveman command: ${argument || "(empty)"}. ${COMMAND_USAGE}`);
 				return;
 			}
 			sessionLevelExplicit = true;

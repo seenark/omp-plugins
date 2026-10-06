@@ -6,6 +6,8 @@ import { getSettingsListTheme } from "@oh-my-pi/pi-coding-agent";
 import {
 	Input,
 	SettingsList,
+	ScrollView,
+	Text,
 	matchesKey,
 	type Component,
 	type SettingItem,
@@ -187,6 +189,7 @@ const RAIL_MEANING_PLACEMENTS = ["top", "below", "beside"] as const satisfies re
 
 const COMMAND_USAGE = "Usage: /codesook-omp-plugin [status|init config]";
 const STATUS_ACTION_ID = "action:status";
+const INIT_ACTION_ID = "action:init";
 const APPLY_ACTION_ID = "action:apply";
 const CANCEL_ACTION_ID = "action:cancel";
 const RELOAD_ACTION_ID = "action:reload";
@@ -840,11 +843,10 @@ function configuredInitAssets(draft: UnifiedSettingsDraft, theme: unknown): Init
 	return assets;
 }
 
-function initializePluginConfig(ctx: ExtensionContext): void {
+function initializePluginConfig(ctx: ExtensionContext, configPath = CODESOOK_OMP_CONFIG_PATH): { message: string; type: "info" | "error" } {
 	const created: string[] = [];
 	const existed: string[] = [];
 	const failed: string[] = [];
-	const configPath = CODESOOK_OMP_CONFIG_PATH;
 	const configBefore = readCodesookOmpConfig(configPath);
 	if (configBefore.exists) {
 		existed.push(`${configPath} (config)`);
@@ -879,16 +881,16 @@ function initializePluginConfig(ctx: ExtensionContext): void {
 		failed.push(`Could not load packaged glyph defaults: ${error instanceof Error ? error.message : String(error)}`);
 	}
 
-	ctx.ui.notify(
-		[
+	return {
+		message: [
 			`Created (${created.length}):`,
 			...(created.length > 0 ? created : ["none"]),
 			`Already existed (${existed.length}):`,
 			...(existed.length > 0 ? existed : ["none"]),
 			...(failed.length > 0 ? [`Failed (${failed.length}):`, ...failed] : []),
 		].join("\n"),
-		failed.length > 0 ? "error" : "info",
-	);
+		type: failed.length > 0 ? "error" : "info",
+	};
 }
 
 
@@ -1119,6 +1121,7 @@ function settingsItems(
 		...roleItems,
 		{ id: "section:actions", label: "Actions", currentValue: "", heading: true },
 		{ id: STATUS_ACTION_ID, label: "Show status", currentValue: "Enter", description: "Open focused read-only status overlay; Enter/Esc closes without affecting prompt input." },
+		{ id: INIT_ACTION_ID, label: "Create missing files", currentValue: "Enter", description: "Create configuration and glyphs now from SAVED settings, not this draft. Keep existing files." },
 		{ id: RELOAD_ACTION_ID, label: "Reload from disk", currentValue: "Enter", description: "Discard draft edits and reread root config; live settings stay unchanged." },
 		{ id: APPLY_ACTION_ID, label: "Apply changes", currentValue: "Enter", description: "Shift+Enter applies directly. Bare Enter asks confirmation, then atomically writes root config and emits live-change event." },
 		{ id: CANCEL_ACTION_ID, label: "Cancel", currentValue: "Enter", description: "Close without saving draft or changing live settings." },
@@ -1293,6 +1296,7 @@ export async function openSettings(pi: ExtensionAPI, ctx: ExtensionContext, conf
 			let closed = false;
 			let textSubmenuOpen = false;
 			let confirmingApply = false;
+			let initializationResult: ScrollView | undefined;
 			const trackedItems = (): SettingItem[] =>
 				trackTextSubmenus(
 					settingsItems(draft, presence),
@@ -1306,6 +1310,7 @@ export async function openSettings(pi: ExtensionAPI, ctx: ExtensionContext, conf
 			const finish = (): void => {
 				if (closed) return;
 				closed = true;
+				initializationResult?.dispose();
 				done(undefined);
 			};
 			const refresh = (): void => list.setItems(trackedItems());
@@ -1342,6 +1347,15 @@ export async function openSettings(pi: ExtensionAPI, ctx: ExtensionContext, conf
 			};
 			const component: Component = {
 				render(width: number): readonly string[] {
+					if (initializationResult) {
+						initializationResult.setHeight(Math.max(4, Math.min(18, (tui.terminal?.rows ?? 24) - 6)));
+						return [
+							theme.fg("accent", theme.bold("Configuration initialization result")),
+							...initializationResult.render(width),
+							"",
+							theme.fg("dim", "↑↓ scroll · Enter/Esc keep editing"),
+						];
+					}
 					const rows = [
 						theme.fg("accent", theme.bold("Codesook OMP Plugin Settings")),
 						theme.fg("dim", `Root: ${configPath}`),
@@ -1358,6 +1372,16 @@ export async function openSettings(pi: ExtensionAPI, ctx: ExtensionContext, conf
 					return rows;
 				},
 				handleInput(data: string): void {
+					if (initializationResult) {
+						if (isEnter(data) || isEscape(data)) {
+							initializationResult.dispose();
+							initializationResult = undefined;
+						} else {
+							initializationResult.handleScrollKey(data);
+						}
+						tui.requestRender();
+						return;
+					}
 					if (confirmingApply) {
 						if (isEscape(data)) {
 							confirmingApply = false;
@@ -1378,6 +1402,15 @@ export async function openSettings(pi: ExtensionAPI, ctx: ExtensionContext, conf
 						tui.requestRender();
 						return;
 					}
+					if (selected?.id === INIT_ACTION_ID && isEnter(data)) {
+						const result = initializePluginConfig(ctx, configPath);
+						initializationResult = new ScrollView(new Text(theme.fg(result.type === "error" ? "error" : "text", result.message), 0, 0), {
+							height: 18,
+							theme: { track: text => theme.fg("dim", text), thumb: text => theme.fg("accent", text) },
+						});
+						tui.requestRender();
+						return;
+					}
 					if (selected?.id === STATUS_ACTION_ID && isEnter(data)) {
 						void showStatus(pi, ctx).then(() => tui.requestRender());
 						return;
@@ -1395,6 +1428,7 @@ export async function openSettings(pi: ExtensionAPI, ctx: ExtensionContext, conf
 				},
 				invalidate(): void {
 					list.invalidate();
+					initializationResult?.invalidate();
 				},
 			};
 			const initialItems = trackedItems();
@@ -1426,13 +1460,26 @@ export default function codesookOmpPluginSettings(pi: ExtensionAPI): void {
 			return ["status", "init config"].filter(value => value.startsWith(prefix)).map(value => ({ value, label: value }));
 		},
 		handler: async (args, ctx) => {
-			const argument = args.trim().toLowerCase();
+			let argument = args.trim().toLowerCase();
+			if ((argument === "" || argument === "init") && (!ctx.hasUI || (argument === "init" ? typeof ctx.ui.select !== "function" : typeof ctx.ui.custom !== "function"))) {
+				ctx.ui.notify("Codesook OMP settings require an interactive UI.\n/codesook-omp-plugin status — Show plugin and configuration status.\n/codesook-omp-plugin init config — Create missing configuration and glyphs from saved settings; preserve existing files.", "info");
+				return;
+			}
+			if (argument === "init") {
+				const choice = await ctx.ui.select("Initialize Codesook OMP configuration", [{
+					label: "Create missing files",
+					description: "Create missing configuration and glyphs now from saved settings. Keep existing files; do not apply a settings draft.",
+				}]);
+				if (choice !== "Create missing files") return;
+				argument = "init config";
+			}
 			if (argument === "status") {
 				await showStatus(pi, ctx);
 				return;
 			}
 			if (argument === "init config") {
-				initializePluginConfig(ctx);
+				const result = initializePluginConfig(ctx);
+				ctx.ui.notify(result.message, result.type);
 				return;
 			}
 			if (argument !== "") {

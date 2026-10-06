@@ -41,6 +41,20 @@ import type { AgentMessage, CompressResult, HeadroomStats } from "./types.ts";
 const SUBCOMMANDS = ["status", "on", "off", "health", "stats", "token", "init"] as const;
 const INIT_TARGETS = ["config", "glyphs", "all"] as const;
 const HEADROOM_USAGE = "Usage: /headroom [status|on|off|health|stats|token|init [config|glyphs|all]]";
+const HEADROOM_MENU = [
+	{ command: "status", label: "Show status", description: "Open compression and proxy status; no plugin settings changes." },
+	{ command: "on", label: "Enable compression", description: "Enable compression this session and check the external proxy." },
+	{ command: "off", label: "Disable compression", description: "Disable compression this session; leave the proxy running." },
+	{ command: "health", label: "Check proxy health", description: "Check proxy reachability now and open the health result." },
+	{ command: "stats", label: "Show proxy statistics", description: "Fetch proxy statistics now and open a read-only result." },
+	{ command: "token", label: "Set proxy token", description: "Open visible input; saving replaces the token and checks proxy health." },
+	{ command: "init", label: "Choose files to initialize", description: "Choose files next; ask per overwrite. Skips do not undo other writes." },
+] as const;
+const HEADROOM_INIT_MENU = [
+	{ target: "config", label: "Initialize config", description: "Write default Headroom config; ask before overwriting the existing file." },
+	{ target: "glyphs", label: "Initialize glyphs", description: "Write glyphs; ask per overwrite. Skips do not undo other writes." },
+	{ target: "all", label: "Initialize config and glyphs", description: "Write config and glyphs; ask per overwrite. No rollback on skips or errors." },
+] as const;
 
 type Subcommand = (typeof SUBCOMMANDS)[number];
 type ParsedCommand = { command: Subcommand | "invalid"; initTarget?: HeadroomInitTarget };
@@ -96,15 +110,20 @@ export default function headroomExtension(pi: ExtensionAPI, options: HeadroomExt
 		const logger = (pi as unknown as { logger?: { warn?: (text: string) => void } }).logger;
 		logger?.warn?.(message);
 	};
-	const runtime = createRuntime({
-		...options,
-		configPath,
-		warn,
-		env: options.env ?? process.env,
-	});
+	let runtime: HeadroomRuntime | undefined;
+	const getRuntime = (): HeadroomRuntime => {
+		runtime ??= createRuntime({
+			...options,
+			configPath,
+			warn,
+			env: options.env ?? process.env,
+		});
+		return runtime;
+	};
 	const events = (pi as unknown as { events?: unknown }).events;
 	if (isHeadroomRootConfigPath(configPath) && isEventBus(events)) {
 		events.on(CODESOOK_OMP_CONFIG_CHANGED, data => {
+			if (!runtime) return;
 			const next = loadEventConfig(data, runtime);
 			if (!next) return;
 			applyLiveConfig(runtime, next, activeContext);
@@ -117,17 +136,17 @@ export default function headroomExtension(pi: ExtensionAPI, options: HeadroomExt
 			if (ctx.hasUI) ctx.ui.notify(message, "warning");
 		}
 		pendingWarnings.clear();
-		resetSession(runtime, pi, ctx, { ...options, configPath, warn, env: options.env ?? process.env });
+		resetSession(getRuntime(), pi, ctx, { ...options, configPath, warn, env: options.env ?? process.env });
 	};
 	pi.on("session_start", startSession);
 	pi.on("session_switch", startSession);
 	pi.on("session_branch", startSession);
 	pi.on("session_shutdown", (_event, ctx) => {
 		activeContext = ctx;
-		disposePublisher(runtime);
+		if (runtime) disposePublisher(runtime);
 		activeContext = undefined;
 	});
-	pi.on("context", (event, ctx) => handleContextCompression(runtime, event, ctx));
+	pi.on("context", (event, ctx) => handleContextCompression(getRuntime(), event, ctx));
 
 	pi.registerCommand("headroom", {
 		description: `Headroom token compression. ${HEADROOM_USAGE}`,
@@ -146,7 +165,36 @@ export default function headroomExtension(pi: ExtensionAPI, options: HeadroomExt
 			const prefix = normalized.trim();
 			return SUBCOMMANDS.filter((value) => value.startsWith(prefix)).map((value) => ({ value, label: value }));
 		},
-		handler: async (args, ctx) => handleCommand(runtime, parseCommand(args), ctx, options.initPaths),
+		handler: async (args, ctx) => {
+			let parsed = parseCommand(args);
+			if (!args.trim()) {
+				if (!ctx.hasUI) {
+					notify(ctx, `${HEADROOM_USAGE}\nUse status for current state, on/off for session compression, health/stats for proxy results, token for visible token input, or init config/glyphs/all to write defaults.`, "info");
+					return;
+				}
+				const choice = await ctx.ui.select("Headroom", HEADROOM_MENU.map(({ label, description }) => ({ label, description })));
+				if (choice === undefined) return;
+				const selected = HEADROOM_MENU.find(option => option.label === choice);
+				if (!selected) return;
+				if (selected.command === "init") {
+					const targetChoice = await ctx.ui.select("Headroom files to initialize", HEADROOM_INIT_MENU.map(({ label, description }) => ({ label, description })));
+					const target = HEADROOM_INIT_MENU.find(option => option.label === targetChoice)?.target;
+					if (!target) return;
+					parsed = { command: "init", initTarget: target };
+				} else {
+					parsed = { command: selected.command };
+				}
+			}
+			if (parsed.command === "invalid") {
+				notify(ctx, HEADROOM_USAGE, "warning");
+				return;
+			}
+			if (parsed.command === "init") {
+				await handleInitCommand(ctx, parsed.initTarget, options.initPaths);
+				return;
+			}
+			await handleCommand(getRuntime(), parsed.command, ctx);
+		},
 	});
 }
 
@@ -561,24 +609,14 @@ async function setupProxyToken(runtime: HeadroomRuntime, ctx: ExtensionContext):
 
 async function handleCommand(
 	runtime: HeadroomRuntime,
-	parsed: ParsedCommand,
+	command: Exclude<Subcommand, "init">,
 	ctx: ExtensionContext,
-	initPaths?: HeadroomInitPaths,
 ): Promise<void> {
-	if (parsed.command === "invalid") {
-		notify(ctx, HEADROOM_USAGE, "warning");
-		return;
-	}
-	if (parsed.command === "init") {
-		await handleInitCommand(ctx, parsed.initTarget, initPaths);
-		return;
-	}
-
-	if (parsed.command === "token") {
+	if (command === "token") {
 		await setupProxyToken(runtime, ctx);
 		return;
 	}
-	if (parsed.command === "on") {
+	if (command === "on") {
 		runtime.state.sessionEnabledOverride = true;
 		runtime.state.enabled = true;
 		runtime.state.offlineWarningShown = false;
@@ -586,18 +624,18 @@ async function handleCommand(
 		notify(ctx, healthy ? "Headroom compression enabled. Start proxy separately if needed." : proxyStartHint(runtime.config), healthy ? "info" : "warning");
 		return;
 	}
-	if (parsed.command === "off") {
+	if (command === "off") {
 		runtime.state.sessionEnabledOverride = false;
 		runtime.state.enabled = false;
 		runtime.refreshStatus(ctx);
 		notify(ctx, "Headroom compression disabled for this Pi session. The proxy process is left running.", "info");
 		return;
 	}
-	if (parsed.command === "health") {
+	if (command === "health") {
 		await showProxyHealth(runtime, ctx);
 		return;
 	}
-	if (parsed.command === "stats") {
+	if (command === "stats") {
 		await showProxyStats(ctx, runtime.client, runtime.config);
 		return;
 	}

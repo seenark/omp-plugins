@@ -136,16 +136,24 @@ export default function beadsExtension(pi: ExtensionAPI, options: BeadsOptions =
 				};
 				ensureEmpty();
 				if (!ctx.hasUI || typeof ctx.ui.select !== "function") throw new Error("Run /beads init in interactive OMP to choose mode and approve hooks, or use bd init directly with --skip-agents and --skip-hooks.");
-				const modes = ["Standard/team", "Stealth (personal, no Git hooks)"];
+				const modes = [
+					{ label: "Standard/team", description: "Continue to a hooks choice before creating a team workspace; native initialization may make a Git commit." },
+					{ label: "Stealth (personal, no Git hooks)", description: "Continue to a no-hooks choice before creating a personal workspace without native setup commits." },
+				];
 				const mode = await ctx.ui.select(`Initialize Beads: ${project}`, modes);
 				if (mode === undefined) { ctx.ui.notify("Beads initialization cancelled; no files changed.", "info"); return; }
-				if (!modes.includes(mode)) throw new Error("Unknown Beads initialization mode; no files changed.");
-				stealth = mode === modes[1];
-				const hookChoices = stealth ? ["No hooks (stealth mode)"] : ["No hooks", "Install supported Git hooks"];
+				if (!modes.some(value => value.label === mode)) throw new Error("Unknown Beads initialization mode; no files changed.");
+				stealth = mode === modes[1]!.label;
+				const hookChoices = stealth
+					? [{ label: "No hooks (stealth mode)", description: "Initialize the personal workspace now without installing Git hooks; leave existing hooks unchanged." }]
+					: [
+						{ label: "No hooks", description: "Initialize the team workspace now without installing Git hooks; native setup may commit files." },
+						{ label: "Install supported Git hooks", description: "Initialize the team workspace now and install native supported hooks; may migrate hooks and make a setup commit." },
+					];
 				const hooks = await ctx.ui.select("Beads Git hooks (Esc cancels initialization)", hookChoices);
 				if (hooks === undefined) { ctx.ui.notify("Beads initialization cancelled; no files changed.", "info"); return; }
-				if (!hookChoices.includes(hooks)) throw new Error("Unknown Git-hook choice; no files changed.");
-				installHooks = !stealth && hooks === hookChoices[1];
+				if (!hookChoices.some(value => value.label === hooks)) throw new Error("Unknown Git-hook choice; no files changed.");
+				installHooks = !stealth && hooks === hookChoices[1]!.label;
 				if (ctx.cwd !== cwd) throw new Error("Project changed during initialization choices; run /beads init again.");
 				current = await refresh(ctx);
 				if (!current || !current.integrationProject || realpathSync(current.integrationProject) !== project || current.errors.length || (current.workspaceState !== "ready" && current.workspaceState !== "uninitialized")) throw new Error(current ? formatBeadsStatus(current) : "Project changed during inspection; run /beads init again.");
@@ -202,9 +210,26 @@ export default function beadsExtension(pi: ExtensionAPI, options: BeadsOptions =
 		}
 	};
 	pi.registerCommand("beads", {
-		description: "Initialize Beads, inspect integration or set project guidance policy: init|status|auto|off",
+		description: "Choose a Beads action, or use init|status|auto|off",
 		handler: async (args, ctx) => {
-			const operation = args.trim().toLowerCase() || "status";
+			let operation = args.trim().toLowerCase();
+			if (!operation) {
+				if (!ctx.hasUI || typeof ctx.ui.select !== "function") {
+					ctx.ui.notify("Beads commands:\n/beads status — Show read-only workspace status.\n/beads init — Reuse a ready workspace, or choose initialization mode and hooks in interactive OMP; standard initialization may commit files.\n/beads auto — Enable project guidance when ready.\n/beads off — Disable only this plugin's project guidance.", "info");
+					return;
+				}
+				const choices = [
+					{ operation: "status", label: "Show status", description: "Open read-only workspace status; Enter or Esc closes it." },
+					{ operation: "init", label: "Initialize project workspace", description: "Reuse a ready workspace, or continue to mode and hooks choices; standard initialization may make a Git commit." },
+					{ operation: "auto", label: "Enable project guidance", description: "Save project permission now for Beads guidance when ready; do not perform issue operations." },
+					{ operation: "off", label: "Disable project guidance", description: "Save project suppression now for this plugin's guidance; leave issue data, hooks, and other instructions unchanged." },
+				];
+				const selected = await ctx.ui.select("Beads", choices);
+				if (selected === undefined) return;
+				const choice = choices.find(value => value.label === selected);
+				if (!choice) return;
+				operation = choice.operation;
+			}
 			if (operation === "status") { await showStatus(ctx); return; }
 			if (operation === "init") { await initialize(ctx); return; }
 			if (operation !== "auto" && operation !== "off") {

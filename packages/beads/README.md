@@ -20,6 +20,8 @@ The package depends on `@codesook/omp-shared-display` 1.2.0 or newer for its cli
 /beads [init|status|auto|off]
 ```
 
+Bare `/beads` now opens the native action menu instead of opening status automatically. Each description explains whether the choice acts immediately or leads to initialization choices. Actions are Show status, Initialize project workspace, Enable project guidance, and Disable project guidance. Esc cancels before inspection, policy writes, or native initialization. Without interactive UI, bare `/beads` prints explicit command help and performs no action. Complete explicit commands keep their existing behavior.
+
 `status` is read-only. Its focused overlay opens with `Loading…`, shows the inspection result or error, and closes with Enter/Esc. It works even when persistent status is hidden. Without interactive UI, status is reported as text.
 
 `auto` and `off` explicitly write only Beads project policy. They do not change OMP plugin lifecycle state. Initialization never changes global or project policy: an off project remains off.
@@ -28,7 +30,7 @@ The package depends on `@codesook/omp-shared-display` 1.2.0 or newer for its cli
 
 `/beads init` first asks native Beads discovery and a read-only database query whether a usable Tool Workspace already exists. It reuses that workspace without reinitializing data, replacing history, changing hooks, or asking setup choices. Existing partial data or a backend/inspection/configuration error is not permission to initialize over it; repair the reported problem with `bd` first.
 
-For a new workspace, interactive OMP offers **Standard/team** first, then **Stealth (personal, no Git hooks)**. The next selector starts with **No hooks**; standard mode also offers explicit installation of supported Git hooks. Stealth follows native restrictions and offers only no hooks. Esc in either selector cancels the entire operation without initialization or data, hook, policy, or agent-file writes. Non-interactive hosts must use the native CLI directly rather than silently approving choices.
+For a new workspace, interactive OMP offers **Standard/team** first, then **Stealth (personal, no Git hooks)**. Both descriptions say that another hooks choice follows; standard mode warns that native initialization may make a Git commit. The next selector starts with **No hooks**; standard mode also offers explicit installation of supported Git hooks. Each hook description explains that selection approves initialization now, with or without native hooks. Stealth follows native restrictions and offers only no hooks. Esc in either selector cancels the entire operation without initialization or data, hook, policy, or agent-file writes. Ready workspaces are reused without these selectors. Non-interactive hosts must use the native CLI directly rather than silently approving choices.
 
 The plugin invokes native initialization with `--skip-agents --non-interactive --sandbox --init-if-missing`, adds `--stealth` only when chosen, and uses `--skip-hooks` unless supported hooks were explicitly approved. It never sets up Claude, Codex, Cursor, or other agents. Native standard defaults apply; there is no role wizard, prerequisite installer, server provisioning, MCP setup, destructive reinitialization, or automatic remote push/sync.
 

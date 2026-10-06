@@ -64,16 +64,32 @@ bun packages/theme-catppuccin/bin/install.js
 /codesook-omp-plugin
 /codesook-omp-plugin status
 /codesook-omp-plugin init config
-/headroom [status|on|off|health|stats|init [config|glyphs|all]]
+/headroom [status|on|off|health|stats|token|init [config|glyphs|all]]
 /caveman [status|off|lite|full|ultra|wenyan-lite|wenyan-full|wenyan-ultra]
 /codegraph [init|status|auto|off]
 /beads [init|status|auto|off]
 /prompt-border [status|<style> [layout]|layout <layout>|reset|rail toggle|glyphs debug [frames|demo|on|off]]
 ```
 
+In interactive OMP, enter `/codegraph`, `/beads`, `/headroom`, `/caveman`, or `/prompt-border` without arguments to choose an action. Native selectors show a description of each choice; longer menus show the selected choice's description. **Choose…** items open further choices rather than applying a setting. Use the terminal's normal navigation and confirmation keys; Esc cancels a menu without running its action.
+
+Incomplete `/prompt-border style`, `layout`, `rail`, `glyphs`, and `glyphs debug` routes open the matching choices. Border style first offers **Choose uniform borders** or **Choose mixed and line borders**, then the styles in that group, keeping descriptions visible in short terminals. A style choice keeps the current layout; a layout choice keeps the current style. Complete commands, including `<style> <layout>`, still run directly. Context Rail offers only the existing session toggle here; saved rail settings remain in root settings. There is no standalone `/context-rail` command.
+
+The Headroom menu's **Choose files to initialize** opens configuration, glyph, or combined choices. Explicit `/headroom init` still initializes **all** files directly. Existing files retain per-file overwrite prompts: declining an overwrite skips that file, not the whole operation. **Set proxy token** opens visible token input; saving replaces the configured token and checks proxy health.
+
+Beads initialization reuses ready data without setup choices. A new workspace opens a mode choice, then a Git-hook choice; their descriptions explain the continuation and native Git effects. Esc at either choice cancels initialization. CodeGraph initialization starts its existing native operation immediately. Neither operation changes project policy.
+
+Without an interactive selector, bare commands and incomplete menu routes show the available explicit commands and their outcomes. Explicit status routes remain accessible even when persistent status is hidden.
+
 Root settings owns persisted configuration. Feature commands own session behavior; CodeGraph and Beads policy commands explicitly write shared project policy. Feature `config` commands and `/shared-display` are removed. Status commands open focused read-only overlays; Enter/Esc closes. `/codesook-omp-plugin init config` creates the v1 global config only when absent and seeds only missing glyph files.
 
 `/codesook-omp-plugin` edits a draft. Shift+Enter applies directly. Bare Enter on Apply opens confirmation inside the same focused overlay without saving. Enter confirms; Esc declines and returns to the unchanged draft without writes or live-change events. Reload discards draft; Cancel leaves persisted and live state unchanged.
+
+The root settings **Create missing files** action runs immediately from **saved settings**, independently of the draft and Apply. It creates missing configuration and glyphs, preserves existing files, and keeps the draft open. Results appear in the same focused overlay; use ↑↓ to scroll and Enter/Esc to return to editing. Cancel afterward does not undo files created by this explicit action. `/codesook-omp-plugin init` exposes the same initialization choice; the complete `init config` command still runs directly.
+
+### Command menu update
+
+All existing feature command families now provide described native choices. Root settings keeps its staged editing surface and exposes its previously command-only initialization action. No tools, servers, plugins, or new operations are installed or started by opening a menu.
 
 ## Configuration and migration
 
