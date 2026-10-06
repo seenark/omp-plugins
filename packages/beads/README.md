@@ -20,7 +20,7 @@ The package depends on `@codesook/omp-shared-display` 1.2.0 or newer for its cli
 /beads [init|status|auto|off]
 ```
 
-Bare `/beads` now opens the native action menu instead of opening status automatically. Each description explains whether the choice acts immediately or leads to initialization choices. Actions are Show status, Initialize project workspace, Enable project guidance, and Disable project guidance. Esc cancels before inspection, policy writes, or native initialization. Without interactive UI, bare `/beads` prints explicit command help and performs no action. Complete explicit commands keep their existing behavior.
+Bare `/beads`: Tab after the command name inserts a trailing space and shows existing action suggestions. Choosing an action inserts command text only; press Enter to execute it. Enter on the bare command opens the native description-bearing action menu. Esc dismisses that menu without action. Each description explains whether the choice acts immediately or leads to initialization choices. Actions are Show status, Initialize project workspace, Enable project guidance, and Disable project guidance. Without interactive UI, bare `/beads` prints explicit command help and performs no action. Complete explicit commands keep their existing behavior.
 
 `status` is read-only. Its focused overlay opens with `Loading…`, shows the inspection result or error, and closes with Enter/Esc. It works even when persistent status is hidden. Without interactive UI, status is reported as text.
 

@@ -7,6 +7,13 @@ import { CODESOOK_OMP_CONFIG_CHANGED, isRecord, readCodesookOmpConfig } from "@c
 import { readIntegrationSettings, resolveIntegrationProject, setProjectIntegrationPolicy, type IntegrationPolicy, type IntegrationVisibility } from "@codesook/omp-shared-display/project-integrations";
 import { inspectBeads, type BeadsInspection } from "./status";
 
+const COMMAND_CHOICES = [
+	{ operation: "status", label: "Show status", description: "Open read-only workspace status; Enter or Esc closes it." },
+	{ operation: "init", label: "Initialize project workspace", description: "Reuse a ready workspace, or continue to mode and hooks choices; standard initialization may make a Git commit." },
+	{ operation: "auto", label: "Enable project guidance", description: "Save project permission now for Beads guidance when ready; do not perform issue operations." },
+	{ operation: "off", label: "Disable project guidance", description: "Save project suppression now for this plugin's guidance; leave issue data, hooks, and other instructions unchanged." },
+];
+
 export type BeadsOptions = { globalConfigPath?: string };
 export type BeadsStatus = Omit<BeadsInspection, "state"> & {
 	state: BeadsInspection["state"] | "suppressed";
@@ -211,6 +218,14 @@ export default function beadsExtension(pi: ExtensionAPI, options: BeadsOptions =
 	};
 	pi.registerCommand("beads", {
 		description: "Choose a Beads action, or use init|status|auto|off",
+		getArgumentCompletions(argumentPrefix) {
+			const prefix = argumentPrefix.trim().toLowerCase();
+			return COMMAND_CHOICES.filter(choice => choice.operation !== prefix && choice.operation.startsWith(prefix)).map(choice => ({
+				value: choice.operation,
+				label: `${choice.operation}: ${choice.label}`,
+				description: `Tab inserts; Enter runs: ${choice.description}`,
+			}));
+		},
 		handler: async (args, ctx) => {
 			let operation = args.trim().toLowerCase();
 			if (!operation) {
@@ -218,15 +233,9 @@ export default function beadsExtension(pi: ExtensionAPI, options: BeadsOptions =
 					ctx.ui.notify("Beads commands:\n/beads status — Show read-only workspace status.\n/beads init — Reuse a ready workspace, or choose initialization mode and hooks in interactive OMP; standard initialization may commit files.\n/beads auto — Enable project guidance when ready.\n/beads off — Disable only this plugin's project guidance.", "info");
 					return;
 				}
-				const choices = [
-					{ operation: "status", label: "Show status", description: "Open read-only workspace status; Enter or Esc closes it." },
-					{ operation: "init", label: "Initialize project workspace", description: "Reuse a ready workspace, or continue to mode and hooks choices; standard initialization may make a Git commit." },
-					{ operation: "auto", label: "Enable project guidance", description: "Save project permission now for Beads guidance when ready; do not perform issue operations." },
-					{ operation: "off", label: "Disable project guidance", description: "Save project suppression now for this plugin's guidance; leave issue data, hooks, and other instructions unchanged." },
-				];
-				const selected = await ctx.ui.select("Beads", choices);
+				const selected = await ctx.ui.select("Beads", COMMAND_CHOICES);
 				if (selected === undefined) return;
-				const choice = choices.find(value => value.label === selected);
+				const choice = COMMAND_CHOICES.find(value => value.label === selected);
 				if (!choice) return;
 				operation = choice.operation;
 			}

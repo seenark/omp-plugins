@@ -7,6 +7,13 @@ import { CODESOOK_OMP_CONFIG_CHANGED, isRecord, readCodesookOmpConfig } from "@c
 import { readIntegrationSettings, resolveIntegrationProject, setProjectIntegrationPolicy, type IntegrationPolicy, type IntegrationVisibility } from "@codesook/omp-shared-display/project-integrations";
 import { inspectCodeGraph, type CodeGraphInspection } from "./status";
 
+const COMMAND_CHOICES = [
+	{ operation: "status", label: "Show status", description: "Open read-only project status; Enter or Esc closes it." },
+	{ operation: "init", label: "Initialize project data", description: "Initialize native data and its initial graph now, or reuse existing data; keep project policy." },
+	{ operation: "auto", label: "Enable project guidance", description: "Save project permission now for CodeGraph guidance when ready; leave data and tools unchanged." },
+	{ operation: "off", label: "Disable project guidance", description: "Save project suppression now for this plugin's guidance; leave data, tools, and other instructions unchanged." },
+];
+
 export type CodeGraphOptions = { globalConfigPath?: string };
 export type CodeGraphStatus = Omit<CodeGraphInspection, "state"> & {
 	state: CodeGraphInspection["state"] | "suppressed";
@@ -170,6 +177,14 @@ export default function codegraphExtension(pi: ExtensionAPI, options: CodeGraphO
 	};
 	pi.registerCommand("codegraph", {
 		description: "Choose a CodeGraph action, or use init|status|auto|off",
+		getArgumentCompletions(argumentPrefix) {
+			const prefix = argumentPrefix.trim().toLowerCase();
+			return COMMAND_CHOICES.filter(choice => choice.operation !== prefix && choice.operation.startsWith(prefix)).map(choice => ({
+				value: choice.operation,
+				label: `${choice.operation}: ${choice.label}`,
+				description: `Tab inserts; Enter runs: ${choice.description}`,
+			}));
+		},
 		handler: async (args, ctx) => {
 			let operation = args.trim().toLowerCase();
 			if (!operation) {
@@ -177,15 +192,9 @@ export default function codegraphExtension(pi: ExtensionAPI, options: CodeGraphO
 					ctx.ui.notify("CodeGraph commands:\n/codegraph status — Show read-only project status.\n/codegraph init — Initialize native project data and its initial graph, or reuse existing data; preserve policy.\n/codegraph auto — Enable project guidance when ready.\n/codegraph off — Disable only this plugin's project guidance.", "info");
 					return;
 				}
-				const choices = [
-					{ operation: "status", label: "Show status", description: "Open read-only project status; Enter or Esc closes it." },
-					{ operation: "init", label: "Initialize project data", description: "Initialize native data and its initial graph now, or reuse existing data; keep project policy." },
-					{ operation: "auto", label: "Enable project guidance", description: "Save project permission now for CodeGraph guidance when ready; leave data and tools unchanged." },
-					{ operation: "off", label: "Disable project guidance", description: "Save project suppression now for this plugin's guidance; leave data, tools, and other instructions unchanged." },
-				];
-				const selected = await ctx.ui.select("CodeGraph", choices);
+				const selected = await ctx.ui.select("CodeGraph", COMMAND_CHOICES);
 				if (selected === undefined) return;
-				const choice = choices.find(value => value.label === selected);
+				const choice = COMMAND_CHOICES.find(value => value.label === selected);
 				if (!choice) return;
 				operation = choice.operation;
 			}

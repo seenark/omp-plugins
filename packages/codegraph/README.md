@@ -26,8 +26,7 @@ Requires OMP 18.3.1 or newer and an installed `codegraph` CLI. Configure CodeGra
 The configured exploration MCP tool must be active, not merely listed. The plugin does not install CodeGraph or missing prerequisites, configure MCP, run the agent installer, register duplicate tools, or write repository agent instructions. Loading the plugin and normal detection never initialize projects.
 
 ## Commands
-
-- `/codegraph`: open the native action menu. Every choice describes its result: show status, initialize project data, enable project guidance, or disable project guidance. Esc cancels before inspection, policy writes, or native initialization. Without interactive UI, the root command prints explicit command help and performs no action.
+- `/codegraph`: Tab after the bare command name inserts a trailing space and shows existing action suggestions. Choosing an action inserts command text only; press Enter to execute it. Enter on the bare command opens the native description-bearing action menu. Esc dismisses that menu without action. Every menu choice describes its result: show status, initialize project data, enable project guidance, or disable project guidance. Without interactive UI, the root command prints explicit command help and performs no action.
 - `/codegraph status`: read-only status overlay, including the Integration Project, native Tool Workspace, data location, effective policy, and prerequisites. Enter/Esc closes the overlay.
 - `/codegraph init`: explicitly prepare native project data and its initial graph, or reuse an existing native Tool Workspace without rebuilding it. Initialization preserves project policy.
 - `/codegraph auto`: persist project permission for automatic guidance when ready.
