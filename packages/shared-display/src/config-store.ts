@@ -62,12 +62,16 @@ export function writeCodesookOmpConfig(
 	config: CodesookOmpConfig,
 	configPath = CODESOOK_OMP_CONFIG_PATH,
 ): void {
-	const directory = path.dirname(configPath);
+	writeTextFileAtomically(configPath, `${JSON.stringify(config, null, 2)}\n`);
+}
+
+export function writeTextFileAtomically(filePath: string, content: string): void {
+	const directory = path.dirname(filePath);
 	mkdirSync(directory, { recursive: true });
-	const temporaryPath = path.join(directory, `.${path.basename(configPath)}.${process.pid}.${randomUUID()}.tmp`);
+	const temporaryPath = path.join(directory, `.${path.basename(filePath)}.${process.pid}.${randomUUID()}.tmp`);
 	try {
-		writeFileSync(temporaryPath, `${JSON.stringify(config, null, 2)}\n`, "utf8");
-		renameSync(temporaryPath, configPath);
+		writeFileSync(temporaryPath, content, "utf8");
+		renameSync(temporaryPath, filePath);
 	} catch (error) {
 		try {
 			rmSync(temporaryPath, { force: true });

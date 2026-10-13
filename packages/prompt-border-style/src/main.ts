@@ -116,7 +116,7 @@ export type PromptBorderGlyphConfig = {
 
 export type PromptBorderGlyphSide = "left" | "right";
 type PromptBorderSpinnerGlyphSlot = SpinnerType;
-type PromptBorderGlyphSlot = PromptBorderGlyphSide | PromptBorderSpinnerGlyphSlot;
+export type PromptBorderGlyphSlot = PromptBorderGlyphSide | PromptBorderSpinnerGlyphSlot;
 type PromptBorderSpinnerGlyphConfig = Record<PromptBorderSpinnerGlyphSlot, PromptBorderGlyphConfig>;
 
 export type PromptBorderConfig = {
@@ -495,7 +495,7 @@ const USAGE =
 	"Usage: /prompt-border [status|<style> [layout]|layout <layout>|reset|rail toggle|glyphs debug [frames|demo|on|off]]";
 const DEFAULT_GLYPH_FRAME_MS = 70;
 const DEFAULT_SPINNER_GLYPH_FRAME_MS = 80;
-const HOST_SPINNER_FRAME_MS = 80;
+export const HOST_SPINNER_FRAME_MS = 80;
 const LOADING_GLYPH_DEBUG_ROOT_OPTIONS = ["debug"] as const;
 const LOADING_GLYPH_DEBUG_ACTIONS = ["frames", "demo", "on", "off"] as const;
 const PROMPT_BORDER_MENU = [
@@ -951,7 +951,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 	return typeof value === "object" && value !== null;
 }
 
-function getGlyphTextPath(configPath: string, slot: PromptBorderGlyphSlot): string {
+export function getGlyphTextPath(configPath: string, slot: PromptBorderGlyphSlot): string {
 	const assetDirectory = configPath === CONFIG_PATH ? CONFIG_DIRECTORY : path.dirname(configPath);
 	return path.join(assetDirectory, GLYPH_TEXT_FILE_NAMES[slot]);
 }

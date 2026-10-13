@@ -30,6 +30,7 @@ describe("Shared Display client", () => {
 		expect(parseFrameSequenceAsset("fps=5\n A  \n B\n\nC\n")).toEqual({ frames: [[" A  ", " B"], ["C"]], fps: 5 });
 		expect(parseFrameSequenceAsset("A B")).toEqual({ frames: [["A"], ["B"]] });
 		expect(parseFrameSequenceAsset("fps=0\nA\n\nB")).toEqual({ frames: [["A"], ["B"]] });
+		expect(parseFrameSequenceAsset("fps=5\nA B C\n\n")).toEqual({ frames: [["A"], ["B"], ["C"]], fps: 5 });
 	});
 
 	it("reports explicit host presence, not requests, and only notifies changes", () => {

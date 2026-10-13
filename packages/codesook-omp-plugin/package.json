@@ -6,6 +6,7 @@
   "license": "MIT",
   "files": [
     "index.ts",
+    "glyph-studio.ts",
     "tsconfig.json"
   ],
   "scripts": {

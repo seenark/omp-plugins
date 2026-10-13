@@ -64,6 +64,7 @@ import {
 	normalizePromptBorderConfig,
 	type BorderLayoutName,
 	type BorderStyleName,
+	getGlyphTextPath,
 } from "@codesook/omp-prompt-border-style/src/main.ts";
 import {
 	CONTEXT_RAIL_ROLES,
@@ -76,6 +77,7 @@ import {
 	type ContextRailPointer,
 	type ContextRailVisibility,
 } from "@codesook/omp-prompt-border-style/src/context-rail.ts";
+import { openGlyphStudio, type GlyphTarget } from "./glyph-studio.ts";
 type CavemanLevel = (typeof CAVEMAN_LEVELS)[number];
 type CavemanConfig = {
 	defaultLevel: CavemanLevel;
@@ -189,6 +191,7 @@ const RAIL_MEANING_PLACEMENTS = ["top", "below", "beside"] as const satisfies re
 
 const COMMAND_USAGE = "Usage: /codesook-omp-plugin [status|init config]";
 const STATUS_ACTION_ID = "action:status";
+const GLYPH_STUDIO_ACTION_ID = "action:glyph-studio";
 const INIT_ACTION_ID = "action:init";
 const APPLY_ACTION_ID = "action:apply";
 const CANCEL_ACTION_ID = "action:cancel";
@@ -789,6 +792,33 @@ function writeMissingFile(filePath: string, content: string): boolean {
 	}
 }
 
+function glyphTargets(draft: UnifiedSettingsDraft, configPath: string): GlyphTarget[] {
+	const targets: GlyphTarget[] = [
+		{ group: "Prompt Border", name: "left", path: getGlyphTextPath(configPath, "left"), surface: "prompt-glyph", fallback: "missing: built-in left glyph; empty: no glyph" },
+		{ group: "Prompt Border", name: "right", path: getGlyphTextPath(configPath, "right"), surface: "prompt-glyph", fallback: "missing or empty: no glyph" },
+		{ group: "Prompt Border", name: "status spinner", path: getGlyphTextPath(configPath, "status"), surface: "prompt-spinner", fallback: "missing or empty: OMP default spinner" },
+		{ group: "Prompt Border", name: "activity spinner", path: getGlyphTextPath(configPath, "activity"), surface: "prompt-spinner", fallback: "missing or empty: OMP default spinner" },
+	];
+	const rail = draft.display.contextRail;
+	const railDirectory = resolveGlyphDirectory(rail.glyphDirectory);
+	for (const role of CONTEXT_RAIL_ROLES) {
+		targets.push({ group: "Context Rail", name: role, path: path.join(railDirectory, rail[role].framesFile), surface: "context-rail", fallback: "missing or empty: theme symbol" });
+	}
+	const cavemanDirectory = resolveGlyphDirectory(draft.display.caveman.display.glyphDirectory);
+	for (const level of CAVEMAN_ACTIVE_LEVELS) {
+		targets.push({ group: "Caveman", name: level, path: path.join(cavemanDirectory, `${level}.txt`), surface: "shared-display", fallback: "missing or empty: packaged Caveman glyph" });
+	}
+	const headroomDirectory = resolveGlyphDirectory(draft.display.headroom.glyphDirectory);
+	for (const state of DISPLAY_STATES) {
+		targets.push({ group: "Headroom", name: state, path: path.join(headroomDirectory, `${state}.txt`), surface: "shared-display", fallback: "missing or empty: theme glyph" });
+	}
+	const ponytailDirectory = resolveGlyphDirectory(draft.display.sharedDisplay.ponytail.glyphDirectory);
+	for (const mode of ["off", "lite", "full", "ultra", "review"] as const) {
+		targets.push({ group: "Ponytail", name: mode, path: path.join(ponytailDirectory, `${mode}.txt`), surface: "shared-display", fallback: "missing or empty: packaged Ponytail glyph" });
+	}
+	return targets;
+}
+
 function configuredInitAssets(draft: UnifiedSettingsDraft, theme: unknown): InitAsset[] {
 	const assets: InitAsset[] = [];
 	const ponytailDirectory = resolveGlyphDirectory(draft.display.sharedDisplay.ponytail.glyphDirectory);
@@ -1120,6 +1150,7 @@ function settingsItems(
 		selectItem("rail.meaningPlacement", "Meaning placement", rail.custom.meaningPlacement, RAIL_MEANING_PLACEMENTS, "Custom mode meaning placement.", promptWarning),
 		...roleItems,
 		{ id: "section:actions", label: "Actions", currentValue: "", heading: true },
+		{ id: GLYPH_STUDIO_ACTION_ID, label: "Edit glyph frames", currentValue: "Enter", description: "Pick a glyph file, paste frames, set FPS, and watch a live preview. Ctrl+S writes the file immediately to the SAVED settings paths and reloads live displays; independent of Apply." },
 		{ id: STATUS_ACTION_ID, label: "Show status", currentValue: "Enter", description: "Open focused read-only status overlay; Enter/Esc closes without affecting prompt input." },
 		{ id: INIT_ACTION_ID, label: "Create missing files", currentValue: "Enter", description: "Create configuration and glyphs now from SAVED settings, not this draft. Keep existing files." },
 		{ id: RELOAD_ACTION_ID, label: "Reload from disk", currentValue: "Enter", description: "Discard draft edits and reread root config; live settings stay unchanged." },
@@ -1413,6 +1444,11 @@ export async function openSettings(pi: ExtensionAPI, ctx: ExtensionContext, conf
 					}
 					if (selected?.id === STATUS_ACTION_ID && isEnter(data)) {
 						void showStatus(pi, ctx).then(() => tui.requestRender());
+						return;
+					}
+					if (selected?.id === GLYPH_STUDIO_ACTION_ID && isEnter(data)) {
+						const root = readCodesookOmpConfig(configPath);
+						void openGlyphStudio(pi, ctx, glyphTargets(draftFromRootConfig(root.valid ? root.value : undefined), configPath), configPath).then(() => tui.requestRender());
 						return;
 					}
 					if (selected?.id === RELOAD_ACTION_ID && isEnter(data)) {

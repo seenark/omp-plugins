@@ -147,7 +147,7 @@ export function parseFrameSequenceAsset(text: string): FrameSequence | undefined
 		}
 	}
 
-	const body = lines.join("\n");
+	const body = lines.join("\n").replace(/^(?:[ \t]*\n)+/u, "").replace(/(?:\n[ \t]*)+$/u, "");
 	if (body.trim().length === 0) return undefined;
 
 	const frames: BlockFrame[] = /\n[ \t]*\n/u.test(body)
