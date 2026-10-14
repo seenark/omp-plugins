@@ -1302,7 +1302,7 @@ function settingsSections(draft: UnifiedSettingsDraft, presence: PluginPresence)
 }
 
 const SETTINGS_ACTIONS = [
-	{ id: GLYPH_STUDIO_ACTION_ID, label: "Edit glyph frames", description: "Pick a glyph file, paste frames, set FPS, and watch a live preview. Ctrl+S writes the file immediately to the SAVED settings paths and reloads live displays; independent of Apply." },
+	{ id: GLYPH_STUDIO_ACTION_ID, label: "Edit glyph frames", description: "Pick a glyph from a list, then edit its frames and FPS with a live preview. Ctrl+S writes the file immediately to the SAVED settings paths and reloads live displays; independent of Apply." },
 	{ id: STATUS_ACTION_ID, label: "Show status", description: "Open focused read-only status overlay; Enter/Esc closes without affecting prompt input." },
 	{ id: INIT_ACTION_ID, label: "Create missing files", description: "Create configuration and glyphs now from SAVED settings, not this draft. Keep existing files." },
 	{ id: RELOAD_ACTION_ID, label: "Reload from disk", description: "Discard draft edits and reread root config; live settings stay unchanged." },

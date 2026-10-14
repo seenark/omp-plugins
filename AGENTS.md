@@ -15,6 +15,8 @@ This project uses **bd** (beads) for issue tracking. Run `bd prime` for full wor
 
 **Upstream sync**: before updating Caveman, Ponytail, the Headroom server or the RTK binary to a newer upstream, follow `docs/agents/upstream-sync.md`.
 
+**Setup**: when asked to install or set up these plugins for a user, follow `docs/agents/setup.md` (ask before installing, removing conflicting plugins, or provisioning Headroom).
+
 ## Quick Reference
 
 ```bash

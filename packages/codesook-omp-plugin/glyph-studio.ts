@@ -20,11 +20,37 @@ export function serializeFrameSequence(sequence: FrameSequence | undefined): str
 	return `${head}${sequence.frames.map(frame => frame.join("\n")).join("\n\n")}\n`;
 }
 
-type Focus = "target" | "fps" | "frames";
+type View = "list" | "edit";
+type Focus = "frames" | "fps";
 type Theme = { fg(color: string, text: string): string; bold(text: string): string };
+type Loaded = { state: "ok" | "missing" | "error"; sequence: FrameSequence | undefined; readError?: string };
 
 function frameWidth(frame: readonly string[]): number {
 	return Math.max(0, ...frame.map(row => visibleWidth(row)));
+}
+
+function readTarget(target: GlyphTarget): Loaded {
+	let text = "";
+	let state: Loaded["state"] = "ok";
+	let readError: string | undefined;
+	try {
+		text = readFileSync(target.path, "utf8");
+	} catch (error) {
+		if (error instanceof Error && "code" in error && error.code === "ENOENT") state = "missing";
+		else {
+			state = "error";
+			readError = `Read failed: ${error instanceof Error ? error.message : String(error)}`;
+		}
+	}
+	if (target.surface === "context-rail") {
+		const asset = parseContextRailGlyphAsset(text);
+		const sequence: FrameSequence | undefined =
+			asset.frames.length === 0
+				? undefined
+				: { frames: asset.frames.map(frame => frame.split("\n")), ...(asset.fps === undefined ? {} : { fps: asset.fps }) };
+		return { state, sequence, readError };
+	}
+	return { state, sequence: parseFrameSequenceAsset(text), readError };
 }
 
 export function createGlyphStudio(options: {
@@ -35,15 +61,17 @@ export function createGlyphStudio(options: {
 	onClose(): void;
 }): Component & { dispose(): void } {
 	const { tui, theme, targets } = options;
+	let view: View = "list";
 	let targetIndex = 0;
-	let focus: Focus = "target";
+	let focus: Focus = "frames";
 	let notice = "";
 	let noticeKind: "success" | "warning" = "warning";
-	let state: "ok" | "missing" | "error" = "ok";
+	let state: Loaded["state"] = "ok";
 	let baseline = { framesText: "", fpsText: "" };
 	let origin = Date.now();
 	let confirmDiscard = false;
 	let timer: ReturnType<typeof setTimeout> | undefined;
+	const summaries = new Map<GlyphTarget, Loaded>();
 
 	const fpsInput = new Input();
 	fpsInput.prompt = "";
@@ -54,7 +82,7 @@ export function createGlyphStudio(options: {
 	const rows = tui.terminal?.rows ?? 24;
 	const framesEditor = new Editor(getEditorTheme());
 	framesEditor.disableSubmit = true;
-	framesEditor.setMaxHeight(Math.max(4, Math.min(12, rows - 14)));
+	framesEditor.setMaxHeight(Math.max(4, Math.min(12, rows - 16)));
 	framesEditor.onLargePaste = text => {
 		framesEditor.insertText(text);
 		return true;
@@ -67,45 +95,36 @@ export function createGlyphStudio(options: {
 	};
 
 	function syncFocus(): void {
-		fpsInput.focused = focus === "fps";
-		framesEditor.focused = focus === "frames";
+		fpsInput.focused = view === "edit" && focus === "fps";
+		framesEditor.focused = view === "edit" && focus === "frames";
 	}
 
 	const current = (): GlyphTarget => targets[targetIndex]!;
 	const isDirty = (): boolean =>
-		framesEditor.getText() !== baseline.framesText || fpsInput.getValue() !== baseline.fpsText;
+		view === "edit" && (framesEditor.getText() !== baseline.framesText || fpsInput.getValue() !== baseline.fpsText);
 
 	function setNotice(text: string, kind: "success" | "warning" = "warning"): void {
 		notice = text;
 		noticeKind = kind;
 	}
 
+	function summary(target: GlyphTarget): Loaded {
+		let cached = summaries.get(target);
+		if (!cached) {
+			cached = readTarget(target);
+			summaries.set(target, cached);
+		}
+		return cached;
+	}
+
 	function loadTarget(target: GlyphTarget): void {
-		let text = "";
-		state = "ok";
-		try {
-			text = readFileSync(target.path, "utf8");
-		} catch (error) {
-			if (error instanceof Error && "code" in error && error.code === "ENOENT") state = "missing";
-			else {
-				state = "error";
-				setNotice(`Read failed: ${error instanceof Error ? error.message : String(error)}`);
-			}
-		}
-		let sequence: FrameSequence | undefined;
-		if (target.surface === "context-rail") {
-			const asset = parseContextRailGlyphAsset(text);
-			sequence =
-				asset.frames.length === 0
-					? undefined
-					: { frames: asset.frames.map(frame => frame.split("\n")), ...(asset.fps === undefined ? {} : { fps: asset.fps }) };
-		} else {
-			sequence = parseFrameSequenceAsset(text);
-		}
-		const framesText = sequence ? sequence.frames.map(frame => frame.join("\n")).join("\n\n") : "";
-		const fpsText = sequence?.fps === undefined ? "" : String(sequence.fps);
-		framesEditor.setText(framesText);
-		fpsInput.setValue(fpsText);
+		const loaded = readTarget(target);
+		summaries.set(target, loaded);
+		state = loaded.state;
+		if (loaded.readError) setNotice(loaded.readError);
+		const sequence = loaded.sequence;
+		framesEditor.setText(sequence ? sequence.frames.map(frame => frame.join("\n")).join("\n\n") : "");
+		fpsInput.setValue(sequence?.fps === undefined ? "" : String(sequence.fps));
 		// setText may fire onChange; baseline records the settled values.
 		baseline = { framesText: framesEditor.getText(), fpsText: fpsInput.getValue() };
 		origin = Date.now();
@@ -166,7 +185,7 @@ export function createGlyphStudio(options: {
 	}
 
 	function schedule(): void {
-		if (timer) return;
+		if (timer || view !== "edit") return;
 		const d = derive();
 		if (!d.sequence || d.sequence.frames.length < 2 || d.fps === undefined || d.error) return;
 		const previewFps = current().surface === "prompt-spinner" ? 1000 / HOST_SPINNER_FRAME_MS : d.fps;
@@ -199,34 +218,113 @@ export function createGlyphStudio(options: {
 		else setNotice(`Saved ${target.path}`, "success");
 	}
 
-	function switchTarget(next: number): void {
-		if (isDirty()) {
-			setNotice("Unsaved changes: Ctrl+S save or Ctrl+R revert before switching.");
-			return;
-		}
-		targetIndex = next;
+	function openEditor(): void {
+		view = "edit";
+		focus = "frames";
 		notice = "";
+		confirmDiscard = false;
 		loadTarget(current());
-	}
-
-	function jumpGroup(direction: 1 | -1): void {
-		const groups: number[] = [];
-		targets.forEach((t, i) => {
-			if (i === 0 || targets[i - 1]!.group !== t.group) groups.push(i);
-		});
-		const currentGroup = groups.filter(start => start <= targetIndex).length - 1;
-		switchTarget(groups[(currentGroup + direction + groups.length) % groups.length]!);
-	}
-
-	function cycleFocus(direction: 1 | -1): void {
-		const order: Focus[] = ["target", "fps", "frames"];
-		focus = order[(order.indexOf(focus) + direction + order.length) % order.length]!;
 		syncFocus();
 	}
 
+	function backToList(): void {
+		view = "list";
+		notice = "";
+		clearTimeout(timer);
+		timer = undefined;
+		syncFocus();
+	}
+
+	function move(delta: number): void {
+		targetIndex = Math.min(targets.length - 1, Math.max(0, targetIndex + delta));
+	}
+
+	function describe(target: GlyphTarget): string {
+		const loaded = summary(target);
+		if (loaded.state === "missing") return theme.fg("warning", "missing file");
+		if (loaded.state === "error") return theme.fg("error", "unreadable");
+		const sequence = loaded.sequence;
+		if (!sequence) return theme.fg("dim", "empty · uses default");
+		const n = sequence.frames.length;
+		const speed = sequence.fps === undefined ? "static" : `${sequence.fps} fps`;
+		return theme.fg("dim", `${n} frame${n === 1 ? "" : "s"} · ${speed}`);
+	}
+
+	function renderList(width: number): string[] {
+		const out: string[] = [];
+		out.push(theme.fg("accent", theme.bold("Glyph Studio")) + theme.fg("dim", " · choose a glyph file to edit"));
+		out.push(theme.fg("dim", "Edits are written straight to the glyph file and reload live displays; independent of Apply."));
+		out.push("");
+		const lines: { text: string; target?: number }[] = [];
+		targets.forEach((target, i) => {
+			if (i === 0 || targets[i - 1]!.group !== target.group) lines.push({ text: theme.bold(target.group) });
+			const label = `${i === targetIndex ? theme.fg("accent", "›") : " "} ${target.name}`;
+			const pad = " ".repeat(Math.max(2, 20 - visibleWidth(label)));
+			lines.push({ text: `  ${label}${pad}${describe(target)}`, target: i });
+		});
+		const visible = Math.max(6, (tui.terminal?.rows ?? 24) - 8);
+		const selectedLine = lines.findIndex(line => line.target === targetIndex);
+		const start = Math.max(0, Math.min(lines.length - visible, selectedLine - Math.floor(visible / 2)));
+		if (start > 0) out.push(theme.fg("dim", `  ↑ ${start} more`));
+		out.push(...lines.slice(start, start + visible).map(line => line.text));
+		if (start + visible < lines.length) out.push(theme.fg("dim", `  ↓ ${lines.length - start - visible} more`));
+		out.push("");
+		out.push(theme.fg("dim", "↑↓ move · Enter edit · Esc close"));
+		return out;
+	}
+
+	function renderEditor(width: number): string[] {
+		const target = current();
+		const d = derive();
+		const index = frameIndex(d);
+		const label = (field: Focus, text: string): string =>
+			focus === field ? theme.fg("accent", theme.bold(`› ${text}`)) : `  ${text}`;
+		const out: string[] = [];
+		out.push(
+			theme.fg("accent", theme.bold("Glyph Studio")) +
+				` › ${target.group} › ${theme.bold(target.name)}` +
+				(isDirty() ? theme.fg("warning", "  ● unsaved") : ""),
+		);
+		const fileFlag = state === "missing" ? " (new file)" : state === "ok" && !baseline.framesText ? " (empty)" : "";
+		out.push(theme.fg("dim", `  ${target.path}${fileFlag}`));
+		out.push("");
+		const frames = d.sequence?.frames;
+		if (!frames) {
+			out.push(`  Preview (no frames) — falls back to ${target.fallback}`);
+		} else {
+			const frame = frames[index]!;
+			out.push(
+				`  Preview ${frame[0]}   frame ${index + 1}/${frames.length} · ${d.fps ?? "no"} fps · width ${frameWidth(frame)}`,
+			);
+			for (const row of frame.slice(1)) out.push(`          ${row}`);
+			if (frames.length > 1) {
+				out.push(
+					"  All     " +
+						frames.map((f, i) => (i === index ? theme.fg("accent", theme.bold(f[0]!)) : f[0]!)).join("  "),
+				);
+			}
+		}
+		if (d.error) out.push(theme.fg("error", `  ✗ ${d.error}`));
+		for (const warning of d.warnings) out.push(theme.fg("warning", `  ! ${warning}`));
+		if (notice) out.push(theme.fg(noticeKind === "success" ? "success" : "warning", `  ${notice}`));
+		out.push("");
+		out.push(`${label("fps", "Speed (fps, optional)")}  ${fpsInput.render(Math.max(1, width - 30))[0] ?? ""}`);
+		out.push(label("frames", "Frames"));
+		out.push(
+			theme.fg(
+				"dim",
+				target.surface === "shared-display"
+					? "  One frame per blank-line block (rows may be several lines)."
+					: "  One row per frame: separate frames with a blank line or a space.",
+			),
+		);
+		out.push(...framesEditor.render(width));
+		out.push("");
+		out.push(theme.fg("dim", "Tab fps ⇄ frames · Ctrl+S save · Ctrl+R revert · Esc back to list"));
+		return out;
+	}
+
 	syncFocus();
-	loadTarget(current());
-	schedule();
 
 	return {
 		invalidate() {},
@@ -235,46 +333,24 @@ export function createGlyphStudio(options: {
 			timer = undefined;
 		},
 		render(width: number): string[] {
-			const target = current();
-			const d = derive();
-			const index = frameIndex(d);
-			const marker = (field: Focus): string => (focus === field ? "› " : "  ");
-			const out: string[] = [];
-			out.push(
-				theme.fg("accent", theme.bold("Glyph Studio")) +
-					theme.fg("dim", " · Ctrl+S writes file now; independent of Apply"),
-			);
-			out.push(
-				`${marker("target")}Target  ◀ ${target.group} › ${target.name} ▶  (${targetIndex + 1}/${targets.length})`,
-			);
-			const fileFlag = state === "missing" ? " (missing)" : state === "ok" && !baseline.framesText ? " (empty)" : "";
-			out.push(`  File    ${target.path}${fileFlag}`);
-			out.push(`${marker("fps")}FPS     ${fpsInput.render(Math.max(1, width - 10))[0] ?? ""}`);
-			const frames = d.sequence?.frames;
-			if (!frames) {
-				out.push(`  Preview (no frames) — ${target.fallback}`);
-			} else {
-				const frame = frames[index]!;
-				out.push(
-					`  Preview ${frame[0]}   frame ${index + 1}/${frames.length} · ${d.fps ?? "no"} fps · width ${frameWidth(frame)}`,
-				);
-				for (const row of frame.slice(1)) out.push(`          ${row}`);
-				const strip = frames
-					.map((f, i) => (i === index ? theme.fg("accent", theme.bold(f[0]!)) : f[0]!))
-					.join("  ");
-				out.push(`  Frames  ${strip}`);
-			}
-			if (d.error) out.push(theme.fg("error", d.error));
-			for (const warning of d.warnings) out.push(theme.fg("warning", warning));
-			if (notice) out.push(theme.fg(noticeKind === "success" ? "success" : "warning", notice));
-			out.push(theme.fg("dim", "Paste frames below: one frame per blank-line block, or frames separated by spaces."));
-			out.push(...framesEditor.render(width));
-			out.push(
-				theme.fg("dim", "Tab/Shift+Tab field · ←→ target · ↑↓ group · Ctrl+S save · Ctrl+R revert · Esc close"),
-			);
+			const out = view === "list" ? renderList(width) : renderEditor(width);
 			return out.map(row => truncateToWidth(row, width));
 		},
 		handleInput(data: string): void {
+			if (view === "list") {
+				if (matchesKey(data, "escape")) {
+					options.onClose();
+					return;
+				}
+				if (matchesKey(data, "up")) move(-1);
+				else if (matchesKey(data, "down")) move(1);
+				else if (matchesKey(data, "pageUp")) move(-5);
+				else if (matchesKey(data, "pageDown")) move(5);
+				else if (matchesKey(data, "enter") || data === "\r") openEditor();
+				schedule();
+				tui.requestRender();
+				return;
+			}
 			let keepDiscard = false;
 			if (matchesKey(data, "ctrl+s")) save();
 			else if (matchesKey(data, "ctrl+r")) {
@@ -285,17 +361,10 @@ export function createGlyphStudio(options: {
 					confirmDiscard = true;
 					keepDiscard = true;
 					setNotice("Unsaved changes: Esc again to discard, Ctrl+S to save.");
-				} else {
-					options.onClose();
-					return;
-				}
-			} else if (matchesKey(data, "tab")) cycleFocus(1);
-			else if (matchesKey(data, "shift+tab")) cycleFocus(-1);
-			else if (focus === "target") {
-				if (matchesKey(data, "left")) switchTarget((targetIndex - 1 + targets.length) % targets.length);
-				else if (matchesKey(data, "right")) switchTarget((targetIndex + 1) % targets.length);
-				else if (matchesKey(data, "up")) jumpGroup(-1);
-				else if (matchesKey(data, "down")) jumpGroup(1);
+				} else backToList();
+			} else if (matchesKey(data, "tab") || matchesKey(data, "shift+tab")) {
+				focus = focus === "frames" ? "fps" : "frames";
+				syncFocus();
 			} else if (focus === "fps") fpsInput.handleInput(data);
 			else if (matchesKey(data, "enter") || data === "\r") framesEditor.insertText("\n");
 			else framesEditor.handleInput(data);

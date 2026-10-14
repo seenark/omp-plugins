@@ -14,6 +14,9 @@ const COMMAND_CHOICES = [
 	{ operation: "off", label: "Disable project guidance", description: "Save project suppression now for this plugin's guidance; leave data, tools, and other instructions unchanged." },
 ];
 
+const MCP_WAIT_ATTEMPTS = 10;
+const MCP_WAIT_MS = 1000;
+
 export type CodeGraphOptions = { globalConfigPath?: string };
 export type CodeGraphStatus = Omit<CodeGraphInspection, "state"> & {
 	state: CodeGraphInspection["state"] | "suppressed";
@@ -60,11 +63,15 @@ export default function codegraphExtension(pi: ExtensionAPI, options: CodeGraphO
 	let unsubscribePresence: (() => void) | undefined;
 	let refreshVersion = 0;
 	let stopped = false;
+	let waiting = false;
+	let lastVisibility: IntegrationVisibility | undefined;
 
 	const syncDisplay = (): void => {
 		if (!activeContext || stopped) return;
-		const visible = status !== undefined && (status.visibility === "always" || (status.visibility === "ready" && status.state === "ready"));
-		const text = visible ? `CodeGraph: ${status!.state}` : undefined;
+		const checking = status === undefined || waiting;
+		const visible = checking ? lastVisibility !== "never" : status!.visibility === "always" || (status!.visibility === "ready" && status!.state === "ready");
+		if (status) lastVisibility = status.visibility;
+		const text = visible ? `CodeGraph: ${checking ? "loading" : status!.state}` : undefined;
 		publisher?.publish(text ? { frames: [[text]] } : null);
 		activeContext.ui.setStatus("codegraph", publisher?.hostAvailable ? undefined : text);
 	};
@@ -105,6 +112,21 @@ export default function codegraphExtension(pi: ExtensionAPI, options: CodeGraphO
 		publisher = connectSharedDisplay(pi.events, "codegraph");
 		unsubscribePresence = publisher.onHostAvailabilityChange(syncDisplay);
 		await refresh(ctx);
+		// MCP servers connect after session_start; keep showing "loading" and re-inspect until the tool is listed.
+		try {
+			for (let attempt = 0; attempt < MCP_WAIT_ATTEMPTS; attempt++) {
+				if (stopped || status?.inspectionState !== "missing-prerequisite" || !status.initialized) return;
+				const version = refreshVersion;
+				waiting = true;
+				syncDisplay();
+				await new Promise<void>(resolve => ctx.setTimeout(() => resolve(), MCP_WAIT_MS));
+				if (stopped || version !== refreshVersion) return;
+				await refresh(ctx);
+			}
+		} finally {
+			waiting = false;
+			syncDisplay();
+		}
 	};
 	const showStatus = async (ctx: ExtensionContext): Promise<void> => {
 		if (!ctx.hasUI || typeof ctx.ui.custom !== "function") {

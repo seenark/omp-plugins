@@ -93,3 +93,7 @@ _Add a brief overview of your project architecture_
 ## Conventions & Patterns
 
 _Add your project-specific conventions here_
+
+### Setup
+
+To install or set up these plugins for a user, read `docs/agents/setup.md` and ask before every install, removal, or Headroom provisioning step.

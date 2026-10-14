@@ -264,6 +264,7 @@ export type ComposeDisplayOptions = {
 
 const POWERLINE_CAP = "\ue0b6";
 const POWERLINE_ARROW = "\ue0b0";
+const POWERLINE_END_CAP = "\ue0b4";
 const RESET = "\x1b[0m";
 const SGR = /\x1b\[[0-9;:]*m/gu;
 
@@ -272,14 +273,14 @@ function ansi(hex: string, plane: 38 | 48): string {
 	return `\x1b[${plane};2;${(value >> 16) & 255};${(value >> 8) & 255};${value & 255}m`;
 }
 
-/** Cap, colored cells joined by arrows, closing arrow. Producer colors are stripped so text stays readable on the segment background. */
+/** Cap, colored cells joined by arrows, rounded closing cap. Producer colors are stripped so text stays readable on the segment background. */
 function powerlineRow(cells: readonly { text: string; bg: string }[], palette: PowerlinePalette): string {
 	if (cells.length === 0) return "";
 	let out = `${ansi(cells[0]!.bg, 38)}${POWERLINE_CAP}`;
 	cells.forEach((cell, index) => {
 		const next = cells[index + 1];
 		out += `${ansi(cell.bg, 48)}${ansi(palette.text, 38)} ${cell.text.replace(SGR, "")} `;
-		out += next === undefined ? `${RESET}${ansi(cell.bg, 38)}${POWERLINE_ARROW}${RESET}` : `${ansi(next.bg, 48)}${ansi(cell.bg, 38)}${POWERLINE_ARROW}`;
+		out += next === undefined ? `${RESET}${ansi(cell.bg, 38)}${POWERLINE_END_CAP}${RESET}` : `${ansi(next.bg, 48)}${ansi(cell.bg, 38)}${POWERLINE_ARROW}`;
 	});
 	return out;
 }

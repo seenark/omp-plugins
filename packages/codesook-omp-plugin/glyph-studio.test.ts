@@ -36,13 +36,20 @@ afterEach(() => {
 });
 
 describe("Glyph Studio", () => {
-	it("loads, accepts a pasted whole file, and saves", () => {
+	it("lists targets with status and opens the selected one", () => {
 		writeFileSync(caveman.path, "fps=5\nA B\n");
 		open([caveman, prompt]);
-		expect(view()).toContain("frame 1/2");
-		expect(view()).toContain("5");
-		send("\t", "\t");
-		send(...Array(10).fill("\x7f"));
+		expect(view()).toContain("2 frames · 5 fps");
+		expect(view()).toContain("missing file");
+		send("\x1b[B", "\r");
+		expect(view()).toContain("Prompt Border › left");
+		expect(view()).toContain("(new file)");
+	});
+
+	it("loads, accepts a pasted whole file, and saves", () => {
+		open([caveman, prompt]);
+		send("\r");
+		expect(view()).toContain("(new file)");
 		send("\x1b[200~fps=8\nX\n\nY\n\nZ\x1b[201~");
 		send("\x13");
 		expect(readFileSync(caveman.path, "utf8")).toBe("fps=8\nX\n\nY\n\nZ\n");
@@ -52,23 +59,25 @@ describe("Glyph Studio", () => {
 
 	it("blocks save on invalid FPS", () => {
 		open([caveman]);
-		send("\t", "0", "\t", "A", "\r", "\r", "B", "\x13");
+		send("\r", "\t", "0", "\t", "A", "\r", "\r", "B", "\x13");
 		expect(existsSync(caveman.path)).toBe(false);
 		expect(view()).toContain("FPS must be a number above 0 and at most 60.");
 	});
 
 	it("rejects multi-row frames on one-row surfaces", () => {
 		open([caveman, prompt]);
-		send("\x1b[C", "\t", "\t", "A", "\r", "B", "\r", "\r", "C", "\x13");
+		send("\x1b[B", "\r", "A", "\r", "B", "\r", "\r", "C", "\x13");
 		expect(existsSync(prompt.path)).toBe(false);
 		expect(view()).toContain("frames must be one row");
 	});
 
-	it("guards Esc when dirty", () => {
+	it("guards Esc when dirty, then returns to the list and closes from there", () => {
 		open([caveman]);
-		send("\t", "\t", "A", "\x1b");
-		expect(closed).toBe(0);
+		send("\r", "A", "\x1b");
 		expect(view()).toContain("Esc again to discard");
+		send("\x1b");
+		expect(closed).toBe(0);
+		expect(view()).toContain("choose a glyph file");
 		send("\x1b");
 		expect(closed).toBe(1);
 	});
