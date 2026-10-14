@@ -11,12 +11,13 @@ import {
 	type FrameSequence,
 } from "@codesook/omp-shared-display/client";
 
-export type DisplayState = "off" | "remote-blocked" | "starting" | "offline" | "unavailable" | "idle" | "online" | "compressed";
+export type DisplayState = "off" | "remote-blocked" | "starting" | "loading" | "offline" | "unavailable" | "idle" | "online" | "compressed";
 
 export const DISPLAY_STATES: readonly DisplayState[] = [
 	"off",
 	"remote-blocked",
 	"starting",
+	"loading",
 	"offline",
 	"unavailable",
 	"idle",
@@ -56,6 +57,7 @@ export const DEFAULT_TEMPLATES: Record<DisplayState, string> = {
 	off: "{glyph} Headroom off",
 	"remote-blocked": "{glyph} Headroom remote blocked",
 	starting: "{glyph} Headroom starting",
+	loading: "{glyph} Headroom loading",
 	offline: "{glyph} Headroom not running",
 	unavailable: "{glyph} Headroom unavailable ({reason})",
 	idle: "{glyph} Headroom idle",
@@ -67,6 +69,7 @@ export const DEFAULT_GLYPHS: Record<DisplayState, string> = {
 	off: "○",
 	"remote-blocked": "⚠",
 	starting: "⏳",
+	loading: "⏳",
 	offline: "○",
 	unavailable: "⚠",
 	idle: "○",
@@ -198,12 +201,14 @@ export function widgetState(
 	starting: boolean,
 	online: boolean | null,
 	unavailable: boolean,
+	checking = false,
 ): DisplayState {
 	if (!enabled) return "off";
 	if (blocked) return "remote-blocked";
 	if (starting) return "starting";
 	if (online === false) return "offline";
 	if (unavailable) return "unavailable";
+	if (online === null && checking) return "loading";
 	return online === true ? "compressed" : "idle";
 }
 
@@ -274,6 +279,7 @@ const THEME_GLYPH_KEYS: Record<DisplayState, string> = {
 	off: "status.disabled",
 	"remote-blocked": "status.warning",
 	starting: "status.pending",
+	loading: "status.pending",
 	offline: "status.aborted",
 	idle: "status.shadowed",
 	online: "status.success",

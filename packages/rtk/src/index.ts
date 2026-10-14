@@ -29,7 +29,7 @@ export default function rtkExtension(pi: ExtensionAPI, options: RtkOptions = {})
 	const storeFor = (ctx: ExtensionContext) => openSessionStore(ctx.sessionManager.getSessionId(), root);
 	const publish = (): void => {
 		if (!publisher) return;
-		const state = !config.enabled ? "off" : checked && !version ? "missing" : "active";
+		const state = !config.enabled ? "off" : !checked ? "loading" : !version ? "missing" : "active";
 		publisher.publish(config.display.visible ? renderRtkFrames(state, savings, config.display) : null);
 	};
 	const startAvailability = (): void => {

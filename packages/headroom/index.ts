@@ -297,12 +297,13 @@ function resetSession(
 	runtime.state.offlineWarningShown = false;
 	const events = (pi as unknown as { events?: unknown }).events;
 	runtime.publisher = connectSharedDisplay(isEventBus(events) ? events : undefined, "headroom");
+	const blocked = isRemoteBlocked(runtime.config);
+	// Start the health check first so the first render shows "loading", not "idle".
+	if (!blocked && runtime.state.enabled) void checkHealthInBackground(runtime, ctx);
 	runtime.refreshStatus(ctx);
-	if (isRemoteBlocked(runtime.config)) {
+	if (blocked) {
 		notify(ctx, `Headroom remote URL is blocked by default: ${runtime.config.baseUrl}\nSet PI_HEADROOM_ALLOW_REMOTE=1 only if you trust that proxy with full context.`, "warning");
-		return;
 	}
-	if (runtime.state.enabled) void checkHealthInBackground(runtime, ctx);
 }
 
 function loadRuntimeConfig(options: HeadroomConfigLoadOptions & { glyphDirectory?: string }): HeadroomConfig {
@@ -788,6 +789,7 @@ function publishDisplay(runtime: HeadroomRuntime, ctx: ExtensionContext): void {
 		runtime.state.proxyStarting,
 		runtime.state.proxyOnline,
 		runtime.state.compressionAvailable === false,
+		runtime.state.pendingHealth !== undefined,
 	);
 	const fallback = resolveThemeGlyph(ctx.ui.theme, state) || DEFAULT_GLYPHS[state];
 	try {

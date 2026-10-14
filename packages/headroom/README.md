@@ -86,6 +86,7 @@ Example:
         "off": "{glyph} Headroom off",
         "remote-blocked": "{glyph} Headroom remote blocked",
         "starting": "{glyph} Headroom starting",
+        "loading": "{glyph} Headroom loading",
         "offline": "{glyph} Headroom not running",
         "unavailable": "{glyph} Headroom unavailable ({reason})",
         "idle": "{glyph} Headroom idle",

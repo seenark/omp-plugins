@@ -5,7 +5,7 @@ import * as path from "node:path";
 import { DEFAULT_HEADROOM_CONFIG } from "./config.ts";
 import { buildHeadroomInitFiles, writeHeadroomInitFiles, type HeadroomInitFile } from "./init.ts";
 
-const states = ["off", "remote-blocked", "starting", "offline", "unavailable", "idle", "online", "compressed"] as const;
+const states = ["off", "remote-blocked", "starting", "loading", "offline", "unavailable", "idle", "online", "compressed"] as const;
 
 function paths(root: string) {
 	return {
@@ -35,7 +35,7 @@ describe("Headroom initialization", () => {
 		try {
 			const files = buildHeadroomInitFiles("all", {}, paths(root));
 			const first = await writeHeadroomInitFiles(files, async () => false);
-			expect(first.created).toHaveLength(9);
+			expect(first.created).toHaveLength(10);
 			const before = files.map(file => fs.readFileSync(file.path, "utf8"));
 			const second = await writeHeadroomInitFiles(files, async () => false);
 			expect(second.skipped).toEqual(files.map(file => file.path));

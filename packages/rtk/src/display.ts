@@ -5,10 +5,10 @@ import { parseFrameSequenceAsset, type FrameSequence } from "@codesook/omp-share
 import type { RtkConfig } from "./config.ts";
 import type { Savings } from "./store.ts";
 
-export type RtkState = "active" | "off" | "missing";
+export type RtkState = "active" | "off" | "missing" | "loading";
 
-const GLYPHS: Record<RtkState, string> = { active: "✂", off: "○", missing: "⚠" };
-const FIXED_TEMPLATES = { off: "{glyph} rtk off", missing: "{glyph} rtk missing" } as const;
+const GLYPHS: Record<RtkState, string> = { active: "✂", off: "○", missing: "⚠", loading: "⏳" };
+const FIXED_TEMPLATES = { off: "{glyph} rtk off", missing: "{glyph} rtk missing", loading: "{glyph} rtk loading" } as const;
 
 /** 950, 1.2k, 3.4M. */
 export function formatCompact(value: number): string {

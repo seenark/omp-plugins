@@ -55,11 +55,15 @@ export default function beadsExtension(pi: ExtensionAPI, options: BeadsOptions =
 	let unsubscribePresence: (() => void) | undefined;
 	let refreshVersion = 0;
 	let stopped = false;
+	let lastVisibility: IntegrationVisibility | undefined;
+	let loading = false;
 
 	const syncDisplay = (): void => {
 		if (!activeContext || stopped) return;
-		const visible = status !== undefined && (status.visibility === "always" || (status.visibility === "ready" && status.state === "ready"));
-		const text = visible ? `Beads: ${status!.state}` : undefined;
+		const checking = loading;
+		const visible = checking ? lastVisibility !== "never" : status !== undefined && (status.visibility === "always" || (status.visibility === "ready" && status.state === "ready"));
+		if (status) lastVisibility = status.visibility;
+		const text = visible ? `Beads: ${checking ? "loading" : status!.state}` : undefined;
 		publisher?.publish(text ? { frames: [[text]] } : null);
 		activeContext.ui.setStatus("beads", publisher?.hostAvailable ? undefined : text);
 	};
@@ -69,12 +73,18 @@ export default function beadsExtension(pi: ExtensionAPI, options: BeadsOptions =
 		if (activeContext && activeContext !== ctx) activeContext.ui.setStatus("beads", undefined);
 		activeContext = ctx;
 		status = undefined;
+		loading = true;
+		const abandon = (): undefined => {
+			// A newer refresh owns the display; otherwise stop showing "loading" for guidance that was dropped.
+			if (version === refreshVersion && !stopped) { loading = false; syncDisplay(); }
+			return undefined;
+		};
 		syncDisplay();
 		try {
 			const integrationProject = await resolveIntegrationProject(cwd);
 			const settings = readIntegrationSettings("beads", integrationProject, options.globalConfigPath);
 			const inspected = await inspectBeads((command, args, execOptions) => pi.exec(command, args, execOptions), cwd);
-			if (version !== refreshVersion || stopped || ctx.cwd !== cwd) return undefined;
+			if (version !== refreshVersion || stopped || ctx.cwd !== cwd) return abandon();
 			status = {
 				...inspected,
 				workspaceState: inspected.state,
@@ -86,12 +96,13 @@ export default function beadsExtension(pi: ExtensionAPI, options: BeadsOptions =
 				errors: settings.errors,
 			};
 		} catch (error) {
-			if (version !== refreshVersion || stopped || ctx.cwd !== cwd) return undefined;
+			if (version !== refreshVersion || stopped || ctx.cwd !== cwd) return abandon();
 			const global = readCodesookOmpConfig(options.globalConfigPath);
 			const display = global.valid && isRecord(global.value.display.beads) ? global.value.display.beads : undefined;
 			const visibility = display?.visibility;
 			status = { state: "error", workspaceState: "error", initialized: false, operatingDirectory: cwd, policySource: "unresolved", visibility: visibility === "always" || visibility === "never" ? visibility : "ready", errors: [], detail: error instanceof Error ? error.message : String(error) };
 		}
+		loading = false;
 		syncDisplay();
 		return status;
 	};

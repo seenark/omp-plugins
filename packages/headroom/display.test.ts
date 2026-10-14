@@ -111,7 +111,7 @@ describe("Headroom display producer", () => {
 			glyphs: "/tmp/headroom-glyphs",
 		});
 		expect(files[0]?.path).toBe("/tmp/headroom-config.json");
-		expect(files).toHaveLength(9);
+		expect(files).toHaveLength(10);
 		expect(files.at(-1)?.content).toBe("S\n");
 	});
 });
