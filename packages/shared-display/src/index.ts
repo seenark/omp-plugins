@@ -65,11 +65,13 @@ const DEFAULT_HORIZONTAL_SEPARATOR = "  ";
 const SOURCE_ORDER: readonly DisplaySource[] = ["ponytail", "caveman", "headroom", "rtk", "codegraph", "beads"];
 
 export type SharedDisplayLayout = "horizontal" | "vertical";
+export type SharedDisplayStyle = "plain" | "powerline";
 export type SharedDisplayPlacement = "aboveEditor" | "belowEditor";
 
 export type SharedDisplayConfig = {
 	enabled: boolean;
 	layout: SharedDisplayLayout;
+	style: SharedDisplayStyle;
 	order: DisplaySource[];
 	widgetPlacement: SharedDisplayPlacement;
 	horizontalSeparator: string;
@@ -87,6 +89,7 @@ export const SHARED_DISPLAY_CONFIG_PATH = CODESOOK_OMP_CONFIG_PATH;
 export const DEFAULT_SHARED_DISPLAY_CONFIG: SharedDisplayConfig = {
 	enabled: true,
 	layout: "horizontal",
+	style: "plain",
 	order: [...SOURCE_ORDER],
 	widgetPlacement: "belowEditor",
 	horizontalSeparator: DEFAULT_HORIZONTAL_SEPARATOR,
@@ -109,6 +112,7 @@ export function normalizeSharedDisplayConfig(raw: unknown): SharedDisplayConfig 
 	const normalized = cloneDefaultConfig();
 	if (typeof source.enabled === "boolean") normalized.enabled = source.enabled;
 	if (source.layout === "horizontal" || source.layout === "vertical") normalized.layout = source.layout;
+	if (source.style === "plain" || source.style === "powerline") normalized.style = source.style;
 	if (Array.isArray(source.order)) {
 		normalized.order = [...new Set(source.order.filter(isDisplaySource))];
 	}
@@ -185,6 +189,7 @@ export function validateSharedDisplayConfig(config: unknown): string[] {
 	const errors: string[] = [];
 	if (typeof config.enabled !== "boolean") errors.push("enabled must be boolean");
 	if (config.layout !== "horizontal" && config.layout !== "vertical") errors.push("layout is invalid");
+	if (config.style !== "plain" && config.style !== "powerline") errors.push("style is invalid");
 	if (
 		!Array.isArray(config.order) ||
 		config.order.some(source => !isDisplaySource(source)) ||
@@ -237,6 +242,13 @@ export function writeSharedDisplayConfig(
 	}
 }
 
+export type PowerlinePalette = {
+	/** Segment background colors as `#rrggbb`, cycled per block. */
+	backgrounds: readonly string[];
+	/** Segment text color as `#rrggbb`. */
+	text: string;
+};
+
 export type ComposeDisplayOptions = {
 	layout: SharedDisplayLayout;
 	order: readonly DisplaySource[];
@@ -246,7 +258,31 @@ export type ComposeDisplayOptions = {
 	nowMs?: number;
 	animationOriginMs?: number;
 	active?: boolean;
+	/** When set, blocks render as Starship-style powerline segments. */
+	powerline?: PowerlinePalette;
 };
+
+const POWERLINE_CAP = "\ue0b6";
+const POWERLINE_ARROW = "\ue0b0";
+const RESET = "\x1b[0m";
+const SGR = /\x1b\[[0-9;:]*m/gu;
+
+function ansi(hex: string, plane: 38 | 48): string {
+	const value = Number.parseInt(hex.slice(1), 16);
+	return `\x1b[${plane};2;${(value >> 16) & 255};${(value >> 8) & 255};${value & 255}m`;
+}
+
+/** Cap, colored cells joined by arrows, closing arrow. Producer colors are stripped so text stays readable on the segment background. */
+function powerlineRow(cells: readonly { text: string; bg: string }[], palette: PowerlinePalette): string {
+	if (cells.length === 0) return "";
+	let out = `${ansi(cells[0]!.bg, 38)}${POWERLINE_CAP}`;
+	cells.forEach((cell, index) => {
+		const next = cells[index + 1];
+		out += `${ansi(cell.bg, 48)}${ansi(palette.text, 38)} ${cell.text.replace(SGR, "")} `;
+		out += next === undefined ? `${RESET}${ansi(cell.bg, 38)}${POWERLINE_ARROW}${RESET}` : `${ansi(next.bg, 48)}${ansi(cell.bg, 38)}${POWERLINE_ARROW}`;
+	});
+	return out;
+}
 
 export function selectFrame(
 	sequence: FrameSequence,
@@ -294,23 +330,36 @@ export function composeDisplayRows(
 		.filter((block): block is { rows: readonly string[]; width: number } => block !== undefined);
 	if (blocks.length === 0) return [];
 
+	const palette = options.powerline;
+	const padded = (block: { rows: readonly string[]; width: number }, rowIndex: number): string => {
+		const row = block.rows[rowIndex] ?? "";
+		return `${row}${" ".repeat(Math.max(0, block.width - visibleWidth(row)))}`;
+	};
+	const backgroundFor = (index: number): string => palette!.backgrounds[index % palette!.backgrounds.length]!;
 	const rows: string[] = [];
 	if (options.layout === "vertical") {
 		for (let blockIndex = 0; blockIndex < blocks.length; blockIndex += 1) {
 			if (blockIndex > 0) rows.push(...Array.from({ length: Math.max(0, options.verticalGapRows ?? 0) }, () => ""));
-			rows.push(...blocks[blockIndex]!.rows);
+			const block = blocks[blockIndex]!;
+			for (let rowIndex = 0; rowIndex < block.rows.length; rowIndex += 1) {
+				rows.push(
+					palette === undefined
+						? block.rows[rowIndex]!
+						: powerlineRow([{ text: padded(block, rowIndex), bg: backgroundFor(blockIndex) }], palette),
+				);
+			}
 		}
 	} else {
 		const height = Math.max(...blocks.map(block => block.rows.length), 0);
 		const separator = options.horizontalSeparator ?? DEFAULT_HORIZONTAL_SEPARATOR;
 		for (let rowIndex = 0; rowIndex < height; rowIndex += 1) {
 			rows.push(
-				blocks
-					.map(block => {
-						const row = block.rows[rowIndex] ?? "";
-						return `${row}${" ".repeat(Math.max(0, block.width - visibleWidth(row)))}`;
-					})
-					.join(separator),
+				palette === undefined
+					? blocks.map(block => padded(block, rowIndex)).join(separator)
+					: powerlineRow(
+							blocks.map((block, blockIndex) => ({ text: padded(block, rowIndex), bg: backgroundFor(blockIndex) })),
+							palette,
+						),
 			);
 		}
 	}
@@ -328,6 +377,7 @@ type WidgetTui = { requestComponentRender(component: WidgetComponent): void };
 type HostContext = {
 	hasUI: boolean;
 	ui: {
+		readonly theme?: unknown;
 		setWidget(
 			key: string,
 			content: ((tui: WidgetTui) => WidgetComponent) | undefined,
@@ -378,6 +428,31 @@ function monotonicNow(): number {
 	return typeof performance !== "undefined" && typeof performance.now === "function" ? performance.now() : Date.now();
 }
 
+type ThemeLike = { getColorHex(color: string): string; getBgHex(color: string): string };
+const POWERLINE_THEME_COLORS = [
+	"statusLineModel",
+	"statusLinePath",
+	"statusLineGitClean",
+	"statusLineContext",
+	"statusLineSpend",
+	"statusLineDirty",
+] as const;
+const HEX = /^#[0-9a-f]{6}$/iu;
+
+/** Palette from the active OMP theme's status-line colors; undefined (plain rendering) unless style is powerline and the theme resolves true colors. */
+function powerlinePalette(runtime: HostRuntime): PowerlinePalette | undefined {
+	if (runtime.config.style !== "powerline") return undefined;
+	const theme = runtime.ctx?.ui.theme as Partial<ThemeLike> | undefined;
+	if (typeof theme?.getColorHex !== "function" || typeof theme.getBgHex !== "function") return undefined;
+	try {
+		const backgrounds = POWERLINE_THEME_COLORS.map(color => theme.getColorHex!(color)).filter(hex => HEX.test(hex));
+		const text = theme.getBgHex("statusLineBg");
+		return backgrounds.length > 0 && HEX.test(text) ? { backgrounds, text } : undefined;
+	} catch {
+		return undefined;
+	}
+}
+
 function configuredSnapshots(runtime: HostRuntime): ReadonlyMap<DisplaySource, FrameSequence> {
 	const result = new Map<DisplaySource, FrameSequence>();
 	for (const source of runtime.config.order) {
@@ -393,6 +468,7 @@ function hasVisibleSnapshot(runtime: HostRuntime): boolean {
 			layout: runtime.config.layout,
 			order: runtime.config.order,
 			horizontalSeparator: runtime.config.horizontalSeparator,
+			powerline: powerlinePalette(runtime),
 			verticalGapRows: runtime.config.verticalGapRows,
 			width: 1,
 			nowMs: monotonicNow(),
@@ -485,6 +561,7 @@ function syncWidget(runtime: HostRuntime): void {
 							layout: runtime.config.layout,
 							order: runtime.config.order,
 							horizontalSeparator: runtime.config.horizontalSeparator,
+							powerline: powerlinePalette(runtime),
 							verticalGapRows: runtime.config.verticalGapRows,
 							width,
 							nowMs: monotonicNow(),
@@ -654,6 +731,14 @@ export function sharedDisplaySettingsItems(
 				"Arrange configured sources side by side (horizontal) or in stacked rows (vertical).",
 		},
 		{
+			id: "style",
+			label: "Style",
+			currentValue: draft.style,
+			values: ["plain", "powerline"],
+			changed: draft.style !== DEFAULT_SHARED_DISPLAY_CONFIG.style,
+			description: "Plain text, or Starship-style powerline segments colored from the active OMP theme (needs a Nerd Font).",
+		},
+		{
 			id: "order",
 			label: "Source order",
 			currentValue: draft.order.join(", "),
@@ -728,6 +813,9 @@ export function updateSharedDisplayDraft(
 			break;
 		case "layout":
 			if (value === "horizontal" || value === "vertical") draft.layout = value;
+			break;
+		case "style":
+			if (value === "plain" || value === "powerline") draft.style = value;
 			break;
 		case "order":
 			draft.order = parseOrderInput(value);

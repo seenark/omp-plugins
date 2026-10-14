@@ -66,8 +66,11 @@ test("settings initialization uses saved values, shows its result in place, and 
 						return;
 					}
 					const select = label => { for (let i = 0; i < 180; i++) { if (component.render(80).join("\\n").includes("> " + label)) return; component.handleInput("\\x1b[B"); } throw new Error("Action not reachable: " + label); };
+					select("CodeGraph Integration");
+					component.handleInput("\\r");
 					select("Global policy");
 					component.handleInput("\\r");
+					component.handleInput("\\x1b");
 					select("Create missing files");
 					component.handleInput("\\r");
 					assert.equal(closed, false);
@@ -81,6 +84,10 @@ test("settings initialization uses saved values, shows its result in place, and 
 					component.handleInput(save ? "\\r" : "\\x1b");
 					assert.equal(closed, false);
 					component.handleInput(save ? "\\x1b[13;2u" : "\\x1b");
+					if (!save) {
+						assert.equal(closed, false);
+						component.handleInput("\\r");
+					}
 					assert.equal(closed, true);
 				}
 			} };

@@ -38,6 +38,7 @@ import {
 	validateSharedDisplayConfig,
 	type SharedDisplayConfig,
 	type SharedDisplayLayout,
+	type SharedDisplayStyle,
 	type SharedDisplayPlacement,
 } from "@codesook/omp-shared-display";
 import {
@@ -135,6 +136,7 @@ const STANDALONE_FEATURE_PACKAGES: Record<ProjectFeature, string> = {
 };
 
 const SHARED_LAYOUTS = ["horizontal", "vertical"] as const satisfies readonly SharedDisplayLayout[];
+const SHARED_STYLES = ["plain", "powerline"] as const satisfies readonly SharedDisplayStyle[];
 const SHARED_PLACEMENTS = ["aboveEditor", "belowEditor"] as const satisfies readonly SharedDisplayPlacement[];
 const RAIL_PLACEMENTS = ["inside", "above", "below"] as const satisfies readonly ContextRailPlacement[];
 const RAIL_VISIBILITIES = ["always", "toggle", "collapse-while-typing"] as const satisfies readonly ContextRailVisibility[];
@@ -464,6 +466,7 @@ export function draftToRootSections(draft: UnifiedSettingsDraft): {
 			sharedDisplay: {
 				enabled: shared.enabled,
 				layout: shared.layout,
+				style: shared.style,
 				order: [...shared.order],
 				widgetPlacement: shared.widgetPlacement,
 				horizontalSeparator: shared.horizontalSeparator,
@@ -945,6 +948,7 @@ function validateDraft(draft: UnifiedSettingsDraft): string | undefined {
 	}
 	const shared = draft.display.sharedDisplay;
 	if (!SHARED_LAYOUTS.includes(shared.layout) || !SHARED_PLACEMENTS.includes(shared.widgetPlacement)) return "Shared Display layout or placement is invalid.";
+	if (!SHARED_STYLES.includes(shared.style)) return "Shared Display style is invalid.";
 	if (!Number.isSafeInteger(shared.verticalGapRows) || shared.verticalGapRows < 0 || shared.verticalGapRows > 10) return "Shared Display gap must be an integer from 0 through 10.";
 	if (/\r|\n/u.test(shared.horizontalSeparator)) return "Shared Display separator must be single-line.";
 	return undefined;
@@ -1073,6 +1077,7 @@ function settingsItems(
 		{ id: "section:shared", label: "Shared Display", currentValue: "", heading: true },
 		boolItem("shared.enabled", "Enabled", shared.enabled, "Enable shared host composition and widget.", sharedWarning),
 		selectItem("shared.layout", "Layout", shared.layout, SHARED_LAYOUTS, "Horizontal or vertical source composition.", sharedWarning),
+		selectItem("shared.style", "Style", shared.style, SHARED_STYLES, "Plain text or theme-colored Starship-style powerline segments (needs a Nerd Font).", sharedWarning),
 		textItem("shared.order", "Source order", shared.order.join(","), "Comma-separated ponytail,caveman,headroom,rtk,codegraph,beads order.", sharedWarning),
 		selectItem("shared.placement", "Placement", shared.widgetPlacement, SHARED_PLACEMENTS, "Widget placement relative to editor.", sharedWarning),
 		textItem("shared.separator", "Separator", shared.horizontalSeparator, "One-line separator for horizontal layout.", sharedWarning),
@@ -1124,13 +1129,6 @@ function settingsItems(
 		textItem("rail.glyphDirectory", "Glyph directory", rail.glyphDirectory, "External label/pointer/role asset directory; frame contents stay in files.", promptWarning),
 		selectItem("rail.meaningPlacement", "Meaning placement", rail.custom.meaningPlacement, RAIL_MEANING_PLACEMENTS, "Custom mode meaning placement.", promptWarning),
 		...roleItems,
-		{ id: "section:actions", label: "Actions", currentValue: "", heading: true },
-		{ id: GLYPH_STUDIO_ACTION_ID, label: "Edit glyph frames", currentValue: "Enter", description: "Pick a glyph file, paste frames, set FPS, and watch a live preview. Ctrl+S writes the file immediately to the SAVED settings paths and reloads live displays; independent of Apply." },
-		{ id: STATUS_ACTION_ID, label: "Show status", currentValue: "Enter", description: "Open focused read-only status overlay; Enter/Esc closes without affecting prompt input." },
-		{ id: INIT_ACTION_ID, label: "Create missing files", currentValue: "Enter", description: "Create configuration and glyphs now from SAVED settings, not this draft. Keep existing files." },
-		{ id: RELOAD_ACTION_ID, label: "Reload from disk", currentValue: "Enter", description: "Discard draft edits and reread root config; live settings stay unchanged." },
-		{ id: APPLY_ACTION_ID, label: "Apply changes", currentValue: "Enter", description: "Shift+Enter applies directly. Bare Enter asks confirmation, then atomically writes root config and emits live-change event." },
-		{ id: CANCEL_ACTION_ID, label: "Cancel", currentValue: "Enter", description: "Close without saving draft or changing live settings." },
 	];
 }
 
@@ -1172,6 +1170,7 @@ function updateDraft(draft: UnifiedSettingsDraft, id: string, value: string): vo
 		case "beads.projectVisibility": if (draft.projectIntegration && (value === "inherit" || value === "ready" || value === "always" || value === "never")) draft.projectIntegration.beads.visibility = value; return;
 		case "shared.enabled": draft.display.sharedDisplay.enabled = bool; return;
 		case "shared.layout": if (SHARED_LAYOUTS.includes(value as SharedDisplayLayout)) draft.display.sharedDisplay.layout = value as SharedDisplayLayout; return;
+		case "shared.style": if (SHARED_STYLES.includes(value as SharedDisplayStyle)) draft.display.sharedDisplay.style = value as SharedDisplayStyle; return;
 		case "shared.order": draft.display.sharedDisplay.order = value.split(",").map(item => item.trim()).filter(isDisplaySource); return;
 		case "shared.placement": if (SHARED_PLACEMENTS.includes(value as SharedDisplayPlacement)) draft.display.sharedDisplay.widgetPlacement = value as SharedDisplayPlacement; return;
 		case "shared.separator": draft.display.sharedDisplay.horizontalSeparator = value; return;
@@ -1290,6 +1289,27 @@ async function showStatus(pi: ExtensionAPI, ctx: ExtensionContext): Promise<void
 	);
 }
 
+type SettingsSection = { id: string; label: string; items: SettingItem[] };
+
+/** Group the flat item list into sections at each `section:` heading; role headings stay inside their section. */
+function settingsSections(draft: UnifiedSettingsDraft, presence: PluginPresence): SettingsSection[] {
+	const sections: SettingsSection[] = [];
+	for (const item of settingsItems(draft, presence)) {
+		if (item.heading && item.id.startsWith("section:")) sections.push({ id: item.id, label: item.label, items: [] });
+		else sections.at(-1)?.items.push(item);
+	}
+	return sections;
+}
+
+const SETTINGS_ACTIONS = [
+	{ id: GLYPH_STUDIO_ACTION_ID, label: "Edit glyph frames", description: "Pick a glyph file, paste frames, set FPS, and watch a live preview. Ctrl+S writes the file immediately to the SAVED settings paths and reloads live displays; independent of Apply." },
+	{ id: STATUS_ACTION_ID, label: "Show status", description: "Open focused read-only status overlay; Enter/Esc closes without affecting prompt input." },
+	{ id: INIT_ACTION_ID, label: "Create missing files", description: "Create configuration and glyphs now from SAVED settings, not this draft. Keep existing files." },
+	{ id: RELOAD_ACTION_ID, label: "Reload from disk", description: "Discard draft edits and reread root config; live settings stay unchanged." },
+	{ id: APPLY_ACTION_ID, label: "Apply changes", description: "Shift+Enter applies from anywhere. Bare Enter asks confirmation, then atomically writes root config and emits live-change event." },
+	{ id: CANCEL_ACTION_ID, label: "Cancel", description: "Close without saving draft or changing live settings." },
+] as const;
+
 export async function openSettings(pi: ExtensionAPI, ctx: ExtensionContext, configPath = CODESOOK_OMP_CONFIG_PATH): Promise<void> {
 	if (!ctx.hasUI || typeof ctx.ui.custom !== "function") {
 		ctx.ui.notify("Codesook OMP Plugin settings require an interactive UI.", "warning");
@@ -1302,14 +1322,23 @@ export async function openSettings(pi: ExtensionAPI, ctx: ExtensionContext, conf
 	let error = loaded.errors.join("\n") || presenceError;
 	await ctx.ui.custom<void>(
 		(tui, theme, _keybindings, done) => {
-			let list: SettingsList;
 			let closed = false;
 			let textSubmenuOpen = false;
 			let confirmingApply = false;
+			let confirmingDiscard = false;
 			let initializationResult: ScrollView | undefined;
-			const trackedItems = (): SettingItem[] =>
+			let openSectionId: string | undefined;
+			let sectionList: SettingsList | undefined;
+			let menuIndex = 0;
+			const snapshot = (): Map<string, string> => new Map(settingsItems(draft, presence).map(item => [item.id, item.currentValue]));
+			let baseline = snapshot();
+			const changedIn = (items: readonly SettingItem[]): number =>
+				items.filter(item => !item.heading && baseline.get(item.id) !== item.currentValue).length;
+			const totalChanged = (): number => settingsSections(draft, presence).reduce((sum, section) => sum + changedIn(section.items), 0);
+			const currentSection = (): SettingsSection | undefined => settingsSections(draft, presence).find(section => section.id === openSectionId);
+			const trackedItems = (items: SettingItem[]): SettingItem[] =>
 				trackTextSubmenus(
-					settingsItems(draft, presence),
+					items,
 					() => {
 						textSubmenuOpen = true;
 					},
@@ -1323,7 +1352,31 @@ export async function openSettings(pi: ExtensionAPI, ctx: ExtensionContext, conf
 				initializationResult?.dispose();
 				done(undefined);
 			};
-			const refresh = (): void => list.setItems(trackedItems());
+			const refresh = (): void => {
+				const section = currentSection();
+				if (section) sectionList?.setItems(trackedItems(section.items));
+			};
+			const openSection = (section: SettingsSection): void => {
+				openSectionId = section.id;
+				const items = trackedItems(section.items);
+				sectionList = new SettingsList(
+					items,
+					Math.min(18, items.length),
+					getSettingsListTheme(),
+					(id, value) => {
+						updateDraft(draft, id, value);
+						error = undefined;
+						refresh();
+						tui.requestRender();
+					},
+					() => {
+						openSectionId = undefined;
+						sectionList = undefined;
+						tui.requestRender();
+					},
+					{ layout: "auto", typeToSearch: false, hint: "↑↓ navigate · Enter edit · Esc back · Shift+Enter apply" },
+				);
+			};
 			const apply = async (): Promise<void> => {
 				if (closed) return;
 				const validation = validateDraft(draft);
@@ -1352,7 +1405,62 @@ export async function openSettings(pi: ExtensionAPI, ctx: ExtensionContext, conf
 				draft = next.draft;
 				legacySources = next.legacySources;
 				error = next.errors.join("\n") || undefined;
-				refresh();
+				baseline = snapshot();
+				openSectionId = undefined;
+				sectionList = undefined;
+				tui.requestRender();
+			};
+			const menuEntries = (): { id: string; label: string; detail: string; description?: string }[] => [
+				...settingsSections(draft, presence).map(section => {
+					const changed = changedIn(section.items);
+					const unloaded = section.id !== "section:presence" && section.items.some(item => item.warning);
+					return {
+						id: section.id,
+						label: section.label,
+						detail: [changed > 0 ? `${changed} changed` : "", unloaded ? "not loaded" : ""].filter(Boolean).join(" · "),
+					};
+				}),
+				...SETTINGS_ACTIONS.map(action => ({
+					id: action.id,
+					label: action.label,
+					detail: action.id === APPLY_ACTION_ID && totalChanged() > 0 ? `${totalChanged()} changed` : "",
+					description: action.description,
+				})),
+			];
+			const cancel = (): void => {
+				if (totalChanged() === 0) {
+					finish();
+					return;
+				}
+				confirmingDiscard = true;
+				tui.requestRender();
+			};
+			const activate = (id: string): void => {
+				const section = settingsSections(draft, presence).find(candidate => candidate.id === id);
+				if (section) {
+					openSection(section);
+				} else if (id === APPLY_ACTION_ID) {
+					confirmingApply = true;
+				} else if (id === INIT_ACTION_ID) {
+					const result = initializePluginConfig(ctx, configPath);
+					initializationResult = new ScrollView(new Text(theme.fg(result.type === "error" ? "error" : "text", result.message), 0, 0), {
+						height: 18,
+						theme: { track: text => theme.fg("dim", text), thumb: text => theme.fg("accent", text) },
+					});
+				} else if (id === STATUS_ACTION_ID) {
+					void showStatus(pi, ctx).then(() => tui.requestRender());
+					return;
+				} else if (id === GLYPH_STUDIO_ACTION_ID) {
+					const root = readCodesookOmpConfig(configPath);
+					void openGlyphStudio(pi, ctx, glyphTargets(draftFromRootConfig(root.valid ? root.value : undefined), configPath), configPath).then(() => tui.requestRender());
+					return;
+				} else if (id === RELOAD_ACTION_ID) {
+					reload();
+					return;
+				} else if (id === CANCEL_ACTION_ID) {
+					cancel();
+					return;
+				}
 				tui.requestRender();
 			};
 			const component: Component = {
@@ -1366,20 +1474,57 @@ export async function openSettings(pi: ExtensionAPI, ctx: ExtensionContext, conf
 							theme.fg("dim", "↑↓ scroll · Enter/Esc keep editing"),
 						];
 					}
-					const rows = [
-						theme.fg("accent", theme.bold("Codesook OMP Plugin Settings")),
+					const changed = totalChanged();
+					const section = currentSection();
+					const heading = theme.fg("accent", theme.bold("Codesook OMP Plugin Settings"));
+					const title = section ? `${heading} ${theme.fg("dim", "›")} ${theme.fg("accent", theme.bold(section.label))}` : heading;
+					const header = [
+						title + (changed > 0 ? `  ${theme.fg("warning", `${changed} unsaved`)}` : ""),
 						theme.fg("dim", `Root: ${configPath}`),
 						theme.fg("dim", `Project: ${projectIntegrationConfigPath(projectPath)}`),
 						...(error ? [theme.fg("error", `Error: ${error}`)] : []),
-						...(confirmingApply ? [
+					];
+					if (confirmingDiscard) {
+						return [
+							...header,
+							"",
+							theme.fg("warning", theme.bold(`Discard ${changed} unsaved change${changed === 1 ? "" : "s"}?`)),
+							"Nothing is written; live settings stay unchanged.",
+							"",
+							theme.fg("dim", "Enter discard · Esc keep editing · Shift+Enter apply instead"),
+						];
+					}
+					if (confirmingApply) {
+						return [
+							...header,
 							"",
 							theme.fg("accent", theme.bold("Apply Codesook OMP settings?")),
 							"Write root and edited project settings; notify loaded extensions.",
 							"",
 							theme.fg("dim", "Enter apply · Esc keep editing"),
-						] : list.render(width)),
+						];
+					}
+					if (sectionList) return [...header, "", ...sectionList.render(width)];
+					const entries = menuEntries();
+					const sectionCount = entries.length - SETTINGS_ACTIONS.length;
+					const labelWidth = Math.max(...entries.map(entry => entry.label.length)) + 2;
+					const row = (entry: (typeof entries)[number], index: number): string => {
+						const selected = index === menuIndex;
+						const text = `${selected ? "> " : "  "}${entry.label.padEnd(labelWidth)}`;
+						return (selected ? theme.fg("accent", text) : text) + (entry.detail ? theme.fg("warning", entry.detail) : "");
+					};
+					return [
+						...header,
+						"",
+						theme.fg("dim", "Settings"),
+						...entries.slice(0, sectionCount).map((entry, index) => row(entry, index)),
+						"",
+						theme.fg("dim", "Actions"),
+						...entries.slice(sectionCount).map((entry, index) => row(entry, sectionCount + index)),
+						"",
+						...(entries[menuIndex]?.description ? [theme.fg("dim", entries[menuIndex]!.description!)] : []),
+						theme.fg("dim", "↑↓ navigate · Enter open · Shift+Enter apply · Esc cancel"),
 					];
-					return rows;
 				},
 				handleInput(data: string): void {
 					if (initializationResult) {
@@ -1392,6 +1537,18 @@ export async function openSettings(pi: ExtensionAPI, ctx: ExtensionContext, conf
 						tui.requestRender();
 						return;
 					}
+					if (confirmingDiscard) {
+						if (isEscape(data)) {
+							confirmingDiscard = false;
+							tui.requestRender();
+						} else if (isShiftEnter(data)) {
+							confirmingDiscard = false;
+							void apply();
+						} else if (isEnter(data)) {
+							finish();
+						}
+						return;
+					}
 					if (confirmingApply) {
 						if (isEscape(data)) {
 							confirmingApply = false;
@@ -1402,64 +1559,32 @@ export async function openSettings(pi: ExtensionAPI, ctx: ExtensionContext, conf
 						}
 						return;
 					}
-					const selected = list.getSelectedItem();
 					if (isShiftEnter(data) && !textSubmenuOpen) {
 						void apply();
 						return;
 					}
-					if (selected?.id === APPLY_ACTION_ID && isEnter(data)) {
-						confirmingApply = true;
+					if (sectionList) {
+						sectionList.handleInput(data);
 						tui.requestRender();
 						return;
 					}
-					if (selected?.id === INIT_ACTION_ID && isEnter(data)) {
-						const result = initializePluginConfig(ctx, configPath);
-						initializationResult = new ScrollView(new Text(theme.fg(result.type === "error" ? "error" : "text", result.message), 0, 0), {
-							height: 18,
-							theme: { track: text => theme.fg("dim", text), thumb: text => theme.fg("accent", text) },
-						});
-						tui.requestRender();
+					const entries = menuEntries();
+					if (matchesKey(data, "up")) menuIndex = (menuIndex + entries.length - 1) % entries.length;
+					else if (matchesKey(data, "down")) menuIndex = (menuIndex + 1) % entries.length;
+					else if (isEnter(data)) {
+						activate(entries[menuIndex]!.id);
+						return;
+					} else if (isEscape(data)) {
+						cancel();
 						return;
 					}
-					if (selected?.id === STATUS_ACTION_ID && isEnter(data)) {
-						void showStatus(pi, ctx).then(() => tui.requestRender());
-						return;
-					}
-					if (selected?.id === GLYPH_STUDIO_ACTION_ID && isEnter(data)) {
-						const root = readCodesookOmpConfig(configPath);
-						void openGlyphStudio(pi, ctx, glyphTargets(draftFromRootConfig(root.valid ? root.value : undefined), configPath), configPath).then(() => tui.requestRender());
-						return;
-					}
-					if (selected?.id === RELOAD_ACTION_ID && isEnter(data)) {
-						reload();
-						return;
-					}
-					if (selected?.id === CANCEL_ACTION_ID && isEnter(data)) {
-						finish();
-						return;
-					}
-					list.handleInput(data);
 					tui.requestRender();
 				},
 				invalidate(): void {
-					list.invalidate();
+					sectionList?.invalidate();
 					initializationResult?.invalidate();
 				},
 			};
-			const initialItems = trackedItems();
-			list = new SettingsList(
-				initialItems,
-				Math.min(18, initialItems.length),
-				getSettingsListTheme(),
-				(id, value) => {
-					updateDraft(draft, id, value);
-					error = undefined;
-					refresh();
-					tui.requestRender();
-				},
-				() => finish(),
-				{ layout: "auto", typeToSearch: false, hint: "↑↓ navigate · Enter edit · Shift+Enter apply · Esc cancel" },
-			);
 			return component;
 		},
 		{ overlay: true },

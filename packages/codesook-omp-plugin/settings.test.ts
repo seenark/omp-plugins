@@ -116,6 +116,12 @@ test("dialog Cancel preserves disk/events; immediate Apply works; Reload discard
 					}
 					throw new Error(`Setting not reachable: ${label}`);
 				};
+				const open = (label: string): void => {
+					select(label);
+					component.handleInput?.("\r");
+				};
+				const back = (): void => component.handleInput?.("\x1b");
+				open("CodeGraph Integration");
 				select("Global policy");
 				component.handleInput?.("\r");
 				if (mode !== "apply") {
@@ -123,7 +129,8 @@ test("dialog Cancel preserves disk/events; immediate Apply works; Reload discard
 					component.handleInput?.("\r");
 					component.handleInput?.("\r");
 				}
-				component.handleInput?.("\x1b[B");
+				back();
+				open("Beads Integration");
 				select("Global policy");
 				component.handleInput?.("\r");
 				select("Global visibility");
@@ -134,11 +141,19 @@ test("dialog Cancel preserves disk/events; immediate Apply works; Reload discard
 				select("Project visibility");
 				component.handleInput?.("\r");
 				component.handleInput?.("\r");
+				back();
 				if (mode === "reload") {
 					select("Reload from disk");
 					component.handleInput?.("\r");
 				}
 				component.handleInput?.(mode === "cancel" ? "\x1b" : "\x1b[13;2u");
+				if (mode === "cancel") {
+					expect(closed).toBe(false);
+					component.handleInput?.("\x1b");
+					expect(closed).toBe(false);
+					component.handleInput?.("\x1b");
+					component.handleInput?.("\r");
+				}
 				expect(closed).toBe(true);
 			},
 		},
@@ -298,8 +313,11 @@ test("Apply requires a visible confirmation in the settings overlay; Esc retains
 					expect(existsSync(projectIntegrationConfigPath(project))).toBe(false);
 					expect(events).toEqual([]);
 				};
-				select("Global policy", 2);
+				select("Beads Integration");
 				component.handleInput?.("\r");
+				select("Global policy");
+				component.handleInput?.("\r");
+				component.handleInput?.("\x1b");
 				select("Apply");
 				component.handleInput?.("\r");
 				unchanged();

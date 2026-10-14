@@ -19,6 +19,12 @@ Legacy `~/.config/codesook-omp/shared-display/config.json` migrates once when ro
 
 Effective source order appends every known source (`ponytail`, `caveman`, `headroom`, `rtk`, `codegraph`, `beads`) that a persisted order omits, including orders saved before a source existed. Sources present keep their configured relative order; unknown names and duplicates are dropped. Each integration's visibility controls whether its segment appears; removing it from source order does not hide it. The side-effect-free client never loads the display host or another integration.
 
+## Style
+
+`display.sharedDisplay.style` is `plain` (default) or `powerline`. `powerline` renders each visible source as a segment in the Starship catppuccin-powerline shape: a rounded cap (U+E0B6), then segments joined by arrows (U+E0B0). Both glyphs need a Nerd Font.
+
+Colors come from the active OMP theme at every render, so a theme switch applies immediately. Segment backgrounds cycle through `statusLineModel`, `statusLinePath`, `statusLineGitClean`, `statusLineContext`, `statusLineSpend`, and `statusLineDirty`; text uses the `statusLineBg` color. Producer ANSI colors are stripped inside powerline segments so text stays readable. `horizontalSeparator` is ignored in powerline style. If the theme does not resolve `#rrggbb` colors, the host renders `plain`. Change it in `/omp-plugins` → Shared Display → Style.
+
 ## Ponytail
 
 Ponytail is a normal producer (package `@codesook/omp-ponytail`). It publishes through `connectSharedDisplay(events, "ponytail")` like every other source; the host renders only published snapshots and reads no Ponytail status, session entries, config, or assets.
