@@ -40,3 +40,15 @@ Use native Beads hierarchy and dependencies rather than copying a GitHub issue m
 - **Frontier:** intersect direct children from `bd children <map-id> --json` with `bd ready --parent <map-id> --unassigned --limit 0 --json`. Choose the first eligible direct child in the map's recorded order, not CLI priority order.
 - **Claim:** `bd update <child-id> --claim`.
 - **Resolve:** comment with the answer, close the child, and update the map's Decisions-so-far text with the gist and full child ID. Preserve other map content.
+
+## Session close
+
+Subordinate to explicit user instructions. Run in order; done when every step has a reported result.
+
+1. File beads for remaining work.
+2. Run quality gates if code changed (`bun run verify`).
+3. Update issue status: close finished work, update in-progress items.
+4. Git and Dolt sync: report `git status` and proposed commands, then wait for approval. Only a user-authorized maintainer session runs `git pull --rebase`, `bd dolt push`, `git push`.
+5. Hand off: changed files, validation, issue status, any blocked commit/sync/push with exact command and error.
+
+`bd setup` appends managed Beads blocks to `AGENTS.md`/`CLAUDE.md`; delete them after running it. This file is the single source.
