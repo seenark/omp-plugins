@@ -23,6 +23,8 @@ function open(targets: GlyphTarget[]): void {
 }
 const send = (...keys: string[]): void => keys.forEach(key => studio.handleInput?.(key));
 const view = (): string => studio.render(120).join("\n");
+const [ENTER, ESC, UP, DOWN, LEFT, SAVE] = ["\r", "\x1b", "\x1b[A", "\x1b[B", "\x1b[D", "\x13"];
+const paste = (text: string): string => `\x1b[200~${text}\x1b[201~`;
 
 beforeEach(() => {
 	dir = mkdtempSync(path.join(os.tmpdir(), "glyph-studio-"));
@@ -36,49 +38,61 @@ afterEach(() => {
 });
 
 describe("Glyph Studio", () => {
-	it("lists targets with status and opens the selected one", () => {
+	it("lists targets with a sample and status, and opens the selected one", () => {
 		writeFileSync(caveman.path, "fps=5\nA B\n");
 		open([caveman, prompt]);
 		expect(view()).toContain("2 frames · 5 fps");
 		expect(view()).toContain("missing file");
-		send("\x1b[B", "\r");
+		send(DOWN, ENTER);
 		expect(view()).toContain("Prompt Border › left");
 		expect(view()).toContain("(new file)");
 	});
 
-	it("loads, accepts a pasted whole file, and saves", () => {
+	it("replaces all frames from a pasted whole file and saves", () => {
 		open([caveman, prompt]);
-		send("\r");
-		expect(view()).toContain("(new file)");
-		send("\x1b[200~fps=8\nX\n\nY\n\nZ\x1b[201~");
-		send("\x13");
+		send(ENTER, paste("fps=8\nX\n\nY\n\nZ"), SAVE);
 		expect(readFileSync(caveman.path, "utf8")).toBe("fps=8\nX\n\nY\n\nZ\n");
-		expect(view()).toContain("/3");
-		expect(view()).toContain("8 fps");
+		expect(view()).toContain("/3 · 8 fps");
 	});
 
-	it("blocks save on invalid FPS", () => {
+	it("adds, deletes, reorders frames and steps FPS without typing it", () => {
 		open([caveman]);
-		send("\r", "\t", "0", "\t", "A", "\r", "\r", "B", "\x13");
-		expect(existsSync(caveman.path)).toBe(false);
-		expect(view()).toContain("FPS must be a number above 0 and at most 60.");
+		send(ENTER, ENTER, "A", ESC, "a", "B", ESC, "a", "C", ESC);
+		send("a", ESC); // an emptied new frame is dropped
+		send(LEFT, "x", "[", UP, SAVE);
+		expect(readFileSync(caveman.path, "utf8")).toBe("fps=1\nC\n\nA\n");
+		send(DOWN, SAVE);
+		expect(readFileSync(caveman.path, "utf8")).toBe("C\n\nA\n");
 	});
 
-	it("rejects multi-row frames on one-row surfaces", () => {
-		open([caveman, prompt]);
-		send("\x1b[B", "\r", "A", "\r", "B", "\r", "\r", "C", "\x13");
-		expect(existsSync(prompt.path)).toBe(false);
+	it("finishes a one-row frame on Enter and rejects multi-row frames there", () => {
+		open([prompt]);
+		send(ENTER, ENTER, "A", ENTER, "a", "B", ENTER, SAVE);
+		expect(readFileSync(prompt.path, "utf8")).toBe("A\n\nB\n");
+		send(paste("A\nB\n\nC"), SAVE);
+		expect(readFileSync(prompt.path, "utf8")).toBe("A\n\nB\n");
 		expect(view()).toContain("frames must be one row");
+	});
+
+	it("keeps the same height while stepping through frames of different heights", () => {
+		writeFileSync(caveman.path, "fps=4\nA\n\nB\nB\nB\n\nC\nC\n");
+		open([caveman]);
+		send(ENTER);
+		const heights = ["\x1b[C", "\x1b[C", " ", LEFT].map(key => {
+			send(key);
+			return studio.render(120).length;
+		});
+		expect(new Set(heights).size).toBe(1);
 	});
 
 	it("guards Esc when dirty, then returns to the list and closes from there", () => {
 		open([caveman]);
-		send("\r", "A", "\x1b");
+		send(ENTER, ENTER, "A", ESC, ESC);
 		expect(view()).toContain("Esc again to discard");
-		send("\x1b");
+		send(ESC);
 		expect(closed).toBe(0);
-		expect(view()).toContain("choose a glyph file");
-		send("\x1b");
+		expect(view()).toContain("pick a glyph to edit");
+		send(ESC);
 		expect(closed).toBe(1);
 	});
 });

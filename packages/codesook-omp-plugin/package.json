@@ -1,6 +1,6 @@
 {
   "name": "@codesook/omp-plugin-settings",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "type": "module",
   "description": "Unified Codesook OMP plugin settings for oh-my-pi",
   "license": "MIT",
