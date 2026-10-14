@@ -15,3 +15,9 @@ export function resolveCavemanSessionLevelFromConfig(entries: readonly unknown[]
 	return resolveCavemanSessionLevel(entries, config.defaultLevel);
 }
 
+/** Whole-message "stop caveman" / "normal mode", ignoring case and trailing punctuation (mirrors Ponytail upstream). */
+export function isCavemanDeactivationCommand(text: string): boolean {
+	const normalized = text.trim().toLowerCase().replace(/[.!?\s]+$/, "");
+	return normalized === "stop caveman" || normalized === "normal mode";
+}
+

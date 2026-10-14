@@ -71,12 +71,14 @@
         "@codesook/omp-caveman": "^1.0.0",
         "@codesook/omp-headroom": "^2.0.0",
         "@codesook/omp-prompt-border-style": "^2.0.0",
+        "@codesook/omp-rtk": "^1.0.0",
         "@codesook/omp-shared-display": "^1.2.0",
       },
       "devDependencies": {
         "@codesook/omp-caveman": "workspace:*",
         "@codesook/omp-headroom": "workspace:*",
         "@codesook/omp-prompt-border-style": "workspace:*",
+        "@codesook/omp-rtk": "workspace:*",
         "@codesook/omp-shared-display": "workspace:*",
         "@oh-my-pi/pi-coding-agent": "18.3.1",
         "@oh-my-pi/pi-tui": "18.3.1",
@@ -113,6 +115,24 @@
       "version": "2.0.0",
       "dependencies": {
         "@codesook/omp-shared-display": "^1.0.0",
+      },
+      "devDependencies": {
+        "@codesook/omp-shared-display": "workspace:*",
+        "@oh-my-pi/pi-coding-agent": "18.3.1",
+        "@oh-my-pi/pi-tui": "18.3.1",
+        "bun-types": "latest",
+        "typescript": "latest",
+      },
+      "peerDependencies": {
+        "@oh-my-pi/pi-coding-agent": ">=18.3.1",
+        "@oh-my-pi/pi-tui": ">=18.3.1",
+      },
+    },
+    "packages/rtk": {
+      "name": "@codesook/omp-rtk",
+      "version": "1.0.0",
+      "dependencies": {
+        "@codesook/omp-shared-display": "^1.2.0",
       },
       "devDependencies": {
         "@codesook/omp-shared-display": "workspace:*",
@@ -168,6 +188,8 @@
     "@codesook/omp-plugin-settings": ["@codesook/omp-plugin-settings@workspace:packages/codesook-omp-plugin"],
 
     "@codesook/omp-prompt-border-style": ["@codesook/omp-prompt-border-style@workspace:packages/prompt-border-style"],
+
+    "@codesook/omp-rtk": ["@codesook/omp-rtk@workspace:packages/rtk"],
 
     "@codesook/omp-shared-display": ["@codesook/omp-shared-display@workspace:packages/shared-display"],
 
@@ -387,7 +409,7 @@
 
     "boolean": ["boolean@3.2.0", "", {}, "sha512-d0II/GO9uf9lfUHH2BQsjxzRJZBdsjgsBiW4BvhWk/3qoKwQFjIDVN19PfX8F2D/r9PCMTtLWjYVCFrpeYUzsw=="],
 
-    "bun-types": ["bun-types@1.4.2", "", { "dependencies": { "@types/node": "*" } }, "sha512-bxV1FgK7yBIzjRe5zBozIM4Bem11ZJcCXSrjWRG3YWLt8yFDePu4cLjpebO8OvPeIE9trbyPF4fuj3Cia4Fj3w=="],
+    "bun-types": ["bun-types@1.4.3", "", { "dependencies": { "@types/node": "*", "undici-types": "*" } }, "sha512-tinRJNGOmUN+tEAsn2y2e942n9JHRHR42iUYzDH75NmhJqVBokGSQkkfSFdNWwsANIdrK6ACH9t01M452YyTwg=="],
 
     "chart.js": ["chart.js@4.5.1", "", { "dependencies": { "@kurkle/color": "^0.3.0" } }, "sha512-GIjfiT9dbmHRiYi6Nl2yFCq7kkwdkp1W/lp2J99rX0yo9tgJGn3lKQATztIjb5tVtevcBtIdICNWqlq5+E8/Pw=="],
 

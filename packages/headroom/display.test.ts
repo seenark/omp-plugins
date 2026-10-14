@@ -6,6 +6,7 @@ import {
 	DEFAULT_DISPLAY_CONFIG,
 	DEFAULT_GLYPHS,
 	isDisplayVisible,
+	formatCompact,
 	loadGlyphAsset,
 	normalizeDisplayConfig,
 	renderDisplay,
@@ -30,23 +31,29 @@ describe("Headroom display producer", () => {
 					tokensSaved: 1234,
 					tokensBefore: 5000,
 					tokensAfter: 3766,
+					lastPercent: 5,
+					lastSaved: 50,
 					proxyStatus: "online",
 					error: "",
+					reason: "",
 				},
 				config,
 				DEFAULT_GLYPHS.compressed,
 				asset,
 			);
-			expect(sequence).toEqual({ frames: [["A", "B Headroom -32% (1,234 saved)"], ["C Headroom -32% (1,234 saved)"]], fps: 8 });
+			expect(sequence).toEqual({ frames: [["A", "B Headroom -32% (1.2k saved)"], ["C Headroom -32% (1.2k saved)"]], fps: 8 });
 			expect(renderDisplay("compressed", {
 				label: "Headroom",
 				compressionPercent: 32,
 				tokensSaved: 1234,
 				tokensBefore: 5000,
 				tokensAfter: 3766,
+				lastPercent: 5,
+				lastSaved: 50,
 				proxyStatus: "online",
 				error: "",
-			}, config, DEFAULT_GLYPHS.compressed, 1, asset.frames)).toBe("C Headroom -32% (1,234 saved)");
+				reason: "",
+			}, config, DEFAULT_GLYPHS.compressed, 1, asset.frames)).toBe("C Headroom -32% (1.2k saved)");
 		} finally {
 			fs.rmSync(directory, { recursive: true, force: true });
 		}
@@ -58,7 +65,44 @@ describe("Headroom display producer", () => {
 		expect(isDisplayVisible({ display: { ...DEFAULT_DISPLAY_CONFIG, visible: false } })).toBe(false);
 		expect(widgetState(false, false, false, null, false)).toBe("off");
 		expect(widgetState(true, true, false, null, false)).toBe("remote-blocked");
-		expect(widgetState(true, false, false, true, true)).toBe("compressed");
+		expect(widgetState(true, false, false, true, false)).toBe("compressed");
+		expect(widgetState(true, false, false, true, true)).toBe("unavailable");
+		expect(widgetState(true, false, false, false, true)).toBe("offline");
+		expect(widgetState(true, false, false, null, false)).toBe("idle");
+	});
+
+	it("renders Headroom Savings, last-call, and reason placeholders with compact numbers", () => {
+		const values = {
+			label: "Headroom",
+			compressionPercent: 11.6,
+			tokensSaved: 3_400_000,
+			tokensBefore: 29_000_000,
+			tokensAfter: 25_600_000,
+			lastPercent: 7,
+			lastSaved: 950,
+			proxyStatus: "online",
+			error: "",
+			reason: "401",
+		};
+		const config = normalizeDisplayConfig({});
+		const render = (state: "compressed" | "unavailable", template?: string) =>
+			renderDisplay(state, values, template ? { ...config, template } : config, "G", 0, [["G"]]);
+
+		expect(render("compressed")).toBe("G Headroom -12% (3.4M saved)");
+		expect(render("compressed", "{lastPercent}% {lastSaved} {tokensBefore} {tokensAfter}")).toBe("7% 950 29M 25.6M");
+		expect(render("unavailable")).toBe("G Headroom unavailable (401)");
+	});
+
+	it("formats compact counts", () => {
+		expect([0, 950, 999, 1000, 1234, 12_345, 999_950, 3_400_000].map(formatCompact)).toEqual([
+			"0", "950", "999", "1k", "1.2k", "12.3k", "1M", "3.4M",
+		]);
+	});
+
+	it("falls back to default state templates when user config omits them", () => {
+		const config = normalizeDisplayConfig({ status: { compressed: "{glyph} custom" } });
+		expect(config.status.compressed).toBe("{glyph} custom");
+		expect(config.status.unavailable).toBe("{glyph} Headroom unavailable ({reason})");
 	});
 
 	it("builds explicit config and glyph initialization files", () => {
@@ -67,7 +111,7 @@ describe("Headroom display producer", () => {
 			glyphs: "/tmp/headroom-glyphs",
 		});
 		expect(files[0]?.path).toBe("/tmp/headroom-config.json");
-		expect(files).toHaveLength(8);
+		expect(files).toHaveLength(9);
 		expect(files.at(-1)?.content).toBe("S\n");
 	});
 });

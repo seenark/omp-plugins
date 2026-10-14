@@ -7,12 +7,18 @@ import sharedDisplayExtension, {
 	connectSharedDisplay,
 	composeDisplayRows,
 	DEFAULT_SHARED_DISPLAY_CONFIG,
+	normalizeSharedDisplayConfig,
 	parseSharedDisplayMessage,
 	writeSharedDisplayConfig,
 } from "./index.ts";
 import type { FrameSequence, SharedDisplayConfig } from "./index.ts";
 
-function makeHostHarness(enabled = true, hasUI = true, order = DEFAULT_SHARED_DISPLAY_CONFIG.order) {
+function makeHostHarness(
+	enabled = true,
+	hasUI = true,
+	order = DEFAULT_SHARED_DISPLAY_CONFIG.order,
+	ponytail: { loaded: boolean; entries?: unknown[] } = { loaded: false },
+) {
 	const root = fs.mkdtempSync(path.join(os.tmpdir(), "omp-display-host-"));
 	const configPath = path.join(root, "config.json");
 	writeSharedDisplayConfig({ ...DEFAULT_SHARED_DISPLAY_CONFIG, enabled, order }, configPath);
@@ -41,7 +47,7 @@ function makeHostHarness(enabled = true, hasUI = true, order = DEFAULT_SHARED_DI
 			setStatus() {},
 			notify() {},
 		},
-		sessionManager: { getBranch() { return []; } },
+		sessionManager: { getBranch() { return ponytail.entries ?? []; } },
 		setInterval() { throw new Error("Static sources must not start a timer"); },
 		clearTimer() {},
 	};
@@ -52,6 +58,7 @@ function makeHostHarness(enabled = true, hasUI = true, order = DEFAULT_SHARED_DI
 			sharedDisplayExtension({
 				events,
 				on(name: string, handler: (event: unknown, context: unknown) => void) { handlers[name] = handler; },
+				getCommands() { return ponytail.loaded ? [{ name: "ponytail", source: "extension" }] : []; },
 			} as unknown as Parameters<typeof sharedDisplayExtension>[0], { configPath });
 		},
 		start() { handlers.session_start!({}, context); },
@@ -197,7 +204,94 @@ describe("Shared Display source composition", () => {
 	});
 });
 
+describe("Shared Display Ponytail status", () => {
+	const stale = [{ type: "custom", customType: "ponytail-mode", data: { mode: "ultra" } }];
+	function withPonytailEnv(env: Record<string, string | undefined>, run: (configHome: string) => void) {
+		const configHome = fs.mkdtempSync(path.join(os.tmpdir(), "omp-ponytail-config-"));
+		const saved = Object.fromEntries(
+			["XDG_CONFIG_HOME", "PONYTAIL_DEFAULT_MODE", "PONYTAIL_HIDE_STATUS"].map(key => [key, process.env[key]]),
+		);
+		delete process.env.PONYTAIL_DEFAULT_MODE;
+		delete process.env.PONYTAIL_HIDE_STATUS;
+		Object.assign(process.env, { XDG_CONFIG_HOME: configHome }, env);
+		try {
+			run(configHome);
+		} finally {
+			for (const [key, value] of Object.entries(saved)) {
+				if (value === undefined) delete process.env[key];
+				else process.env[key] = value;
+			}
+			fs.rmSync(configHome, { recursive: true, force: true });
+		}
+	}
+	function rowsFor(ponytail: { loaded: boolean; entries?: unknown[] }) {
+		const host = makeHostHarness(true, true, DEFAULT_SHARED_DISPLAY_CONFIG.order, ponytail);
+		try {
+			host.load();
+			host.start();
+			return host.rows();
+		} finally {
+			host.close();
+		}
+	}
+
+	it("shows no segment from a stale ponytail-mode entry when Ponytail is not loaded", () => {
+		withPonytailEnv({}, () => expect(rowsFor({ loaded: false, entries: stale })).toEqual([]));
+	});
+
+	it("shows the session mode when Ponytail is loaded", () => {
+		withPonytailEnv({}, () => expect(rowsFor({ loaded: true, entries: stale })[0]).toContain("ULTRA"));
+	});
+
+	it("shows the default mode when Ponytail is loaded and the branch has no entry", () => {
+		withPonytailEnv({}, () => expect(rowsFor({ loaded: true })[0]).toContain("FULL"));
+		withPonytailEnv({ PONYTAIL_DEFAULT_MODE: "lite" }, () => expect(rowsFor({ loaded: true })[0]).toContain("LITE"));
+		withPonytailEnv({}, configHome => {
+			fs.mkdirSync(path.join(configHome, "ponytail"));
+			fs.writeFileSync(path.join(configHome, "ponytail", "config.json"), JSON.stringify({ defaultMode: "ultra" }));
+			expect(rowsFor({ loaded: true })[0]).toContain("ULTRA");
+		});
+		withPonytailEnv({ PONYTAIL_DEFAULT_MODE: "review" }, () => expect(rowsFor({ loaded: true })[0]).toContain("FULL"));
+	});
+
+	it("shows no segment when upstream hides its status", () => {
+		withPonytailEnv({ PONYTAIL_HIDE_STATUS: "1" }, () => expect(rowsFor({ loaded: true })).toEqual([]));
+		withPonytailEnv({}, configHome => {
+			fs.mkdirSync(path.join(configHome, "ponytail"));
+			fs.writeFileSync(path.join(configHome, "ponytail", "config.json"), JSON.stringify({ hideStatus: true }));
+			expect(rowsFor({ loaded: true, entries: stale })).toEqual([]);
+		});
+	});
+});
+
 describe("Shared Display configuration", () => {
+	it("appends every missing known source to a saved order and drops unknown or duplicate entries", () => {
+		expect(normalizeSharedDisplayConfig({ order: ["caveman", "bogus", "ponytail", "caveman"] }).order).toEqual([
+			"caveman",
+			"ponytail",
+			"headroom",
+			"rtk",
+			"codegraph",
+			"beads",
+		]);
+		expect(normalizeSharedDisplayConfig({ order: ["headroom", "codegraph", "beads"] }).order).toEqual([
+			"headroom",
+			"codegraph",
+			"beads",
+			"ponytail",
+			"caveman",
+			"rtk",
+		]);
+	});
+
+	it("renders RTK snapshots at its configured position", () => {
+		const snapshots = new Map<"rtk" | "headroom", FrameSequence>([
+			["rtk", { frames: [["R"]] }],
+			["headroom", { frames: [["H"]] }],
+		]);
+		expect(composeDisplayRows(snapshots, { layout: "horizontal", order: DEFAULT_SHARED_DISPLAY_CONFIG.order, width: 10 }).map(row => row.trim())).toEqual(["H  R"]);
+	});
+
 	it("keeps explicit non-root paths as standalone config files", () => {
 		const root = fs.mkdtempSync(path.join(os.tmpdir(), "omp-shared-display-"));
 		try {

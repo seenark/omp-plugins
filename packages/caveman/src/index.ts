@@ -18,7 +18,7 @@ import {
 	filterCavemanSkill,
 	readCavemanSkill,
 } from "./instructions.ts";
-import { resolveCavemanSessionLevelFromConfig } from "./session.ts";
+import { isCavemanDeactivationCommand, resolveCavemanSessionLevelFromConfig } from "./session.ts";
 import {
 	CAVEMAN_ACTIVE_LEVELS,
 	CAVEMAN_LEVELS,
@@ -44,6 +44,9 @@ const COMMAND_LEVELS = [
 	...CAVEMAN_ACTIVE_LEVELS,
 	"off",
 ] as const;
+// Live Caveman level per agent id. OMP rebinds the parent's extension factories into every subagent
+// session in the same process, so this module state is shared: a child reads its parent's level at session_start.
+const agentLevels = new Map<string, () => CavemanLevel>();
 const COMMAND_USAGE =
 	"Usage: /caveman [status|off|lite|full|ultra|wenyan-lite|wenyan-full|wenyan-ultra]";
 const CAVEMAN_MENU = [
@@ -95,6 +98,12 @@ function hasSessionLevelEntry(entries: readonly unknown[]): boolean {
 	return false;
 }
 
+// `ctx.agent` exists from OMP 18.3.2; older hosts report undefined and skip subagent inheritance.
+function agentIdentity(ctx: ExtensionContext): { id: string; parentId?: string } | undefined {
+	if (!("agent" in ctx) || !isRecord(ctx.agent) || typeof ctx.agent.id !== "string") return undefined;
+	return { id: ctx.agent.id, parentId: typeof ctx.agent.parentId === "string" ? ctx.agent.parentId : undefined };
+}
+
 function reportInfo(pi: ExtensionAPI, ctx: ExtensionContext, message: string): void {
 	if (ctx.hasUI) {
 		ctx.ui.notify(message, "info");
@@ -135,10 +144,11 @@ async function showCavemanStatus(
 	level: CavemanLevel,
 	config: CavemanConfig,
 	configPath: string,
+	sessionLevelExplicit: boolean,
 ): Promise<void> {
 	const content = [
 		`Level: ${level}`,
-		`Default: ${config.defaultLevel}`,
+		`Default: ${config.defaultLevel}${sessionLevelExplicit && level !== config.defaultLevel ? " (overridden by session level)" : ""}`,
 		`Native status: ${config.nativeVisible ? "on" : "off"}`,
 		`Shared display: ${config.display.visible ? "on" : "off"}`,
 		`Config: ${configPath}`,
@@ -185,6 +195,8 @@ export default function cavemanExtension(pi: ExtensionAPI, options: CavemanExten
 	let configLoad: Promise<void> | undefined;
 	let skillLoad: Promise<string> | undefined;
 	let syncVersion = 0;
+	let agentId: string | undefined;
+	const currentLevel = (): CavemanLevel => level;
 
 	const loadConfig = async (ctx?: ExtensionContext, force = false): Promise<void> => {
 		if (force) configLoad = undefined;
@@ -258,20 +270,38 @@ export default function cavemanExtension(pi: ExtensionAPI, options: CavemanExten
 	};
 	const unsubscribeConfig = rootConfig ? pi.events.on(CODESOOK_OMP_CONFIG_CHANGED, applyLiveConfig) : undefined;
 
-	const rehydrateSession = async (ctx: ExtensionContext): Promise<void> => {
+	const rehydrateSession = async (ctx: ExtensionContext, inheritFromParent = false): Promise<void> => {
 		activeContext = ctx;
 		hasSessionState = true;
 		await loadConfig(ctx, true);
 		const entries = ctx.sessionManager.getBranch();
 		sessionLevelExplicit = hasSessionLevelEntry(entries);
 		level = resolveCavemanSessionLevelFromConfig(entries, config);
+		const agent = agentIdentity(ctx);
+		const parentLevel = inheritFromParent && !sessionLevelExplicit && agent?.parentId ? agentLevels.get(agent.parentId)?.() : undefined;
+		if (parentLevel !== undefined) {
+			sessionLevelExplicit = true;
+			level = parentLevel;
+			pi.appendEntry("caveman-level", { level });
+		}
+		if (agent) {
+			agentLevels.set(agent.id, currentLevel);
+			agentId = agent.id;
+		}
 		active = false;
 		await syncDisplay(ctx);
 	};
 
+	const setSessionLevel = async (next: CavemanLevel, ctx: ExtensionContext): Promise<void> => {
+		sessionLevelExplicit = true;
+		level = next;
+		pi.appendEntry("caveman-level", { level });
+		await syncDisplay(ctx);
+		reportInfo(pi, ctx, level === "off" ? "Caveman off." : `Caveman ${level}.`);
+	};
 
 	pi.on("session_start", async (_event, ctx) => {
-		await rehydrateSession(ctx);
+		await rehydrateSession(ctx, true);
 	});
 	pi.on("session_switch", async (_event, ctx) => {
 		await rehydrateSession(ctx);
@@ -291,6 +321,7 @@ export default function cavemanExtension(pi: ExtensionAPI, options: CavemanExten
 		await syncDisplay(ctx);
 	});
 	pi.on("session_shutdown", async (_event, ctx) => {
+		if (agentId !== undefined && agentLevels.get(agentId) === currentLevel) agentLevels.delete(agentId);
 		disposed = true;
 		active = false;
 		syncVersion += 1;
@@ -319,6 +350,11 @@ export default function cavemanExtension(pi: ExtensionAPI, options: CavemanExten
 		return { systemPrompt: appendCavemanSystemPrompt(event.systemPrompt, addition) };
 	});
 
+	pi.on("input", async (event, ctx) => {
+		if (event.source === "extension" || level === "off" || !isCavemanDeactivationCommand(event.text)) return;
+		await setSessionLevel("off", ctx);
+	});
+
 	pi.registerCommand("caveman", {
 		description: COMMAND_USAGE,
 		getArgumentCompletions: commandCompletions,
@@ -340,14 +376,10 @@ export default function cavemanExtension(pi: ExtensionAPI, options: CavemanExten
 			}
 			await loadConfig(ctx);
 			if (argument === "status") {
-				await showCavemanStatus(ctx, level, config, configPath);
+				await showCavemanStatus(ctx, level, config, configPath, sessionLevelExplicit);
 				return;
 			}
-			sessionLevelExplicit = true;
-			level = argument as CavemanLevel;
-			pi.appendEntry("caveman-level", { level });
-			await syncDisplay(ctx);
-			reportInfo(pi, ctx, level === "off" ? "Caveman off." : `Caveman ${level}.`);
+			await setSessionLevel(argument as CavemanLevel, ctx);
 		},
 	});
 }

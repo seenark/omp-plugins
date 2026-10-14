@@ -1,7 +1,6 @@
 import type { ImageContent, TextContent, ToolCall } from "@oh-my-pi/pi-ai";
 import type {
 	AgentMessage,
-	ApplyCompressionOptions,
 	ApplyCompressionResult,
 	CompressionMapping,
 	CompressionPayload,
@@ -10,7 +9,7 @@ import type {
 	OpenAIToolCall,
 } from "./types.ts";
 
-type AnyMessage = AgentMessage & { role?: string; content?: unknown; timestamp?: number };
+type AnyMessage = AgentMessage & { role?: string; content?: unknown; timestamp?: number; isError?: boolean };
 
 interface MessageWithContent {
 	content: unknown;
@@ -18,9 +17,19 @@ interface MessageWithContent {
 
 const STANDARD_COMPRESSIBLE_ROLES = new Set(["user", "assistant", "toolResult"]);
 
+/** A bash command that runs `rtk`; its result is already compacted by RTK (pitfall I1). */
+const RTK_COMMAND = /(^|[;&|(]\s*)rtk\s/;
+
+/** One chars/4 estimate for every Headroom Savings number. */
+export function estimateTokens(chars: number): number {
+	return Math.ceil(chars / 4);
+}
+
 export function buildCompressionPayload(messages: AgentMessage[], minMessageChars: number): CompressionPayload {
 	const mappings: CompressionMapping[] = [];
+	const rtkCallIds = collectRtkCallIds(messages);
 	let candidateCount = 0;
+	let chars = 0;
 
 	for (let sourceIndex = 0; sourceIndex < messages.length; sourceIndex++) {
 		const source = messages[sourceIndex] as AnyMessage;
@@ -28,71 +37,136 @@ export function buildCompressionPayload(messages: AgentMessage[], minMessageChar
 		if (!converted) continue;
 
 		const originalText = extractOpenAIText(converted);
-		const applyTo = source.role === "toolResult" && originalText.length >= minMessageChars ? "toolResult" : null;
+		const toolCallId = converted.role === "tool" ? converted.tool_call_id : undefined;
+		const applyTo =
+			source.role === "toolResult" &&
+			source.isError !== true &&
+			!rtkCallIds.has(toolCallId ?? "") &&
+			originalText.length >= minMessageChars
+				? "toolResult"
+				: null;
 		if (applyTo) candidateCount++;
-		mappings.push({ sourceIndex, message: converted, applyTo, originalText });
+		chars += originalText.length + toolCallChars(converted);
+		mappings.push({ sourceIndex, message: converted, applyTo, originalText, toolCallId });
 	}
 
 	return {
 		messages: mappings.map((mapping) => mapping.message),
 		mappings,
 		candidateCount,
+		chars,
 	};
 }
 
+/**
+ * Take every candidate change from the server independently. Changes to non-candidates,
+ * misaligned messages, empty text, or text that is not shorter are ignored, not fatal.
+ */
 export function applyCompressionResult(
-	originalMessages: AgentMessage[],
 	mappings: CompressionMapping[],
 	compressedMessages: OpenAIMessage[],
-	_options: ApplyCompressionOptions,
 ): ApplyCompressionResult {
 	if (compressedMessages.length !== mappings.length) {
 		return { ok: false, reason: "message-count-changed" };
 	}
 
-	let nextMessages: AgentMessage[];
-	try {
-		nextMessages = structuredClone(originalMessages) as AgentMessage[];
-	} catch {
-		nextMessages = originalMessages.map(cloneMessageForCompression);
-	}
-	let appliedMessages = 0;
-
+	const replacements = new Map<string, string>();
+	const rejected: string[] = [];
 	for (let index = 0; index < mappings.length; index++) {
 		const mapping = mappings[index];
+		if (mapping.applyTo !== "toolResult" || !mapping.toolCallId) continue;
 		const compressed = compressedMessages[index];
-		const validation = validateAlignedMessage(mapping.message, compressed);
-		if (!validation.ok) return validation;
+		const mismatch = alignmentMismatch(mapping.message, compressed);
+		if (mismatch) {
+			rejected.push(mismatch);
+			continue;
+		}
 		const nextText = extractOpenAIText(compressed);
 		if (nextText === mapping.originalText) continue;
-		if (mapping.applyTo !== "toolResult") {
-			return { ok: false, reason: `non-candidate-changed:${mapping.message.role}` };
+		if (nextText.length === 0 || nextText.length >= mapping.originalText.length) {
+			rejected.push("not-smaller");
+			continue;
 		}
-		const target = nextMessages[mapping.sourceIndex] as AnyMessage;
-		if (target.role !== "toolResult") {
-			return { ok: false, reason: "source-role-mismatch" };
-		}
-		if (!replaceTextContent(target, nextText)) {
-			return { ok: false, reason: "target-content-unreplaceable" };
-		}
-		appliedMessages++;
+		replacements.set(mapping.toolCallId, nextText);
 	}
-
-	if (appliedMessages === 0) {
-		return { ok: false, reason: "no-applicable-message-changed" };
-	}
-
-	return { ok: true, messages: nextMessages, appliedMessages };
+	return { ok: true, replacements, rejected };
 }
 
-function cloneMessageForCompression(message: AgentMessage): AgentMessage {
-	const clone = { ...(message as AnyMessage) };
-	if (Array.isArray(clone.content)) {
-		clone.content = clone.content.map(part => (isRecord(part) ? { ...part } : part));
-	} else if (isRecord(clone.content)) {
-		clone.content = { ...clone.content };
+/**
+ * Index of the last assistant message that carries provider-reported prompt usage, or -1.
+ * OMP's context estimate is anchored on that usage: everything up to it is counted as the provider
+ * saw it (already compressed), everything after it is estimated from the original text.
+ */
+export function findUsageAnchor(messages: AgentMessage[]): number {
+	for (let index = messages.length - 1; index >= 0; index--) {
+		const message = messages[index] as AnyMessage & { usage?: { input?: number; cacheRead?: number; cacheWrite?: number } };
+		if (message.role !== "assistant" || !message.usage) continue;
+		if ((message.usage.input ?? 0) + (message.usage.cacheRead ?? 0) + (message.usage.cacheWrite ?? 0) > 0) return index;
 	}
-	return clone as AgentMessage;
+	return -1;
+}
+
+/**
+ * Replace tool-result text by toolCallId, copying only the messages that change.
+ * Returns the input array itself when nothing changed. `anchoredChars` is the share of the
+ * replaced text at or before `anchorIndex`.
+ */
+export function replaceToolResultTexts(
+	messages: AgentMessage[],
+	replacements: ReadonlyMap<string, string>,
+	anchorIndex = -1,
+): {
+	messages: AgentMessage[];
+	originalChars: number;
+	forwardedChars: number;
+	anchoredChars: { original: number; forwarded: number };
+	replaced: number;
+} {
+	let originalChars = 0;
+	let forwardedChars = 0;
+	const anchoredChars = { original: 0, forwarded: 0 };
+	let replaced = 0;
+	let next: AgentMessage[] | undefined;
+	if (replacements.size > 0) {
+		for (let index = 0; index < messages.length; index++) {
+			const source = messages[index] as AnyMessage;
+			const toolCallId = source.role === "toolResult" ? readStringProperty(source, "toolCallId") : undefined;
+			const text = toolCallId === undefined ? undefined : replacements.get(toolCallId);
+			if (text === undefined) continue;
+			const previous = extractTextFromContent(source.content);
+			if (previous === text) continue;
+			const copy = { ...source } as AnyMessage & MessageWithContent;
+			if (!replaceTextContent(copy, text)) continue;
+			next ??= [...messages];
+			next[index] = copy as AgentMessage;
+			originalChars += previous.length;
+			forwardedChars += text.length;
+			if (index <= anchorIndex) {
+				anchoredChars.original += previous.length;
+				anchoredChars.forwarded += text.length;
+			}
+			replaced++;
+		}
+	}
+	return { messages: next ?? messages, originalChars, forwardedChars, anchoredChars, replaced };
+}
+
+function collectRtkCallIds(messages: AgentMessage[]): Set<string> {
+	const ids = new Set<string>();
+	for (const message of messages as AnyMessage[]) {
+		if (message.role !== "assistant" || !Array.isArray(message.content)) continue;
+		for (const part of message.content) {
+			if (!isToolCall(part) || part.name !== "bash") continue;
+			const command = part.arguments.command;
+			if (typeof command === "string" && RTK_COMMAND.test(command)) ids.add(part.id);
+		}
+	}
+	return ids;
+}
+
+function toolCallChars(message: OpenAIMessage): number {
+	if (message.role !== "assistant") return 0;
+	return (message.tool_calls ?? []).reduce((sum, call) => sum + call.function.name.length + call.function.arguments.length, 0);
 }
 
 function convertMessage(message: AnyMessage): OpenAIMessage | undefined {
@@ -159,30 +233,16 @@ function convertToolCall(toolCall: ToolCall): OpenAIToolCall {
 	return {
 		id: toolCall.id,
 		type: "function",
-		function: {
-			// Headroom may exclude built-in names; retain original name in arguments for outbound-only adaptation.
-			name: "pi_tool_result",
-			arguments: JSON.stringify({ originalToolName: toolCall.name }),
-		},
+		function: { name: toolCall.name, arguments: JSON.stringify(toolCall.arguments) },
 	};
 }
 
-function validateAlignedMessage(
-	original: OpenAIMessage,
-	compressed: OpenAIMessage,
-): { ok: true } | { ok: false; reason: string } {
-	if (original.role !== compressed.role) {
-		return { ok: false, reason: `role-changed:${original.role}->${compressed.role}` };
+function alignmentMismatch(original: OpenAIMessage, compressed: OpenAIMessage): string | undefined {
+	if (original.role !== compressed.role) return `role-changed:${original.role}->${compressed.role}`;
+	if (original.role === "tool" && compressed.role === "tool" && original.tool_call_id !== compressed.tool_call_id) {
+		return "tool-call-id-changed";
 	}
-	if (original.role === "tool" && compressed.role === "tool") {
-		if (original.tool_call_id !== compressed.tool_call_id) return { ok: false, reason: "tool-call-id-changed" };
-	}
-	if (original.role === "assistant" && compressed.role === "assistant") {
-		const originalIds = (original.tool_calls ?? []).map((call) => call.id).join("\n");
-		const compressedIds = (compressed.tool_calls ?? []).map((call) => call.id).join("\n");
-		if (originalIds !== compressedIds) return { ok: false, reason: "assistant-tool-calls-changed" };
-	}
-	return { ok: true };
+	return undefined;
 }
 
 function extractOpenAIText(message: OpenAIMessage): string {

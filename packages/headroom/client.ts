@@ -12,6 +12,9 @@ interface ProxyCompressResponse {
 	compression_ratio: number;
 	transforms_applied: string[];
 	ccr_hashes?: string[];
+	compression_skipped?: boolean;
+	skip_reason?: string;
+	session?: { id: string; frozen_message_count: number; cached_prefix_replayed: boolean };
 }
 
 export class HeadroomHttpError extends Error {
@@ -115,7 +118,12 @@ export class HeadroomHttpClient {
 		return response.json();
 	}
 
-	async compress(messages: OpenAIMessage[], model: string | undefined, signal?: AbortSignal): Promise<CompressResult> {
+	async compress(
+		messages: OpenAIMessage[],
+		model: string | undefined,
+		sessionId: string,
+		signal?: AbortSignal,
+	): Promise<CompressResult> {
 		const response = await fetch(`${this.baseUrl}/v1/compress`, {
 			method: "POST",
 			headers: {
@@ -123,7 +131,7 @@ export class HeadroomHttpClient {
 				"Content-Type": "application/json",
 				"X-Headroom-Stack": "omp-extension",
 			},
-			body: JSON.stringify({ messages, model: model || "gpt-4o" }),
+			body: JSON.stringify({ messages, model: model || "gpt-4o", config: { session_id: sessionId } }),
 			signal: buildSignal(this.timeoutMs, signal),
 		});
 
@@ -141,7 +149,16 @@ export class HeadroomHttpClient {
 			compressionRatio: payload.compression_ratio,
 			transformsApplied: payload.transforms_applied ?? [],
 			ccrHashes: payload.ccr_hashes ?? [],
-			compressed: true,
+			...(payload.compression_skipped ? { skipReason: payload.skip_reason ?? "compression_skipped" } : {}),
+			...(payload.session
+				? {
+						session: {
+							id: payload.session.id,
+							frozenMessageCount: payload.session.frozen_message_count,
+							cachedPrefixReplayed: payload.session.cached_prefix_replayed,
+						},
+					}
+				: {}),
 		};
 	}
 }

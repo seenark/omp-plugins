@@ -59,6 +59,11 @@ function warn(onWarning: CavemanWarning | undefined, message: string): void {
 	onWarning?.(message);
 }
 
+// Unparseable config must never silently enable Caveman: default level fails closed to off.
+function failClosedConfig(): CavemanConfig {
+	return { ...cloneCavemanConfig(DEFAULT_CAVEMAN_CONFIG), defaultLevel: "off" };
+}
+
 function isRootConfigPath(configPath: string, options: CavemanConfigLoadOptions = {}): boolean {
 	const injectedRoot = getCodesookOmpConfigPath(options.homeDirectory);
 	return (
@@ -304,9 +309,9 @@ async function loadRootCavemanConfig(
 ): Promise<CavemanConfigLoadResult> {
 	const destination = readCodesookOmpConfig(configPath);
 	if (destination.exists && !destination.valid) {
-		warn(options.onWarning, `Unable to parse Caveman config at ${configPath}; using defaults.`);
+		warn(options.onWarning, `Unable to parse Caveman config at ${configPath}; Caveman stays off until it is fixed.`);
 		return {
-			config: cloneCavemanConfig(DEFAULT_CAVEMAN_CONFIG),
+			config: failClosedConfig(),
 			configPath,
 			legacyConfigPath,
 			destinationExists: true,
@@ -382,9 +387,9 @@ export async function loadCavemanConfig(options: CavemanConfigLoadOptions = {}):
 	const destination = await readJsonFile(configPath);
 	if (destination.exists) {
 		if (destination.error !== undefined || !isRecord(destination.value)) {
-			warn(options.onWarning, `Unable to parse Caveman config at ${configPath}; using defaults.`);
+			warn(options.onWarning, `Unable to parse Caveman config at ${configPath}; Caveman stays off until it is fixed.`);
 			return {
-				config: cloneCavemanConfig(DEFAULT_CAVEMAN_CONFIG),
+				config: failClosedConfig(),
 				configPath,
 				legacyConfigPath,
 				destinationExists: true,

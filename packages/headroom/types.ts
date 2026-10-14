@@ -54,7 +54,9 @@ export interface CompressResult {
 	compressionRatio: number;
 	transformsApplied: string[];
 	ccrHashes: string[];
-	compressed: boolean;
+	/** Set when the server returned originals unchanged (`compression_skipped`). */
+	skipReason?: string;
+	session?: { id: string; frozenMessageCount: number; cachedPrefixReplayed: boolean };
 }
 
 export interface HeadroomConfig {
@@ -70,18 +72,23 @@ export interface HeadroomConfig {
 }
 
 export interface HeadroomStats {
+	/** Compress requests sent to the server. */
 	attempts: number;
+	/** Calls where the server newly compressed at least one result. */
 	applied: number;
 	guardSkips: number;
-	tokensSaved: number;
+	/** Calls that reached the model; the Headroom Savings denominator spans these. */
+	calls: number;
+	beforeTokens: number;
+	savedTokens: number;
 	last?: {
-		tokensBefore: number;
-		tokensAfter: number;
-		tokensSaved: number;
-		compressionRatio: number;
+		beforeTokens: number;
+		savedTokens: number;
+		newMessages: number;
+		replayedMessages: number;
 		transformsApplied: string[];
 		ccrHashes: string[];
-		appliedMessages: number;
+		session?: CompressResult["session"];
 	};
 	lastError?: string;
 	lastSkipReason?: string;
@@ -92,18 +99,17 @@ export interface CompressionMapping {
 	message: OpenAIMessage;
 	applyTo: "toolResult" | null;
 	originalText: string;
+	toolCallId?: string;
 }
 
 export interface CompressionPayload {
 	messages: OpenAIMessage[];
 	mappings: CompressionMapping[];
 	candidateCount: number;
-}
-
-export interface ApplyCompressionOptions {
-	minMessageChars: number;
+	/** Characters across every converted message; feeds the Headroom Savings estimate. */
+	chars: number;
 }
 
 export type ApplyCompressionResult =
-	| { ok: true; messages: AgentMessage[]; appliedMessages: number }
+	| { ok: true; replacements: Map<string, string>; rejected: string[] }
 	| { ok: false; reason: string };

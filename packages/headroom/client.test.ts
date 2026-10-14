@@ -27,6 +27,7 @@ describe("Headroom HTTP client", () => {
 						compression_ratio: 0.6,
 						transforms_applied: ["structural"],
 						ccr_hashes: ["hash"],
+						session: { id: "session-1", frozen_message_count: 2, cached_prefix_replayed: true },
 					});
 				}
 				return new Response("not found", { status: 404 });
@@ -41,7 +42,7 @@ describe("Headroom HTTP client", () => {
 			});
 			expect(await client.health()).toBe(true);
 			expect(await client.stats()).toEqual({ compression: { requests: 1 } });
-			const result = await client.compress([{ role: "user", content: "hello" }], undefined);
+			const result = await client.compress([{ role: "user", content: "hello" }], undefined, "session-1");
 			expect(proxyTokens).toEqual([
 				{ path: "/health", token: "test-proxy-token" },
 				{ path: "/stats", token: "test-proxy-token" },
@@ -49,18 +50,47 @@ describe("Headroom HTTP client", () => {
 			]);
 
 			expect(stackHeader).toBe("omp-extension");
-			expect(requestBody).toEqual({ messages: [{ role: "user", content: "hello" }], model: "gpt-4o" });
+			expect(requestBody).toEqual({
+				messages: [{ role: "user", content: "hello" }],
+				model: "gpt-4o",
+				config: { session_id: "session-1" },
+			});
 			expect(result).toMatchObject({
 				tokensBefore: 100,
 				tokensAfter: 60,
 				tokensSaved: 40,
 				compressionRatio: 0.6,
-				compressed: true,
+				session: { id: "session-1", frozenMessageCount: 2, cachedPrefixReplayed: true },
 			});
 		} finally {
 			server.stop(true);
 		}
 	});
+	it("surfaces compression_skipped and HTTP failures from a session compress", async () => {
+		const server = Bun.serve({
+			port: 0,
+			fetch(request) {
+				if (new URL(request.url).searchParams.has("fail")) return new Response("x", { status: 500 });
+				return Response.json({
+					messages: [],
+					tokens_before: 1,
+					tokens_after: 1,
+					tokens_saved: 0,
+					compression_ratio: 1,
+					transforms_applied: [],
+					compression_skipped: true,
+					skip_reason: "compression_timeout",
+				});
+			},
+		});
+		try {
+			const client = new HeadroomHttpClient({ baseUrl: `http://127.0.0.1:${server.port}`, timeoutMs: 1000 });
+			expect((await client.compress([], undefined, "s")).skipReason).toBe("compression_timeout");
+		} finally {
+			server.stop(true);
+		}
+	});
+
 	it("omits proxy token header when token is blank", async () => {
 		const proxyTokens: Array<string | null> = [];
 		const server = Bun.serve({
@@ -89,7 +119,7 @@ describe("Headroom HTTP client", () => {
 			});
 			await client.health();
 			await client.stats();
-			await client.compress([{ role: "user", content: "hello" }], undefined);
+			await client.compress([{ role: "user", content: "hello" }], undefined, "session-1");
 			expect(proxyTokens).toEqual([null, null, null]);
 		} finally {
 			server.stop(true);

@@ -43,7 +43,7 @@ function runFixture(scenario: string): void {
 				registerCommand(name, command) { commands.set(name, command); },
 				logger: { warn() {}, info() {}, error() {} },
 			};
-			const ctx = { hasUI: true, ui: { theme: { symbol: () => "S" }, notify: message => notices.push(message), select: async () => undefined, input: async () => undefined, confirm: async () => false }, getContextUsage: () => ({ tokens: 50000 }) };
+			const ctx = { hasUI: true, ui: { theme: { symbol: () => "S" }, notify: message => notices.push(message), select: async () => undefined, input: async () => undefined, confirm: async () => false }, getContextUsage: () => ({ tokens: 50000 }), sessionManager: { getSessionId: () => "menu-session" } };
 			const command = args => commands.get("headroom").handler(args, ctx);
 			globalThis.fetch = async () => { throw new Error("Network access is forbidden in menu fixtures"); };
 			${scenario}

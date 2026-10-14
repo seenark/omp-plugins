@@ -67,7 +67,7 @@ const WIDGET_KEY = "codesook-shared-display";
 const DEFAULT_HORIZONTAL_SEPARATOR = "  ";
 const DEFAULT_PONYTAIL_TEMPLATE = "{activity} {glyph} ponytail: {modeIcon}{mode}";
 const DEFAULT_PONYTAIL_DIRECTORY = "~/.config/codesook-omp/ponytail";
-const SOURCE_ORDER: readonly DisplaySource[] = ["ponytail", "caveman", "headroom", "codegraph", "beads"];
+const SOURCE_ORDER: readonly DisplaySource[] = ["ponytail", "caveman", "headroom", "rtk", "codegraph", "beads"];
 const PONYTAIL_MODES = ["off", "lite", "full", "ultra", "review"] as const;
 const PONYTAIL_MODE_ICONS: Record<PonytailMode, string> = {
 	off: "",
@@ -144,8 +144,7 @@ export function normalizeSharedDisplayConfig(raw: unknown): SharedDisplayConfig 
 	if (Array.isArray(source.order)) {
 		normalized.order = [...new Set(source.order.filter(isDisplaySource))];
 	}
-	if (!normalized.order.includes("codegraph")) normalized.order.push("codegraph");
-	if (!normalized.order.includes("beads")) normalized.order.push("beads");
+	for (const known of SOURCE_ORDER) if (!normalized.order.includes(known)) normalized.order.push(known);
 	if (source.widgetPlacement === "aboveEditor" || source.widgetPlacement === "belowEditor") {
 		normalized.widgetPlacement = source.widgetPlacement;
 	}
@@ -319,6 +318,43 @@ export function resolvePonytailSessionStatus(entries: readonly unknown[]): Ponyt
 		}
 	}
 	return undefined;
+}
+
+function readPonytailConfig(): Record<string, unknown> {
+	const dir = process.env.XDG_CONFIG_HOME
+		? path.join(process.env.XDG_CONFIG_HOME, "ponytail")
+		: path.join(os.homedir(), ".config", "ponytail");
+	try {
+		const parsed: unknown = JSON.parse(readFileSync(path.join(dir, "config.json"), "utf8").replace(/^\uFEFF/u, ""));
+		return isObject(parsed) ? parsed : {};
+	} catch {
+		return {};
+	}
+}
+
+// Mirrors upstream hooks/ponytail-config.js getDefaultMode: env, config defaultMode, then full. review is never a default.
+// ponytail: Windows %APPDATA% config location is not mirrored; add if Windows support is needed.
+function resolvePonytailDefaultMode(): PonytailMode {
+	const runtimeMode = (value: unknown): PonytailMode | undefined => {
+		const mode = typeof value === "string" ? value.toLowerCase() : "";
+		return mode !== "review" && (PONYTAIL_MODES as readonly string[]).includes(mode) ? (mode as PonytailMode) : undefined;
+	};
+	return runtimeMode(process.env.PONYTAIL_DEFAULT_MODE) ?? runtimeMode(readPonytailConfig().defaultMode) ?? "full";
+}
+
+function ponytailStatusHidden(): boolean {
+	const env = process.env.PONYTAIL_HIDE_STATUS;
+	if (env !== undefined) return !["", "0", "false", "no"].includes(env.trim().toLowerCase());
+	return readPonytailConfig().hideStatus === true;
+}
+
+/**
+ * Initial Ponytail status for a session. Absent plugin or upstream hideStatus => no segment;
+ * otherwise latest `ponytail-mode` entry, else the upstream default mode.
+ */
+export function resolvePonytailInitialStatus(entries: readonly unknown[], ponytailLoaded: boolean): PonytailStatus | undefined {
+	if (!ponytailLoaded || ponytailStatusHidden()) return undefined;
+	return resolvePonytailSessionStatus(entries) ?? { active: false, mode: resolvePonytailDefaultMode() };
 }
 
 function expandHome(value: string): string {
@@ -542,6 +578,7 @@ type HostRuntime = {
 	capturedNativeText?: string;
 	savedNativeText?: string;
 	ponytailStatus?: PonytailStatus;
+	ponytailLoaded?: () => boolean;
 	wrapper?: { ui: HostContext["ui"]; previous: HostContext["ui"]["setStatus"]; handler: HostContext["ui"]["setStatus"] };
 };
 
@@ -801,7 +838,10 @@ function startSession(runtime: HostRuntime, context: unknown): void {
 	runtime.epoch = randomUUID();
 	announceHost(runtime);
 	runtime.publisher = connectSharedDisplay(runtime.events, "ponytail");
-	runtime.ponytailStatus = resolvePonytailSessionStatus(ctx.sessionManager?.getBranch() ?? []);
+	runtime.ponytailStatus = resolvePonytailInitialStatus(
+		ctx.sessionManager?.getBranch() ?? [],
+		runtime.ponytailLoaded?.() ?? false,
+	);
 	runtime.publisher.publish(
 		runtime.config.enabled ? ponytailFrameSequence(runtime.ponytailStatus, runtime.config) : null,
 	);
@@ -908,7 +948,7 @@ export function sharedDisplaySettingsItems(
 			submenu: (current, done) => inputSubmenu(current, done),
 			changed: draft.order.join(",") !== DEFAULT_SHARED_DISPLAY_CONFIG.order.join(","),
 			description:
-				"Comma-separated source order: ponytail, caveman, headroom, codegraph, beads. Unknown names and duplicates are discarded. Omitted integrations are appended; integration visibility controls whether they appear.",
+				"Comma-separated source order: ponytail, caveman, headroom, rtk, codegraph, beads. Unknown names and duplicates are discarded. Omitted sources are appended; integration visibility controls whether they appear.",
 		},
 		{
 			id: "widgetPlacement",
@@ -1160,6 +1200,15 @@ export default function sharedDisplayExtension(pi: ExtensionAPI, options: HostOp
 		mounted: false,
 	};
 	runtime.events = (pi as unknown as { events?: SharedDisplayEvents }).events;
+	// Ponytail presence: the upstream plugin registers an extension command named "ponytail".
+	// Checked at session start, when every extension is loaded; a missing getCommands means absent.
+	runtime.ponytailLoaded = () => {
+		try {
+			return pi.getCommands().some(command => command.name === "ponytail" && command.source === "extension");
+		} catch {
+			return false;
+		}
+	};
 	if (runtime.events !== undefined) {
 		runtime.unsubscribe = runtime.events.on(CHANNEL, data => handleHostMessage(runtime, data));
 		if (isRootConfigPath(runtime.configPath)) {

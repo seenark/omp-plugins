@@ -304,3 +304,21 @@ test("Apply requires a visible confirmation in the settings overlay; Esc retains
 	expect(saved.display.codegraph).toEqual({ visibility: "never" });
 	expect(existsSync(projectIntegrationConfigPath(project))).toBe(false);
 });
+
+test("RTK settings default, persist, and block an invalid retention", () => {
+	const file = path.join(temporary(), "global.json");
+	const root = { version: 1, display: { rtk: { template: "{percent}%", custom: 1 } }, behavior: { rtk: { enabled: false } } };
+	writeFileSync(file, JSON.stringify(root));
+	const draft = draftFromRootConfig(root);
+	expect(draft.behavior.rtk).toEqual({ enabled: false, retentionDays: 7 });
+	expect(draft.display.rtk).toMatchObject({ visible: true, template: "{percent}%" });
+	draft.behavior.rtk.retentionDays = 3;
+	persistDraftToRoot(draft, file);
+	const saved = JSON.parse(readFileSync(file, "utf8"));
+	expect(saved.behavior.rtk).toEqual({ enabled: false, retentionDays: 3 });
+	expect(saved.display.rtk).toMatchObject({ visible: true, template: "{percent}%", custom: 1 });
+	expect(saved.display.rtk.glyphDirectory).toBe("~/.config/codesook-omp/rtk");
+
+	draft.behavior.rtk.retentionDays = 0;
+	expect(() => persistDraftToRoot(draft, file)).toThrow("RTK retention days");
+});

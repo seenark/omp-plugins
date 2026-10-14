@@ -11,18 +11,20 @@ import {
 	type FrameSequence,
 } from "@codesook/omp-shared-display/client";
 
-export type DisplayState = "off" | "remote-blocked" | "starting" | "offline" | "idle" | "online" | "compressed";
+export type DisplayState = "off" | "remote-blocked" | "starting" | "offline" | "unavailable" | "idle" | "online" | "compressed";
 
 export const DISPLAY_STATES: readonly DisplayState[] = [
 	"off",
 	"remote-blocked",
 	"starting",
 	"offline",
+	"unavailable",
 	"idle",
 	"online",
 	"compressed",
 ];
 
+/** Compression/Headroom Savings values are per Agent Session; `last*` describe the latest call. */
 export interface DisplayValues {
 	glyph: string;
 	state: DisplayState;
@@ -31,8 +33,11 @@ export interface DisplayValues {
 	tokensSaved: number;
 	tokensBefore: number;
 	tokensAfter: number;
+	lastPercent: number;
+	lastSaved: number;
 	proxyStatus: string;
 	error: string;
+	reason: string;
 }
 
 export interface HeadroomDisplayConfig {
@@ -52,6 +57,7 @@ export const DEFAULT_TEMPLATES: Record<DisplayState, string> = {
 	"remote-blocked": "{glyph} Headroom remote blocked",
 	starting: "{glyph} Headroom starting",
 	offline: "{glyph} Headroom not running",
+	unavailable: "{glyph} Headroom unavailable ({reason})",
 	idle: "{glyph} Headroom idle",
 	online: "{glyph} Headroom",
 	compressed: "{glyph} Headroom -{compressionPercent}% ({tokensSaved} saved)",
@@ -62,6 +68,7 @@ export const DEFAULT_GLYPHS: Record<DisplayState, string> = {
 	"remote-blocked": "⚠",
 	starting: "⏳",
 	offline: "○",
+	unavailable: "⚠",
 	idle: "○",
 	online: "✓",
 	compressed: "✓",
@@ -190,15 +197,27 @@ export function widgetState(
 	blocked: boolean,
 	starting: boolean,
 	online: boolean | null,
-	compressed: boolean,
+	unavailable: boolean,
 ): DisplayState {
 	if (!enabled) return "off";
 	if (blocked) return "remote-blocked";
 	if (starting) return "starting";
 	if (online === false) return "offline";
-	if (compressed) return "compressed";
-	if (online === true) return "online";
-	return "idle";
+	if (unavailable) return "unavailable";
+	return online === true ? "compressed" : "idle";
+}
+
+const TEMPLATE_KEY = /\{(status|glyph|state|label|compressionPercent|tokensSaved|tokensBefore|tokensAfter|lastPercent|lastSaved|proxyStatus|error|reason)\}/g;
+
+/** Compact count: 950, 1.2k, 3.4M. */
+export function formatCompact(value: number): string {
+	const n = Math.max(0, Math.round(value));
+	const units = [[1e9, "B"], [1e6, "M"], [1e3, "k"]] as const;
+	let index = units.findIndex(([size]) => n >= size);
+	if (index < 0) return String(n);
+	const scale = (i: number) => Math.round((n / units[i][0]) * 10) / 10;
+	if (scale(index) >= 1000 && index > 0) index--;
+	return `${scale(index)}${units[index][1]}`;
 }
 
 function renderDisplayFrame(
@@ -208,23 +227,16 @@ function renderDisplayFrame(
 	glyph: string,
 	fallbackGlyph: string,
 ): string {
-	const all: DisplayValues = { ...values, glyph: glyph || fallbackGlyph, state };
-	const statusTemplate = config.status[state] ?? DEFAULT_TEMPLATES[state];
-	const status = statusTemplate.replace(
-		/\{(glyph|state|label|compressionPercent|tokensSaved|tokensBefore|tokensAfter|proxyStatus|error)\}/g,
-		(_, key: keyof DisplayValues) => {
+	const all: DisplayValues & { status?: string } = { ...values, glyph: glyph || fallbackGlyph, state };
+	const fill = (template: string): string =>
+		template.replace(TEMPLATE_KEY, (match, key: keyof typeof all) => {
 			const value = all[key];
-			return typeof value === "number" ? value.toLocaleString() : value;
-		},
-	);
-	return config.template.replace(
-		/\{(status|glyph|state|label|compressionPercent|tokensSaved|tokensBefore|tokensAfter|proxyStatus|error)\}/g,
-		(_, key: "status" | keyof DisplayValues) => {
-			if (key === "status") return status;
-			const value = all[key];
-			return typeof value === "number" ? value.toLocaleString() : value;
-		},
-	);
+			if (value === undefined) return match;
+			if (typeof value !== "number") return value;
+			return key === "compressionPercent" || key === "lastPercent" ? String(Math.round(value)) : formatCompact(value);
+		});
+	all.status = fill(config.status[state] ?? DEFAULT_TEMPLATES[state]);
+	return fill(config.template);
 }
 
 function readGlyphAssetFile(directory: string, state: DisplayState): GlyphAsset | undefined {
@@ -266,5 +278,6 @@ const THEME_GLYPH_KEYS: Record<DisplayState, string> = {
 	idle: "status.shadowed",
 	online: "status.success",
 	compressed: "status.success",
+	unavailable: "status.warning",
 };
 

@@ -19,9 +19,9 @@ import {
 import type { HeadroomConfig as OperationalHeadroomConfig } from "./types.ts";
 
 const DEFAULT_BASE_URL = "http://127.0.0.1:8788";
-const DEFAULT_MIN_CONTEXT_TOKENS = 20_000;
-const DEFAULT_MIN_MESSAGE_CHARS = 2_000;
-const DEFAULT_TIMEOUT_MS = 30_000;
+const DEFAULT_MIN_CONTEXT_TOKENS = 8_000;
+const DEFAULT_MIN_MESSAGE_CHARS = 1_000;
+const DEFAULT_TIMEOUT_MS = 35_000;
 
 export const DEFAULT_HEADROOM_SETTINGS = {
 	enabled: true,

@@ -1,34 +1,46 @@
 services:
   headroom:
-    image: ghcr.io/headroomlabs-ai/headroom:0.37.0
-    command: ["--host", "0.0.0.0", "--port", "8787"]
+    # -code ships tree-sitter for TypeScript/Go/Rust AST compression.
+    # -nonroot runs as uid/gid 1000; chown the host state dir to 1000:1000.
+    image: ghcr.io/headroomlabs-ai/headroom:0.40.0-code-nonroot
+    container_name: headroom
     restart: unless-stopped
-    environment:
-      HEADROOM_HOST: "0.0.0.0"
-      # Required when a tunnel or non-loopback client calls /v1/compress.
-      HEADROOM_COMPRESS_ALLOW_REMOTE: "1"
-      # ONNX CPU path needs onnxruntime + transformers, not PyTorch.
-      HEADROOM_KOMPRESS_BACKEND: "onnx_cpu"
-      # Keep downloaded Kompress artifacts across container recreation.
-      HOME: "/home/nonroot"
-      HF_HOME: "/home/nonroot/.headroom/huggingface"
-      HEADROOM_WORKSPACE_DIR: "/home/nonroot/.headroom"
-      HEADROOM_CONFIG_DIR: "/home/nonroot/.headroom/config"
-      # Empty is acceptable for loopback-only local testing.
-      # Set HEADROOM_PROXY_TOKEN before exposing this port through a tunnel.
-      HEADROOM_PROXY_TOKEN: "${HEADROOM_PROXY_TOKEN:-}"
+    command: ["--host", "0.0.0.0", "--port", "8787"]
     ports:
-      - "127.0.0.1:8787:8787"
+      # Cloudflare Tunnel reaches the proxy through this loopback port.
+      - "127.0.0.1:8887:8787"
+    environment:
+      HOME: /home/nonroot
+      HEADROOM_HOST: "0.0.0.0"
+      HEADROOM_PORT: "8787"
+      # Required: 0.40+ refuses a non-loopback bind without a token.
+      # Set it in .env next to this file; never commit .env.
+      HEADROOM_PROXY_TOKEN: "${HEADROOM_PROXY_TOKEN:?set HEADROOM_PROXY_TOKEN}"
+      # Required when the OMP plugin calls /v1/compress through the tunnel.
+      HEADROOM_COMPRESS_ALLOW_REMOTE: "1"
+      HEADROOM_WORKSPACE_DIR: /home/nonroot/.headroom
+      HEADROOM_CONFIG_DIR: /home/nonroot/.headroom/config
+      # Local-only stats collector; nothing leaves the host.
+      HEADROOM_TELEMETRY: "on"
+      # Anonymous upload beacon defaults on; keep it off.
+      HEADROOM_BEACON: "off"
+      # Homelab CPU cannot run the Kompress model; never fall back to it.
+      HEADROOM_DISABLE_KOMPRESS: "1"
+      HEADROOM_DISABLE_KOMPRESS_FALLBACK: "1"
+      # Coding-agent safety (docs/research/headroom-0.40-agent-pitfalls.md):
+      # keep edit anchors intact, never touch user text, protect file reads.
+      HEADROOM_DEDUPE: "0"
+      HEADROOM_COMPRESS_USER_MESSAGES: "0"
+      HEADROOM_PROTECT_READS: "1"
+      HEADROOM_PROTECT_TOOL_RESULTS: "find,ast_grep,ast_edit,lsp,github,task"
+      # Finish before the plugin's 35 s client timeout.
+      HEADROOM_COMPRESSION_TIMEOUT_SECONDS: "20"
+      HEADROOM_SAVINGS_PROFILE: "coding"
     volumes:
-      - headroom_workspace:/home/nonroot/.headroom
+      - "${HOME}/.headroom:/home/nonroot/.headroom"
     healthcheck:
-      # /readyz checks proxy serving state. Optional Kompress readiness is
-      # checked separately through /debug/warmup and /health checks.kompress.
       test: ["CMD", "curl", "--fail", "--silent", "http://127.0.0.1:8787/readyz"]
       interval: 30s
       timeout: 5s
       retries: 3
       start_period: 20s
-
-volumes:
-  headroom_workspace:

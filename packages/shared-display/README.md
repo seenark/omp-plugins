@@ -1,6 +1,6 @@
 # @codesook/omp-shared-display
 
-Opt-in OMP extension that owns `codesook-shared-display` widget and versioned EventBus snapshot protocol for Ponytail, Caveman, Headroom, CodeGraph, and Beads producers. Default source order preserves that sequence. Beads source support requires version 1.2.0 or newer.
+Opt-in OMP extension that owns `codesook-shared-display` widget and versioned EventBus snapshot protocol for Ponytail, Caveman, Headroom, RTK, CodeGraph, and Beads producers. Default source order preserves that sequence. Beads source support requires version 1.2.0 or newer.
 
 Side-effect-free client and root config helpers:
 
@@ -17,7 +17,13 @@ Shared Display presentation persists in `display.sharedDisplay` inside:
 
 Legacy `~/.config/codesook-omp/shared-display/config.json` migrates once when root section is missing. `/shared-display` command is removed; root `/codesook-omp-plugin` settings owns persisted presentation. Producers remain safe when host/EventBus is absent.
 
-Effective source order appends CodeGraph and Beads when a persisted order omits them, including orders saved before integration support. Existing producers keep their configured relative order and omissions. Each integration's visibility controls whether its segment appears; removing it from source order does not hide it. The side-effect-free client never loads the display host or another integration.
+Effective source order appends every known source (`ponytail`, `caveman`, `headroom`, `rtk`, `codegraph`, `beads`) that a persisted order omits, including orders saved before a source existed. Sources present keep their configured relative order; unknown names and duplicates are dropped. Each integration's visibility controls whether its segment appears; removing it from source order does not hide it. The side-effect-free client never loads the display host or another integration.
+
+## Ponytail status
+
+The host shows Ponytail only when the upstream Ponytail plugin (`@dietrichgebert/ponytail`) is loaded in the same process. At session start the host checks `pi.getCommands()` for an extension command named `ponytail`; without it, stale `ponytail-mode` session entries are ignored and no segment renders.
+
+When Ponytail is loaded, the initial mode is the latest `ponytail-mode` entry on the branch. With no entry, the host resolves upstream's default: `PONYTAIL_DEFAULT_MODE`, then `defaultMode` in `$XDG_CONFIG_HOME/ponytail/config.json` (else `~/.config/ponytail/config.json`), then `full`; `review` is never a default. Upstream `hideStatus` (`PONYTAIL_HIDE_STATUS` or config `hideStatus: true`) hides the segment. Statuses Ponytail sets afterwards replace the initial mode.
 
 ## Host presence
 

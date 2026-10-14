@@ -2,8 +2,10 @@
 
 Headroom context-compression producer for [oh-my-pi](https://github.com/can1357/oh-my-pi).
 
-- compresses large `toolResult` messages before provider requests;
-- preserves message roles, tool-call metadata, images, and original context when compression is unsafe;
+- compresses large `toolResult` messages before provider requests, in Headroom session mode (`config.session_id` = the OMP session id);
+- keeps every result it forwarded compressed byte-identical on later requests, so the provider prompt cache is not broken;
+- never offers failed tool results or RTK-processed bash results to Headroom;
+- shows Headroom Savings per Agent Session from the first request;
 - uses externally managed Headroom proxy; session start performs health check only and never starts Docker/Cloudflare/proxy processes;
 - publishes one complete Headroom display sequence through `@codesook/omp-shared-display`;
 - never mounts a widget, installs a timer, or captures another producer's `setStatus` output.
@@ -85,6 +87,7 @@ Example:
         "remote-blocked": "{glyph} Headroom remote blocked",
         "starting": "{glyph} Headroom starting",
         "offline": "{glyph} Headroom not running",
+        "unavailable": "{glyph} Headroom unavailable ({reason})",
         "idle": "{glyph} Headroom idle",
         "online": "{glyph} Headroom",
         "compressed": "{glyph} Headroom -{compressionPercent}% ({tokensSaved} saved)"
@@ -98,14 +101,16 @@ Example:
       "allowRemote": false,
       "autoStart": false,
       "command": "headroom",
-      "minContextTokens": 20000,
-      "minMessageChars": 2000,
-      "timeoutMs": 30000,
+      "minContextTokens": 8000,
+      "minMessageChars": 1000,
+      "timeoutMs": 35000,
       "proxyTokenFile": "~/.config/codesook-omp/headroom/proxy-token"
     }
   }
 }
 ```
+
+A state template missing from user config falls back to its default. The client timeout (35 s) stays above the server compression deadline (20 s) so the server's `503` arrives before the client aborts.
 
 `autoStart` remains normalized to `false` for compatibility. Proxy token file is optional and read only by request path; token contents never enter root JSON. When the file is absent or blank, requests omit `X-Headroom-Proxy-Token` and use the proxy's unauthenticated access policy. `/headroom token` trims outer whitespace, rejects blank values and embedded newlines, writes atomically with file mode `0600`, and keeps the saved token when the health check cannot reach the proxy.
 
@@ -130,13 +135,37 @@ Headroom connects to versioned `codesook/shared-display/v1` channel with source 
 
 ## Compression flow
 
-1. Skip compression while context is below `minContextTokens`.
-2. Convert messages to the Headroom OpenAI-shaped payload.
-3. Submit only eligible large `toolResult` messages.
-4. Apply a response only when message alignment, roles, tool-call IDs, and non-candidate content remain safe.
-5. Keep a reachable proxy online when its compression endpoint returns an HTTP error; status reports compression as unavailable until a successful health check allows retry.
-6. On timeout, proxy failure, or unsafe output, retain the original context.
+Each `context` event (one per model request):
 
+1. Build the Headroom OpenAI-shaped payload with real tool names and JSON-stringified arguments.
+2. Candidates are `toolResult` messages of at least `minMessageChars` that are not errors (`isError`) and whose bash command does not run `rtk` (`(^|[;&|(]\s*)rtk\s`). Other messages are sent as context only.
+3. If a candidate is not yet compressed, context is at least `minContextTokens`, and the proxy is usable, POST `/v1/compress` with `config.session_id` set to `ctx.sessionManager.getSessionId()`. Nothing else is sent in `config`.
+4. Take each changed candidate independently when it is aligned (role, `tool_call_id`), non-empty, and shorter. Ignore server changes to everything else.
+5. Add newly compressed results to the replay memo (`toolCallId` → forwarded text) and forward every memoised result with its memoised text. This runs on every request, including skipped ones, so bytes forwarded once never change within the Agent Session.
+
+Failures never forward raw text for results already in the memo:
+
+| Failure | Behavior |
+| --- | --- |
+| `503` | Retry once immediately, then memo only for this request. |
+| Client timeout or `compression_skipped` | Memo only for this request. |
+| `429` and other `5xx` | Memo only for this request. |
+| `400`, `401`, `404` | Compression Unavailable (`{reason}` is the status). No requests until a health check succeeds. |
+| Network failure | Offline. No requests until a health check succeeds. |
+
+Recovery is lazy; there are no timers. After Unavailable or offline, the first `context` event past the backoff (30 s, 60 s, 120 s, then 300 s) runs one health check. Success clears the state and compression is tried again; backoff resets after a successful compression. At session start the first request waits for the in-flight health check (at most `timeoutMs`) before deciding to skip.
+
+## Headroom Savings
+
+Headroom Savings is the share of the whole request (system prompt, tools, and messages) that Headroom removed. It is computed locally per Agent Session with one chars/4 estimate. Server `tokens_saved` is never summed.
+
+- saved = estimate(original text of replaced results) − estimate(forwarded text), including memo replays;
+- before = the request size without Headroom. The base is OMP's context estimate (`ctx.getContextUsage()`, the same value that gates `minContextTokens`). That estimate is hybrid: up to the last response with provider-reported usage it counts results as the provider saw them (already compressed), and after it it counts original text. So only savings at or before that response are added back; savings on results first compressed in this request are already excluded from the base. Without such a response, or when OMP reports no usage, the base is the original text and no add-back applies. If OMP gives no usage at all, the estimate of the message payload is used instead;
+- Headroom Savings = Σ saved / Σ before over every request that reached the model, including requests that removed nothing.
+
+Template placeholders: `{compressionPercent}` and `{tokensSaved}` (session, so existing templates keep working), `{tokensBefore}`, `{tokensAfter}` (session), `{lastPercent}`, `{lastSaved}` (latest request), `{reason}`, `{error}`, `{proxyStatus}`, `{glyph}`, `{state}`, `{label}`. Token counts are compact (950, 1.2k, 3.4M); percentages are integers. The compressed state shows from session start at 0%.
+
+Agent Session = one OMP conversation. Stats and memo reset on `session_start` and `session_switch`, not on `session_branch`. `/headroom status` shows session savings, memo size, last error or reason, server session block, and the next health retry.
 
 ## Development
 

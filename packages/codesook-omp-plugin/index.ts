@@ -52,6 +52,7 @@ import {
 } from "@codesook/omp-headroom/config";
 import { HEADROOM_PROXY_TOKEN_FILE } from "@codesook/omp-headroom/client";
 import { DEFAULT_GLYPHS, DISPLAY_STATES, resolveThemeGlyph } from "@codesook/omp-headroom/display";
+import { normalizeRtkConfig, type RtkConfig } from "@codesook/omp-rtk/config";
 import {
 	DEFAULT_LEFT_GLYPH_TEXT,
 	DEFAULT_LEFT_GLYPH_TEXT_PATH,
@@ -158,13 +159,14 @@ const LEGACY_PROMPT_BORDER_CONFIG_PATH = path.join(
 	"config.json",
 );
 
-const PROJECT_FEATURES = ["shared-display", "caveman", "headroom", "prompt-border-style", "codegraph", "beads"] as const;
+const PROJECT_FEATURES = ["shared-display", "caveman", "headroom", "rtk", "prompt-border-style", "codegraph", "beads"] as const;
 type ProjectFeature = (typeof PROJECT_FEATURES)[number];
 
 const DEFAULT_PROJECT_FEATURES: Record<ProjectFeature, boolean> = {
 	"shared-display": false,
 	caveman: false,
 	headroom: true,
+	rtk: false,
 	"prompt-border-style": true,
 	codegraph: false,
 	beads: false,
@@ -174,6 +176,7 @@ const STANDALONE_FEATURE_PACKAGES: Record<ProjectFeature, string> = {
 	"shared-display": "@codesook/omp-shared-display",
 	caveman: "@codesook/omp-caveman",
 	headroom: "@codesook/omp-headroom",
+	rtk: "@codesook/omp-rtk",
 	"prompt-border-style": "@codesook/omp-prompt-border-style",
 	codegraph: "@codesook/omp-codegraph",
 	beads: "@codesook/omp-beads",
@@ -230,6 +233,7 @@ export type UnifiedSettingsDraft = {
 		sharedDisplay: SharedDisplayConfig;
 		caveman: Pick<CavemanConfig, "nativeVisible" | "display">;
 		headroom: HeadroomConfig["display"];
+		rtk: RtkConfig["display"];
 		promptBorder: {
 			style: BorderStyleName;
 			layout: BorderLayoutName;
@@ -251,6 +255,7 @@ export type UnifiedSettingsDraft = {
 			timeoutMs: number;
 			proxyTokenFile: string;
 		};
+		rtk: Pick<RtkConfig, "enabled" | "retentionDays">;
 	};
 	projectIntegration?: {
 		path: string;
@@ -437,6 +442,7 @@ function createDraft(raw: unknown, legacy: LegacySources = {}): UnifiedSettingsD
 		promptBorder: mergeRecords(legacyPrompt.promptBorder, rootPrompt),
 		contextRail: rootRail ?? legacyPrompt.contextRail,
 	});
+	const rtk = normalizeRtkConfig(source);
 
 	return {
 		display: {
@@ -445,6 +451,7 @@ function createDraft(raw: unknown, legacy: LegacySources = {}): UnifiedSettingsD
 			sharedDisplay,
 			caveman: { nativeVisible: caveman.nativeVisible, display: clone(caveman.display) },
 			headroom: clone(headroom.display),
+			rtk: clone(rtk.display),
 			promptBorder: {
 				style: prompt.style,
 				layout: prompt.layout,
@@ -466,6 +473,7 @@ function createDraft(raw: unknown, legacy: LegacySources = {}): UnifiedSettingsD
 				timeoutMs: headroom.timeoutMs,
 				proxyTokenFile,
 			},
+			rtk: { enabled: rtk.enabled, retentionDays: rtk.retentionDays },
 		},
 	};
 }
@@ -516,6 +524,7 @@ export function draftToRootSections(draft: UnifiedSettingsDraft): {
 				template: headroomDisplay.template,
 				status: { ...headroomDisplay.status },
 			},
+			rtk: { ...draft.display.rtk },
 			promptBorder: {
 				style: promptBorder.style,
 				layout: promptBorder.layout,
@@ -544,6 +553,7 @@ export function draftToRootSections(draft: UnifiedSettingsDraft): {
 			beads: { ...draft.behavior.beads },
 			caveman: { defaultLevel: draft.behavior.caveman.defaultLevel },
 			headroom: { ...draft.behavior.headroom, autoStart: false },
+			rtk: { ...draft.behavior.rtk },
 		},
 	};
 }
@@ -950,6 +960,7 @@ function validateDraft(draft: UnifiedSettingsDraft): string | undefined {
 	if (!Number.isSafeInteger(headroom.minContextTokens) || headroom.minContextTokens < 0) return "Headroom minimum context tokens must be a non-negative integer.";
 	if (!Number.isSafeInteger(headroom.minMessageChars) || headroom.minMessageChars < 1) return "Headroom minimum message chars must be at least 1.";
 	if (!Number.isSafeInteger(headroom.timeoutMs) || headroom.timeoutMs < 100) return "Headroom timeout must be an integer of at least 100 ms.";
+	if (!Number.isSafeInteger(draft.behavior.rtk.retentionDays) || draft.behavior.rtk.retentionDays < 1) return "RTK retention days must be an integer of at least 1.";
 	if (!isBorderStyleName(draft.display.promptBorder.style)) return "Prompt Border style is invalid.";
 	if (!isBorderLayoutName(draft.display.promptBorder.layout)) return "Prompt Border layout is invalid.";
 	const rail = draft.display.contextRail;
@@ -1055,6 +1066,7 @@ function settingsItems(
 		? undefined
 		: "Ponytail is not installed; rows are read-only. Install @dietrichgebert/ponytail to edit these controls.";
 	const headroomWarning = featureWarning(presence, "headroom");
+	const rtkWarning = featureWarning(presence, "rtk");
 	const cavemanWarning = featureWarning(presence, "caveman");
 	const sharedWarning = featureWarning(presence, "shared-display");
 	const promptWarning = featureWarning(presence, "prompt-border-style");
@@ -1105,7 +1117,7 @@ function settingsItems(
 		{ id: "section:shared", label: "Shared Display", currentValue: "", heading: true },
 		boolItem("shared.enabled", "Enabled", shared.enabled, "Enable shared host composition and widget.", sharedWarning),
 		selectItem("shared.layout", "Layout", shared.layout, SHARED_LAYOUTS, "Horizontal or vertical source composition.", sharedWarning),
-		textItem("shared.order", "Source order", shared.order.join(","), "Comma-separated ponytail,caveman,headroom,codegraph,beads order.", sharedWarning),
+		textItem("shared.order", "Source order", shared.order.join(","), "Comma-separated ponytail,caveman,headroom,rtk,codegraph,beads order.", sharedWarning),
 		selectItem("shared.placement", "Placement", shared.widgetPlacement, SHARED_PLACEMENTS, "Widget placement relative to editor.", sharedWarning),
 		textItem("shared.separator", "Separator", shared.horizontalSeparator, "One-line separator for horizontal layout.", sharedWarning),
 		numberItem("shared.gap", "Vertical gap", shared.verticalGapRows, "Blank rows between vertical sources, 0-10.", sharedWarning),
@@ -1136,6 +1148,12 @@ function settingsItems(
 		...Object.keys(headroom.status).map(state =>
 			textItem(`headroom.status.${state}`, `${state} template`, headroom.status[state as keyof typeof headroom.status], "Single-line Headroom state template.", headroomWarning),
 		),
+		{ id: "section:rtk", label: "RTK", currentValue: "", heading: true },
+		boolItem("rtk.enabled", "Enabled", behavior.rtk.enabled, "Rewrite bash commands through RTK; live only when RTK extension is loaded.", rtkWarning),
+		numberItem("rtk.retentionDays", "Retention (days)", behavior.rtk.retentionDays, "Delete RTK session history untouched for this many days.", rtkWarning),
+		boolItem("rtk.visible", "Display visible", draft.display.rtk.visible, "Publish RTK Savings to Shared Display.", rtkWarning),
+		textItem("rtk.template", "Display template", draft.display.rtk.template, "Placeholders {glyph} {percent} {tokensSaved} {tokensInput} {commands}.", rtkWarning),
+		textItem("rtk.glyphDirectory", "Glyph directory", draft.display.rtk.glyphDirectory, "External RTK glyph directory with active/off/missing .txt files.", rtkWarning),
 		{ id: "section:prompt", label: "Prompt Border", currentValue: "", heading: true },
 		selectItem("prompt.style", "Style", draft.display.promptBorder.style, Object.keys(borderStyles) as BorderStyleName[], "Prompt border style.", promptWarning),
 		selectItem("prompt.layout", "Layout", draft.display.promptBorder.layout, ["full", "bottom", "sides", "top-bottom", "default"], "Prompt border layout.", promptWarning),
@@ -1222,6 +1240,11 @@ function updateDraft(draft: UnifiedSettingsDraft, id: string, value: string): vo
 		case "headroom.visible": draft.display.headroom.visible = bool; return;
 		case "headroom.template": draft.display.headroom.template = value; return;
 		case "headroom.glyphDirectory": draft.display.headroom.glyphDirectory = value; return;
+		case "rtk.enabled": draft.behavior.rtk.enabled = bool; return;
+		case "rtk.retentionDays": draft.behavior.rtk.retentionDays = Number(value); return;
+		case "rtk.visible": draft.display.rtk.visible = bool; return;
+		case "rtk.template": draft.display.rtk.template = value; return;
+		case "rtk.glyphDirectory": draft.display.rtk.glyphDirectory = value; return;
 		case "prompt.style": if (isBorderStyleName(value)) draft.display.promptBorder.style = value; return;
 		case "prompt.layout": if (isBorderLayoutName(value)) draft.display.promptBorder.layout = value; return;
 		case "rail.enabled": draft.display.contextRail.enabled = bool; return;

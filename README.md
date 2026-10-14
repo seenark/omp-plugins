@@ -13,9 +13,10 @@ Standalone [oh-my-pi](https://github.com/can1357/oh-my-pi) extensions in one Bun
 | `@codesook/omp-caveman` | `caveman` | no | `packages/caveman/src/index.ts` |
 | `@codesook/omp-codegraph` | `codegraph` | no | `packages/codegraph/src/index.ts` |
 | `@codesook/omp-beads` | `beads` | no | `packages/beads/src/index.ts` |
+| `@codesook/omp-rtk` | `rtk` | no | `packages/rtk/src/index.ts` |
 | `@codesook/omp-theme-catppuccin` | theme package | — | `packages/theme-catppuccin/bin/install.js` |
 
-Root install loads unified settings plus default Headroom and Prompt Border features. Shared Display, Caveman, CodeGraph, and Beads remain opt-in.
+Root install loads unified settings plus default Headroom and Prompt Border features. Shared Display, Caveman, CodeGraph, Beads, and RTK remain opt-in.
 
 ## Requirements
 
@@ -57,6 +58,7 @@ omp plugin install "$PWD/packages/shared-display"
 omp plugin install "$PWD/packages/caveman"
 omp plugin install "$PWD/packages/codegraph"
 omp plugin install "$PWD/packages/beads"
+omp plugin install "$PWD/packages/rtk"
 ```
 
 Install Catppuccin themes:

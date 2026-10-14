@@ -35,6 +35,12 @@ Bare `/caveman` opens a native menu for status and all seven canonical levels. E
 
 Cancelling the menu does not load or migrate config, seed glyphs, or append a session entry. Without interactive UI, bare `/caveman` prints explicit command help instead of choosing a level. `/caveman status` still opens the read-only overlay, closed with Enter/Esc. Level choices and explicit level commands append a `caveman-level` session entry, so resume and branch operations recover the newest valid entry. They do not change the saved default.
 
+Typing exactly `stop caveman` or `normal mode` (case-insensitive, trailing punctuation ignored) as a user message turns Caveman off for the session, like `/caveman off`. Messages sent by extensions are ignored. `/caveman status` marks the default as overridden when an explicit session level differs from it.
+
+A subagent follows the session that spawned it (needs OMP 18.3.2+ for `ctx.agent`; older hosts skip inheritance): it starts at its parent's current level, including `off`, and records that level as its own `caveman-level` entry. Children of different parents never mix, and a nested subagent follows its direct parent. A subagent whose parent is gone falls back to the saved default. `/new` and branching in the parent do not affect running children.
+
+Ponytail's subagent default is not inherited: Ponytail reads `PONYTAIL_DEFAULT_MODE` at its own `session_start` and exposes no per-session hook, so Caveman cannot set it safely.
+
 Behavior change: bare `/caveman` now offers an action menu, not a settings form. `/caveman config` remains removed; root `/codesook-omp-plugin` owns persisted settings.
 
 ## Configuration
@@ -64,7 +70,7 @@ Caveman uses `behavior.caveman.defaultLevel` and `display.caveman`:
 }
 ```
 
-Legacy `~/.config/codesook-omp/caveman/config.json` and `.pi/agent/caveman.json` migrate into missing root sections, then valid legacy JSON files are removed after successful migration. Invalid root JSON wins and is never overwritten; invalid legacy files remain for repair. Glyph files remain external.
+Legacy `~/.config/codesook-omp/caveman/config.json` and `.pi/agent/caveman.json` migrate into missing root sections, then valid legacy JSON files are removed after successful migration. Invalid root JSON wins and is never overwritten; while it is invalid, Caveman warns and the default level is `off` (fail closed). Invalid legacy files remain for repair. Glyph files remain external.
 
 ## Assets
 

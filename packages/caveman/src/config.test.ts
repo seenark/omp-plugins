@@ -114,7 +114,7 @@ describe("Caveman config", () => {
 
 			const loaded = await loadCavemanConfig({ homeDirectory: home, seedAssets: false });
 
-			expect(loaded.config).toEqual(DEFAULT_CAVEMAN_CONFIG);
+			expect(loaded.config).toEqual({ ...DEFAULT_CAVEMAN_CONFIG, defaultLevel: "off" });
 			expect(readFileSync(rootPath, "utf8")).toBe("{invalid\n");
 			expect(existsSync(packagePath)).toBe(true);
 			expect(existsSync(legacyPath)).toBe(true);

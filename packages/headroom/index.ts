@@ -12,7 +12,7 @@ import {
 	connectSharedDisplay,
 	type SharedDisplayPublisher,
 } from "@codesook/omp-shared-display/client";
-import { applyCompressionResult, buildCompressionPayload } from "./bridge.ts";
+import { applyCompressionResult, buildCompressionPayload, estimateTokens, findUsageAnchor, replaceToolResultTexts } from "./bridge.ts";
 import { HeadroomHttpClient, HeadroomHttpError, loadHeadroomProxyToken, writeHeadroomProxyToken } from "./client.ts";
 import {
 	HEADROOM_CONFIG_FILE,
@@ -25,6 +25,7 @@ import {
 } from "./config.ts";
 import {
 	DEFAULT_GLYPHS,
+	formatCompact,
 	loadGlyphAsset,
 	renderDisplayFrames,
 	resolveThemeGlyph,
@@ -36,7 +37,7 @@ import {
 	type HeadroomInitPaths,
 	type HeadroomInitTarget,
 } from "./init.ts";
-import type { AgentMessage, CompressResult, HeadroomStats } from "./types.ts";
+import type { AgentMessage, CompressionPayload, CompressResult, HeadroomStats } from "./types.ts";
 
 const SUBCOMMANDS = ["status", "on", "off", "health", "stats", "token", "init"] as const;
 const INIT_TARGETS = ["config", "glyphs", "all"] as const;
@@ -64,10 +65,19 @@ type HeadroomRuntimeState = {
 	sessionEnabledOverride: boolean | undefined;
 	proxyOnline: boolean | null;
 	compressionAvailable: boolean | null;
+	/** Short reason (HTTP status) while Compression Unavailable. */
+	unavailableReason: string | undefined;
+	/** Health retries since the last successful compression; indexes BACKOFF_MS. */
+	retryAttempts: number;
+	/** Epoch ms; the next `context` event re-checks health once this passes. */
+	nextRetryAt: number | undefined;
+	pendingHealth: Promise<void> | undefined;
 	proxyStarting: boolean;
 	proxyStartAttempted: boolean;
 	remoteWarningShown: boolean;
 	offlineWarningShown: boolean;
+	/** Agent Session scope: id sent to Headroom and toolCallId -> text already forwarded compressed. */
+	session: { id: string | undefined; memo: Map<string, string> };
 	stats: HeadroomStats;
 };
 
@@ -130,17 +140,17 @@ export default function headroomExtension(pi: ExtensionAPI, options: HeadroomExt
 		});
 	}
 
-	const startSession = (_event: unknown, ctx: ExtensionContext): void => {
+	const startSession = (preserveSession: boolean) => (_event: unknown, ctx: ExtensionContext): void => {
 		activeContext = ctx;
 		for (const message of pendingWarnings) {
 			if (ctx.hasUI) ctx.ui.notify(message, "warning");
 		}
 		pendingWarnings.clear();
-		resetSession(getRuntime(), pi, ctx, { ...options, configPath, warn, env: options.env ?? process.env });
+		resetSession(getRuntime(), pi, ctx, { ...options, configPath, warn, env: options.env ?? process.env }, preserveSession);
 	};
-	pi.on("session_start", startSession);
-	pi.on("session_switch", startSession);
-	pi.on("session_branch", startSession);
+	pi.on("session_start", startSession(false));
+	pi.on("session_switch", startSession(false));
+	pi.on("session_branch", startSession(true));
 	pi.on("session_shutdown", (_event, ctx) => {
 		activeContext = ctx;
 		if (runtime) disposePublisher(runtime);
@@ -214,10 +224,15 @@ function createRuntime(options: HeadroomConfigLoadOptions & { glyphDirectory?: s
 		sessionEnabledOverride: undefined,
 		proxyOnline: null,
 		compressionAvailable: null,
+		unavailableReason: undefined,
+		retryAttempts: 0,
+		nextRetryAt: undefined,
+		pendingHealth: undefined,
 		proxyStarting: false,
 		proxyStartAttempted: false,
 		remoteWarningShown: false,
 		offlineWarningShown: false,
+		session: { id: undefined, memo: new Map() },
 		stats: emptyStats(),
 	};
 	const runtime: HeadroomRuntime = {
@@ -249,6 +264,7 @@ function resetSession(
 	pi: ExtensionAPI,
 	ctx: ExtensionContext,
 	options: HeadroomExtensionOptions & HeadroomConfigLoadOptions,
+	preserveSession: boolean,
 ): void {
 	disposePublisher(runtime);
 	runtime.healthGeneration++;
@@ -267,14 +283,18 @@ function resetSession(
 	) {
 		runtime.client = createClient(nextConfig);
 	}
-	runtime.state.enabled = nextConfig.enabled;
-	runtime.state.sessionEnabledOverride = undefined;
-	runtime.state.compressionAvailable = null;
+	runtime.state.enabled = preserveSession ? runtime.state.enabled : nextConfig.enabled;
+	if (!preserveSession) {
+		runtime.state.sessionEnabledOverride = undefined;
+		runtime.state.session = { id: undefined, memo: new Map() };
+		runtime.state.stats = emptyStats();
+	}
+	clearAvailability(runtime.state);
+	runtime.state.pendingHealth = undefined;
 	runtime.state.proxyStarting = false;
 	runtime.state.proxyStartAttempted = false;
 	runtime.state.remoteWarningShown = false;
 	runtime.state.offlineWarningShown = false;
-	runtime.state.stats = emptyStats();
 	const events = (pi as unknown as { events?: unknown }).events;
 	runtime.publisher = connectSharedDisplay(isEventBus(events) ? events : undefined, "headroom");
 	runtime.refreshStatus(ctx);
@@ -340,12 +360,12 @@ function applyLiveConfig(runtime: HeadroomRuntime, next: HeadroomConfig, ctx: Ex
 	if (clientChanged) {
 		runtime.client = createClient(next);
 		runtime.state.proxyOnline = null;
-		runtime.state.compressionAvailable = null;
 		runtime.state.proxyStarting = false;
 		runtime.state.proxyStartAttempted = false;
+		clearAvailability(runtime.state);
 	}
 	runtime.state.enabled = runtime.state.sessionEnabledOverride ?? next.enabled;
-	if (!wasEnabled && runtime.state.enabled) runtime.state.compressionAvailable = null;
+	if (!wasEnabled && runtime.state.enabled) clearAvailability(runtime.state);
 	runtime.state.remoteWarningShown = false;
 	runtime.state.offlineWarningShown = false;
 	if (ctx) {
@@ -358,6 +378,21 @@ function applyLiveConfig(runtime: HeadroomRuntime, next: HeadroomConfig, ctx: Ex
 	}
 }
 
+const BACKOFF_MS = [30_000, 60_000, 120_000, 300_000];
+/** HTTP statuses that mean "misconfigured", not "busy": stop calling until health succeeds. */
+const UNAVAILABLE_STATUSES = [400, 401, 404];
+
+function clearAvailability(state: HeadroomRuntimeState): void {
+	state.compressionAvailable = null;
+	state.unavailableReason = undefined;
+	state.retryAttempts = 0;
+	state.nextRetryAt = undefined;
+}
+
+function scheduleRetry(state: HeadroomRuntimeState): void {
+	state.nextRetryAt = Date.now() + BACKOFF_MS[Math.min(state.retryAttempts++, BACKOFF_MS.length - 1)];
+}
+
 async function updateHealthState(
 	runtime: HeadroomRuntime,
 	signal?: AbortSignal,
@@ -368,19 +403,31 @@ async function updateHealthState(
 	const online = await client.health(signal);
 	if (generation !== runtime.healthGeneration || client !== runtime.client) return runtime.state.proxyOnline === true;
 	runtime.state.proxyOnline = online;
-	if (online && runtime.state.compressionAvailable === false) runtime.state.compressionAvailable = null;
+	if (!online) scheduleRetry(runtime.state);
+	else if (runtime.state.compressionAvailable === false) {
+		runtime.state.compressionAvailable = null;
+		runtime.state.unavailableReason = undefined;
+	}
 	return online;
 }
 
-async function checkHealthInBackground(runtime: HeadroomRuntime, ctx: ExtensionContext): Promise<void> {
+/** One shared in-flight health check; `context` awaits it, bounded by the client timeout. */
+function checkHealthInBackground(runtime: HeadroomRuntime, ctx: ExtensionContext): Promise<void> {
+	if (runtime.state.pendingHealth) return runtime.state.pendingHealth;
 	const generation = runtime.healthGeneration;
 	const client = runtime.client;
-	try {
-		await updateHealthState(runtime, undefined, generation, client);
-	} catch {
-		if (generation === runtime.healthGeneration && client === runtime.client) runtime.state.proxyOnline = false;
-	}
-	if (generation === runtime.healthGeneration && client === runtime.client) runtime.refreshStatus(ctx);
+	const tracked: Promise<void> = (async () => {
+		try {
+			await updateHealthState(runtime, undefined, generation, client);
+		} catch {
+			if (generation === runtime.healthGeneration && client === runtime.client) runtime.state.proxyOnline = false;
+		}
+		if (generation === runtime.healthGeneration && client === runtime.client) runtime.refreshStatus(ctx);
+	})().finally(() => {
+		if (runtime.state.pendingHealth === tracked) runtime.state.pendingHealth = undefined;
+	});
+	runtime.state.pendingHealth = tracked;
+	return tracked;
 }
 
 async function ensureProxy(runtime: HeadroomRuntime, ctx: ExtensionContext): Promise<boolean> {
@@ -391,43 +438,106 @@ async function ensureProxy(runtime: HeadroomRuntime, ctx: ExtensionContext): Pro
 	return healthy;
 }
 
+/** Lazy recovery: no timers, the next `context` event after the backoff re-checks health. */
+async function proxyReady(runtime: HeadroomRuntime, ctx: ExtensionContext): Promise<boolean> {
+	const state = runtime.state;
+	if (state.pendingHealth) await state.pendingHealth;
+	const down = state.proxyOnline === false || state.compressionAvailable === false;
+	if (state.proxyOnline === null || (down && Date.now() >= (state.nextRetryAt ?? 0))) await checkHealthInBackground(runtime, ctx);
+	return state.proxyOnline === true && state.compressionAvailable !== false;
+}
+
 async function handleContextCompression(
 	runtime: HeadroomRuntime,
 	event: ContextEvent,
 	ctx: ExtensionContext,
 ): Promise<{ messages?: AgentMessage[] } | undefined> {
 	if (shouldSkipBeforePayload(runtime, ctx)) return undefined;
-	const config = runtime.config;
-	const client = runtime.client;
-	const payload = buildCompressionPayload(event.messages, config.minMessageChars);
-	if (payload.candidateCount === 0 || runtime.state.proxyOnline !== true || runtime.state.compressionAvailable === false) return undefined;
+	const { state } = runtime;
+	const memo = state.session.memo;
+	const contextTokens = ctx.getContextUsage()?.tokens ?? undefined;
+	const payload = buildCompressionPayload(event.messages, runtime.config.minMessageChars);
+	const hasNewCandidate = payload.mappings.some(({ applyTo, toolCallId }) => applyTo && toolCallId && !memo.has(toolCallId));
+	const requested =
+		hasNewCandidate && !(contextTokens !== undefined && contextTokens < runtime.config.minContextTokens) && (await proxyReady(runtime, ctx))
+			? await requestCompression(runtime, ctx, payload)
+			: undefined;
 
-	runtime.state.stats.attempts++;
+	// Replay invariant: text forwarded compressed once is forwarded identically on every later call,
+	// whether or not this call reached the server.
+	let newMessages = 0;
+	for (const [id, text] of requested?.replacements ?? []) {
+		if (memo.has(id)) continue;
+		memo.set(id, text);
+		newMessages++;
+	}
+	const anchorIndex = findUsageAnchor(event.messages);
+	const out = replaceToolResultTexts(event.messages, memo, anchorIndex);
+
+	const stats = state.stats;
+	const savedTokens = Math.max(0, estimateTokens(out.originalChars) - estimateTokens(out.forwardedChars));
+	// Headroom Savings is the share of the whole request. OMP's context estimate is the provider-reported
+	// prompt of the last response (results up to the anchor already counted compressed) plus original text
+	// after it, so only savings at or before the anchor are added back to get the size without Headroom.
+	const anchoredSaved = Math.max(0, estimateTokens(out.anchoredChars.original) - estimateTokens(out.anchoredChars.forwarded));
+	const beforeTokens =
+		contextTokens === undefined ? estimateTokens(payload.chars) : Math.max(contextTokens + anchoredSaved, savedTokens);
+	stats.calls++;
+	stats.beforeTokens += beforeTokens;
+	stats.savedTokens += savedTokens;
+	if (newMessages > 0) stats.applied++;
+	stats.last = {
+		beforeTokens,
+		savedTokens,
+		newMessages,
+		replayedMessages: out.replaced - newMessages,
+		transformsApplied: requested?.result.transformsApplied ?? [],
+		ccrHashes: requested?.result.ccrHashes ?? [],
+		session: requested?.result.session ?? stats.last?.session,
+	};
+	runtime.refreshStatus(ctx);
+	return out.messages === event.messages ? undefined : { messages: out.messages };
+}
+
+async function requestCompression(
+	runtime: HeadroomRuntime,
+	ctx: ExtensionContext,
+	payload: CompressionPayload,
+): Promise<{ result: CompressResult; replacements: Map<string, string> } | undefined> {
+	const { state, client } = runtime;
+	state.session.id ??= ctx.sessionManager.getSessionId();
+	const sessionId = state.session.id;
+	const send = () => client.compress(payload.messages, ctx.model?.id, sessionId);
+	state.stats.attempts++;
+	let result: CompressResult;
 	try {
-		const result = await client.compress(payload.messages, ctx.model?.id);
-		runtime.state.compressionAvailable = true;
-		runtime.state.proxyOnline = true;
-		if (!result.compressed || result.tokensSaved <= 0) {
-			runtime.refreshStatus(ctx);
-			return undefined;
-		}
-
-		const applied = applyCompressionResult(event.messages, payload.mappings, result.messages, {
-			minMessageChars: config.minMessageChars,
+		// A 503 is a busy/timed-out session; the retry lands on consistent server state.
+		result = await send().catch(error => {
+			if (error instanceof HeadroomHttpError && error.status === 503) return send();
+			throw error;
 		});
-		if (!applied.ok) {
-			recordGuardSkip(runtime.state.stats, applied.reason);
-			runtime.refreshStatus(ctx);
-			return undefined;
-		}
-
-		recordAppliedCompression(runtime.state.stats, result, applied.appliedMessages);
-		runtime.refreshStatus(ctx);
-		return { messages: applied.messages };
 	} catch (error) {
 		recordCompressionError(runtime, ctx, error);
 		return undefined;
 	}
+	if (result.skipReason) {
+		state.stats.lastError = `compression skipped: ${result.skipReason}`;
+		return undefined;
+	}
+	state.compressionAvailable = true;
+	state.proxyOnline = true;
+	state.unavailableReason = undefined;
+	state.retryAttempts = 0;
+	state.nextRetryAt = undefined;
+	state.stats.lastError = undefined;
+	const applied = applyCompressionResult(payload.mappings, result.messages);
+	if (!applied.ok) {
+		recordGuardSkip(state.stats, applied.reason);
+		return undefined;
+	}
+	state.stats.lastSkipReason = applied.rejected[0];
+	if (applied.rejected.length > 0) state.stats.guardSkips++;
+	return { result, replacements: applied.replacements };
 }
 
 function shouldSkipBeforePayload(runtime: HeadroomRuntime, ctx: ExtensionContext): boolean {
@@ -440,8 +550,7 @@ function shouldSkipBeforePayload(runtime: HeadroomRuntime, ctx: ExtensionContext
 		runtime.refreshStatus(ctx);
 		return true;
 	}
-	const usage = ctx.getContextUsage();
-	return usage?.tokens !== null && usage?.tokens !== undefined && usage.tokens < runtime.config.minContextTokens;
+	return false;
 }
 
 function recordGuardSkip(stats: HeadroomStats, reason: string): void {
@@ -449,34 +558,29 @@ function recordGuardSkip(stats: HeadroomStats, reason: string): void {
 	stats.lastSkipReason = reason;
 }
 
-function recordAppliedCompression(stats: HeadroomStats, result: CompressResult, appliedMessages: number): void {
-	stats.applied++;
-	stats.tokensSaved += result.tokensSaved;
-	stats.lastError = undefined;
-	stats.lastSkipReason = undefined;
-	stats.last = { ...result, appliedMessages };
-}
-
+/** Memo-only for this call unless the error says the proxy or its configuration is unusable. */
 function recordCompressionError(runtime: HeadroomRuntime, ctx: ExtensionContext, error: unknown): void {
-	runtime.state.stats.lastError = getErrorMessage(error);
-	if (isAbortOrTimeoutError(error)) {
-		runtime.refreshStatus(ctx);
-		return;
-	}
-	if (error instanceof HeadroomHttpError) {
-		runtime.state.compressionAvailable = false;
-		runtime.refreshStatus(ctx);
-		return;
-	}
-
-	runtime.state.proxyOnline = false;
-	if (!runtime.state.offlineWarningShown) {
-		runtime.state.offlineWarningShown = true;
-		notify(
-			ctx,
-			`Headroom proxy unavailable. Compression disabled until /headroom health succeeds.\n${runtime.state.stats.lastError}`,
-			"warning",
-		);
+	const state = runtime.state;
+	state.stats.lastError = getErrorMessage(error);
+	if (!isAbortOrTimeoutError(error)) {
+		if (error instanceof HeadroomHttpError) {
+			if (UNAVAILABLE_STATUSES.includes(error.status)) {
+				state.compressionAvailable = false;
+				state.unavailableReason = String(error.status);
+				scheduleRetry(state);
+			}
+		} else {
+			state.proxyOnline = false;
+			scheduleRetry(state);
+			if (!state.offlineWarningShown) {
+				state.offlineWarningShown = true;
+				notify(
+					ctx,
+					`Headroom proxy unavailable. Compression retries automatically; already compressed results stay stable.\n${state.stats.lastError}`,
+					"warning",
+				);
+			}
+		}
 	}
 	runtime.refreshStatus(ctx);
 }
@@ -591,7 +695,7 @@ async function setupProxyToken(runtime: HeadroomRuntime, ctx: ExtensionContext):
 		runtime.healthGeneration++;
 		runtime.client = createClient(runtime.config);
 		runtime.state.proxyOnline = null;
-		runtime.state.compressionAvailable = null;
+		clearAvailability(runtime.state);
 		runtime.state.remoteWarningShown = false;
 		runtime.state.offlineWarningShown = false;
 		const healthy = await runtime.updateHealth(ctx);
@@ -683,16 +787,19 @@ function publishDisplay(runtime: HeadroomRuntime, ctx: ExtensionContext): void {
 		isRemoteBlocked(runtime.config),
 		runtime.state.proxyStarting,
 		runtime.state.proxyOnline,
-		Boolean(runtime.state.stats.last),
+		runtime.state.compressionAvailable === false,
 	);
 	const fallback = resolveThemeGlyph(ctx.ui.theme, state) || DEFAULT_GLYPHS[state];
 	try {
+		const stats = runtime.state.stats;
 		const values = {
 			label: "Headroom",
-			compressionPercent: runtime.state.stats.last ? Math.round((1 - runtime.state.stats.last.compressionRatio) * 100) : 0,
-			tokensSaved: runtime.state.stats.last?.tokensSaved ?? 0,
-			tokensBefore: runtime.state.stats.last?.tokensBefore ?? 0,
-			tokensAfter: runtime.state.stats.last?.tokensAfter ?? 0,
+			compressionPercent: savingsPercent(stats.savedTokens, stats.beforeTokens),
+			tokensSaved: stats.savedTokens,
+			tokensBefore: stats.beforeTokens,
+			tokensAfter: stats.beforeTokens - stats.savedTokens,
+			lastPercent: savingsPercent(stats.last?.savedTokens ?? 0, stats.last?.beforeTokens ?? 0),
+			lastSaved: stats.last?.savedTokens ?? 0,
 			proxyStatus:
 				runtime.state.proxyOnline === true
 					? "online"
@@ -701,7 +808,8 @@ function publishDisplay(runtime: HeadroomRuntime, ctx: ExtensionContext): void {
 						: runtime.state.proxyOnline === false
 							? "offline"
 							: "unknown",
-			error: runtime.state.stats.lastError ?? "",
+			error: stats.lastError ?? "",
+			reason: runtime.state.unavailableReason ?? stats.lastError ?? "",
 		};
 		const asset = loadGlyphAsset(state, runtime.config.display, fallback);
 		runtime.publisher.publish(renderDisplayFrames(state, values, runtime.config.display, fallback, asset));
@@ -727,24 +835,33 @@ function renderStatus(config: HeadroomConfig, state: HeadroomRuntimeState, confi
 		`  Config: ${configPath}`,
 		"",
 		"Session stats:",
-		`  Attempts:     ${stats.attempts}`,
-		`  Applied:      ${stats.applied}`,
+		`  Agent Session: ${state.session.id ?? "not started"}`,
+		`  Headroom Savings: ${savingsPercent(stats.savedTokens, stats.beforeTokens)}% (${formatCompact(stats.savedTokens)} of ${formatCompact(stats.beforeTokens)} tokens saved over ${stats.calls} calls)`,
+		`  Compressed results replayed: ${state.session.memo.size}`,
+		`  Compress requests: ${stats.attempts}`,
+		`  Calls with new compression: ${stats.applied}`,
 		`  Guard skips:  ${stats.guardSkips}`,
-		`  Tokens saved: ${stats.tokensSaved.toLocaleString()}`,
 	];
 	if (stats.last) {
-		const pct = Math.round((1 - stats.last.compressionRatio) * 100);
 		lines.push(
 			"",
-			"Last applied compression:",
-			`  ${stats.last.tokensBefore.toLocaleString()} → ${stats.last.tokensAfter.toLocaleString()} tokens (-${pct}%)`,
-			`  Applied messages: ${stats.last.appliedMessages}`,
+			"Last call:",
+			`  ${formatCompact(stats.last.savedTokens)} of ${formatCompact(stats.last.beforeTokens)} tokens saved (${savingsPercent(stats.last.savedTokens, stats.last.beforeTokens)}%)`,
+			`  New compressed results: ${stats.last.newMessages}, replayed from memo: ${stats.last.replayedMessages}`,
 			`  Transforms: ${stats.last.transformsApplied.join(", ") || "none"}`,
 			`  CCR hashes: ${stats.last.ccrHashes.length}`,
+			stats.last.session
+				? `  Server session: ${stats.last.session.id} (frozen ${stats.last.session.frozenMessageCount}, prefix replayed: ${stats.last.session.cachedPrefixReplayed ? "yes" : "no"})`
+				: "  Server session: none returned",
 		);
 	}
+	if (state.unavailableReason) lines.push("", `Unavailable reason: ${state.unavailableReason}`);
 	if (stats.lastSkipReason) lines.push("", `Last guard skip: ${stats.lastSkipReason}`);
 	if (stats.lastError) lines.push("", `Last error: ${stats.lastError}`);
+	if (state.nextRetryAt !== undefined && (state.proxyOnline === false || state.compressionAvailable === false)) {
+		const seconds = Math.max(0, Math.ceil((state.nextRetryAt - Date.now()) / 1000));
+		lines.push("", `Next health retry: on the next request after ${seconds}s`);
+	}
 	return lines.join("\n");
 }
 
@@ -790,8 +907,12 @@ function parseCommand(args: string): ParsedCommand {
 	return tokens.length === 1 ? { command: command as Subcommand } : { command: "invalid" };
 }
 
+function savingsPercent(saved: number, before: number): number {
+	return before > 0 ? Math.round((saved / before) * 100) : 0;
+}
+
 function emptyStats(): HeadroomStats {
-	return { attempts: 0, applied: 0, guardSkips: 0, tokensSaved: 0 };
+	return { attempts: 0, applied: 0, guardSkips: 0, calls: 0, beforeTokens: 0, savedTokens: 0 };
 }
 
 function notify(ctx: ExtensionContext, message: string, type: "info" | "warning" | "error"): void {
