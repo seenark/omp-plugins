@@ -48,7 +48,7 @@ Headroom Savings stay separate; Headroom never compresses RTK-processed results.
 
 ## Configuration
 
-Edited through `/codesook-omp-plugin` (RTK section) in `~/.config/codesook-omp/config.json`. Changes apply live.
+Edited through `/omp-plugins` (RTK section) in `~/.config/codesook-omp/config.json`. Changes apply live.
 
 ```json
 {

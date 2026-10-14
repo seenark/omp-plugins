@@ -15,15 +15,13 @@ Shared Display presentation persists in `display.sharedDisplay` inside:
 ~/.config/codesook-omp/config.json
 ```
 
-Legacy `~/.config/codesook-omp/shared-display/config.json` migrates once when root section is missing. `/shared-display` command is removed; root `/codesook-omp-plugin` settings owns persisted presentation. Producers remain safe when host/EventBus is absent.
+Legacy `~/.config/codesook-omp/shared-display/config.json` migrates once when root section is missing. `/shared-display` command is removed; root `/omp-plugins` settings owns persisted presentation. Producers remain safe when host/EventBus is absent.
 
 Effective source order appends every known source (`ponytail`, `caveman`, `headroom`, `rtk`, `codegraph`, `beads`) that a persisted order omits, including orders saved before a source existed. Sources present keep their configured relative order; unknown names and duplicates are dropped. Each integration's visibility controls whether its segment appears; removing it from source order does not hide it. The side-effect-free client never loads the display host or another integration.
 
-## Ponytail status
+## Ponytail
 
-The host shows Ponytail only when the upstream Ponytail plugin (`@dietrichgebert/ponytail`) is loaded in the same process. At session start the host checks `pi.getCommands()` for an extension command named `ponytail`; without it, stale `ponytail-mode` session entries are ignored and no segment renders.
-
-When Ponytail is loaded, the initial mode is the latest `ponytail-mode` entry on the branch. With no entry, the host resolves upstream's default: `PONYTAIL_DEFAULT_MODE`, then `defaultMode` in `$XDG_CONFIG_HOME/ponytail/config.json` (else `~/.config/ponytail/config.json`), then `full`; `review` is never a default. Upstream `hideStatus` (`PONYTAIL_HIDE_STATUS` or config `hideStatus: true`) hides the segment. Statuses Ponytail sets afterwards replace the initial mode.
+Ponytail is a normal producer (package `@codesook/omp-ponytail`). It publishes through `connectSharedDisplay(events, "ponytail")` like every other source; the host renders only published snapshots and reads no Ponytail status, session entries, config, or assets.
 
 ## Host presence
 

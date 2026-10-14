@@ -24,6 +24,7 @@ function runFixture(scenario: string): void {
 			// Import only after the child process proves HOME and writable paths are isolated.
 			const { default: extension } = await import(${JSON.stringify(new URL("./index.ts", import.meta.url).href)});
 			const types = await import(${JSON.stringify(new URL("./types.ts", import.meta.url).href)});
+			const instructions = await import(${JSON.stringify(new URL("./instructions.ts", import.meta.url).href)});
 			for (const file of [types.CONFIG_PATH, types.LEGACY_CONFIG_PATH, types.getLegacyConfigPath(), types.expandHomePath(types.DEFAULT_GLYPH_DIRECTORY), path.join(process.env.PI_CODING_AGENT_DIR, "sessions")]) inside(file);
 			const snapshot = () => {
 				const files = {};
@@ -46,6 +47,8 @@ function runFixture(scenario: string): void {
 			};
 			const ctx = { hasUI: true, agent: { kind: "main", id: "Main", name: "main", depth: 0 }, ui: { theme: { fg: (_color, text) => text, bold: text => text }, notify: message => notices.push(message), select: async () => undefined, setStatus() {} }, sessionManager: { getBranch: () => entries } };
 			const command = args => commands.get("caveman").handler(args, ctx);
+			const skill = mode => instructions.readCavemanSkillBody(types.DEFAULT_SKILL_DIRECTORY, mode);
+			const prompt = async (h = handlers, c = ctx) => (await h.get("before_agent_start")({ systemPrompt: ["Base"] }, c))?.systemPrompt;
 			globalThis.fetch = async () => { throw new Error("Network access is forbidden in menu fixtures"); };
 			${scenario}
 		`], {
@@ -82,51 +85,104 @@ test("cancelling Caveman root preserves legacy config and creates no glyphs or s
 	`);
 });
 
-test("Caveman menu choices change actual prompt rules and recover the session level", () => {
+test("Each Mode Level injects exactly its vendored skill body and off injects nothing", () => {
 	runFixture(`
 		extension(pi);
-		ctx.ui.select = async () => "Lite";
+		const bodies = new Set();
+		for (const mode of ["caveman", "ultracave", "megacave"]) {
+			await command(mode);
+			assert.deepEqual(entries.at(-1), { type: "custom", customType: "caveman-mode", data: { mode } });
+			const expected = await skill(mode);
+			assert.ok(expected.startsWith("# " + mode));
+			assert.deepEqual(await prompt(), ["Base", expected]);
+			bodies.add(expected);
+		}
+		assert.equal(bodies.size, 3);
+		await command("off");
+		assert.equal(await prompt(), undefined);
+		assert.equal(entries.at(-1).data.mode, "off");
+	`);
+});
+
+test("Upstream aliases and standalone commands select ultracave and megacave", () => {
+	runFixture(`
+		extension(pi);
+		await command("ultra");
+		assert.equal(entries.at(-1).data.mode, "ultracave");
+		assert.deepEqual(await prompt(), ["Base", await skill("ultracave")]);
+		await command("wenyan");
+		assert.equal(entries.at(-1).data.mode, "megacave");
+		assert.deepEqual(await prompt(), ["Base", await skill("megacave")]);
+		await command("caveman");
+		await commands.get("ultracave").handler("", ctx);
+		assert.equal(entries.at(-1).data.mode, "ultracave");
+		await commands.get("megacave").handler("", ctx);
+		assert.equal(entries.at(-1).data.mode, "megacave");
+		assert.deepEqual(await prompt(), ["Base", await skill("megacave")]);
+		const count = entries.length;
+		for (const removed of ["lite", "full", "wenyan-full", "wenyan-lite", "wenyan-ultra"]) await command(removed);
+		assert.equal(entries.length, count);
+		assert.equal(notices.filter(message => message.startsWith("Unknown Caveman command")).length, 5);
+	`);
+});
+
+test("Caveman menu choices change actual prompt rules and recover the session mode", () => {
+	runFixture(`
+		extension(pi);
+		ctx.ui.select = async () => "Ultracave";
 		await command("");
-		const light = await handlers.get("before_agent_start")({ systemPrompt: ["Base prompt"] }, ctx);
-		assert.equal(light.systemPrompt[0], "Base prompt");
-		assert.equal(light.systemPrompt.at(-1).split("\\n")[0], "CAVEMAN MODE ACTIVE — level: lite");
-		assert.deepEqual(entries.at(-1), { type: "custom", customType: "caveman-level", data: { level: "lite" } });
-		const session = fs.readFileSync(sessionFile, "utf8");
-		assert.equal(JSON.parse(session.trim()).data.level, "lite");
+		const ultra = await prompt();
+		assert.deepEqual(ultra, ["Base", await skill("ultracave")]);
+		assert.deepEqual(entries.at(-1), { type: "custom", customType: "caveman-mode", data: { mode: "ultracave" } });
+		assert.equal(JSON.parse(fs.readFileSync(sessionFile, "utf8").trim()).data.mode, "ultracave");
 		await handlers.get("session_branch")({}, ctx);
-		const restored = await handlers.get("before_agent_start")({ systemPrompt: ["Base prompt"] }, ctx);
-		assert.deepEqual(restored.systemPrompt, light.systemPrompt);
+		assert.deepEqual(await prompt(), ultra);
 		const beforeOff = snapshot();
 		ctx.ui.select = async () => "Off";
 		await command("");
-		assert.equal(await handlers.get("before_agent_start")({ systemPrompt: ["Base prompt"] }, ctx), undefined);
+		assert.equal(await prompt(), undefined);
 		const afterOff = snapshot();
 		delete beforeOff[sessionFile];
 		delete afterOff[sessionFile];
 		assert.deepEqual(afterOff, beforeOff);
-		assert.equal(entries.at(-1).data.level, "off");
-		await command("ultra");
-		const explicit = await handlers.get("before_agent_start")({ systemPrompt: ["Base prompt"] }, ctx);
-		assert.equal(explicit.systemPrompt.at(-1).split("\\n")[0], "CAVEMAN MODE ACTIVE — level: ultra");
+		assert.equal(entries.at(-1).data.mode, "off");
+		await command("megacave");
+		assert.deepEqual(await prompt(), ["Base", await skill("megacave")]);
 	`);
 });
 
-test("Caveman root cancellation preserves an already active level and session history", () => {
+test("Session entries rehydrate on session_switch and session_branch; invalid entries are ignored", () => {
 	runFixture(`
 		extension(pi);
-		await command("full");
+		await command("ultracave");
+		entries.push({ type: "custom", customType: "caveman-level", data: { level: "full" } });
+		entries.push({ type: "custom", customType: "caveman-mode", data: { mode: "full" } });
+		entries.push({ type: "custom", customType: "caveman-mode", data: { mode: "wenyan-full" } });
+		for (const event of ["session_switch", "session_branch"]) {
+			await handlers.get(event)({}, ctx);
+			assert.deepEqual(await prompt(), ["Base", await skill("ultracave")]);
+		}
+		entries.length = 0;
+		await handlers.get("session_switch")({}, ctx);
+		assert.deepEqual(await prompt(), ["Base", await skill("caveman")]);
+	`);
+});
+
+test("Caveman root cancellation preserves an already active mode and session history", () => {
+	runFixture(`
+		extension(pi);
+		await command("caveman");
 		const before = snapshot();
 		const history = JSON.stringify(entries);
 		ctx.ui.select = async () => undefined;
 		await command("");
 		assert.deepEqual(snapshot(), before);
 		assert.equal(JSON.stringify(entries), history);
-		const result = await handlers.get("before_agent_start")({ systemPrompt: ["Base prompt"] }, ctx);
-		assert.equal(result.systemPrompt.at(-1).split("\\n")[0], "CAVEMAN MODE ACTIVE — level: full");
+		assert.deepEqual(await prompt(), ["Base", await skill("caveman")]);
 	`);
 });
 
-test("Caveman non-UI root never selects, migrates, seeds, or appends a level", () => {
+test("Caveman non-UI root never selects, migrates, seeds, or appends a mode", () => {
 	runFixture(`
 		write(types.LEGACY_CONFIG_PATH, JSON.stringify({ defaultLevel: "lite" }));
 		const before = snapshot();
@@ -139,29 +195,25 @@ test("Caveman non-UI root never selects, migrates, seeds, or appends a level", (
 	`);
 });
 
-const promptLevel = `
-	const level = async (h, c) => (await h.get("before_agent_start")({ systemPrompt: ["Base"] }, c))?.systemPrompt.at(-1).split("\\n")[0];
-`;
-
 test("Typing stop caveman or normal mode turns Caveman off for the session", () => {
 	runFixture(`
-		${promptLevel}
 		extension(pi);
 		await handlers.get("session_start")({}, ctx);
 		const input = (text, source = "interactive") => handlers.get("input")({ type: "input", text, source }, ctx);
-		assert.equal(await level(handlers, ctx), "CAVEMAN MODE ACTIVE — level: full");
+		const on = ["Base", await skill("caveman")];
+		assert.deepEqual(await prompt(), on);
 		await input("stop caveman please");
 		await input("stop caveman", "extension");
 		assert.equal(entries.length, 0);
-		assert.equal(await level(handlers, ctx), "CAVEMAN MODE ACTIVE — level: full");
+		assert.deepEqual(await prompt(), on);
 		await input("  Stop Caveman. ");
-		assert.deepEqual(entries.at(-1), { type: "custom", customType: "caveman-level", data: { level: "off" } });
-		assert.equal(await level(handlers, ctx), undefined);
-		await command("lite");
+		assert.deepEqual(entries.at(-1), { type: "custom", customType: "caveman-mode", data: { mode: "off" } });
+		assert.equal(await prompt(), undefined);
+		await command("ultracave");
 		await input("normal mode!");
-		assert.equal(entries.at(-1).data.level, "off");
+		assert.equal(entries.at(-1).data.mode, "off");
 		await handlers.get("session_branch")({}, ctx);
-		assert.equal(await level(handlers, ctx), undefined);
+		assert.equal(await prompt(), undefined);
 	`);
 });
 
@@ -170,15 +222,27 @@ test("Unparseable root config keeps Caveman off", () => {
 		write(types.CONFIG_PATH, "{invalid\\n");
 		extension(pi);
 		await handlers.get("session_start")({}, ctx);
-		assert.equal(await handlers.get("before_agent_start")({ systemPrompt: ["Base"] }, ctx), undefined);
+		assert.equal(await prompt(), undefined);
 		assert.ok(notices.some(message => message.includes("Unable to parse Caveman config")));
 		assert.equal(fs.readFileSync(types.CONFIG_PATH, "utf8"), "{invalid\\n");
 	`);
 });
 
-test("Subagents inherit the level of their spawning agent, including off", () => {
+test("Legacy defaultLevel in root config fails closed to off", () => {
 	runFixture(`
-		${promptLevel}
+		write(types.CONFIG_PATH, JSON.stringify({ version: 1, display: { caveman: {} }, behavior: { caveman: { defaultLevel: "full" } } }));
+		extension(pi);
+		await handlers.get("session_start")({}, ctx);
+		assert.equal(await prompt(), undefined);
+		assert.ok(notices.some(message => message.includes("removed defaultLevel")));
+		write(types.CONFIG_PATH, JSON.stringify({ version: 1, display: { caveman: {} }, behavior: { caveman: { defaultMode: "ultracave" } } }));
+		await handlers.get("session_switch")({}, ctx);
+		assert.deepEqual(await prompt(), ["Base", await skill("ultracave")]);
+	`);
+});
+
+test("Subagents inherit the mode of their spawning agent, including off", () => {
+	runFixture(`
 		const agent = (id, parentId) => ({ kind: parentId ? "sub" : "main", id, name: id, depth: 0, ...(parentId ? { parentId } : {}) });
 		const start = async (id, parentId) => {
 			const h = new Map();
@@ -191,36 +255,36 @@ test("Subagents inherit the level of their spawning agent, including off", () =>
 			return { h, e, c, run: args => cmds.get("caveman").handler(args, c) };
 		};
 		const parent = await start("Main");
-		await parent.run("ultra");
-		const lite = await start("1-Task", "Main");
-		const ultra = await start("0-Task", "Main");
-		assert.equal(await level(ultra.h, ultra.c), "CAVEMAN MODE ACTIVE — level: ultra");
-		assert.deepEqual(ultra.e, [{ type: "custom", customType: "caveman-level", data: { level: "ultra" } }]);
-		await lite.run("lite");
-		assert.equal(await level(lite.h, lite.c), "CAVEMAN MODE ACTIVE — level: lite");
-		assert.equal(await level(ultra.h, ultra.c), "CAVEMAN MODE ACTIVE — level: ultra");
+		await parent.run("ultracave");
+		const child = await start("1-Task", "Main");
+		const sibling = await start("0-Task", "Main");
+		assert.deepEqual(await prompt(sibling.h, sibling.c), ["Base", await skill("ultracave")]);
+		assert.deepEqual(sibling.e, [{ type: "custom", customType: "caveman-mode", data: { mode: "ultracave" } }]);
+		await child.run("megacave");
+		assert.deepEqual(await prompt(child.h, child.c), ["Base", await skill("megacave")]);
+		assert.deepEqual(await prompt(sibling.h, sibling.c), ["Base", await skill("ultracave")]);
 		const grandchild = await start("0-Task.0-Sub", "0-Task");
-		assert.equal(await level(grandchild.h, grandchild.c), "CAVEMAN MODE ACTIVE — level: ultra");
+		assert.deepEqual(await prompt(grandchild.h, grandchild.c), ["Base", await skill("ultracave")]);
 		await parent.run("off");
 		const silent = await start("2-Task", "Main");
-		assert.equal(await level(silent.h, silent.c), undefined);
-		assert.equal(await level(ultra.h, ultra.c), "CAVEMAN MODE ACTIVE — level: ultra");
-		await parent.run("lite");
+		assert.equal(await prompt(silent.h, silent.c), undefined);
+		assert.deepEqual(await prompt(sibling.h, sibling.c), ["Base", await skill("ultracave")]);
+		await parent.run("megacave");
 		await parent.h.get("session_shutdown")({}, parent.c);
 		const orphan = await start("4-Task", "Main");
-		assert.equal(await level(orphan.h, orphan.c), "CAVEMAN MODE ACTIVE — level: full");
+		assert.deepEqual(await prompt(orphan.h, orphan.c), ["Base", await skill("caveman")]);
 	`);
 });
 
-test("Caveman status says when a session level overrides the default", () => {
+test("Caveman status says when a session mode overrides the default", () => {
 	runFixture(`
 		ctx.hasUI = false;
 		extension(pi);
-		await command("full");
+		await command("caveman");
 		await command("status");
-		assert.ok(notices.at(-1).includes("Default: full\\n"));
-		await command("lite");
+		assert.ok(notices.at(-1).includes("Default: caveman\\n"));
+		await command("ultracave");
 		await command("status");
-		assert.ok(notices.at(-1).includes("Level: lite\\nDefault: full (overridden by session level)"));
+		assert.ok(notices.at(-1).includes("Mode: ultracave\\nDefault: caveman (overridden by session mode)"));
 	`);
 });

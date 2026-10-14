@@ -41,7 +41,7 @@ Bare `/prompt-border` opens a native menu with descriptions: show status, choose
 
 Canceling any menu leaves configuration, glyph assets, and the editor unchanged; configuration reads and migrations begin only after choosing an operation. Without an interactive UI, bare commands and these incomplete prefixes show English help and explicit syntax instead of selecting or applying a default.
 
-`/prompt-border status` opens a focused read-only overlay; Loading/result/error is async and Enter/Esc closes. The old settings form and `/prompt-border config` remain removed. Root `/codesook-omp-plugin` owns persisted settings; behavior commands remain session-scoped. Complete explicit commands retain their existing behavior.
+`/prompt-border status` opens a focused read-only overlay; Loading/result/error is async and Enter/Esc closes. The old settings form and `/prompt-border config` remain removed. Root `/omp-plugins` owns persisted settings; behavior commands remain session-scoped. Complete explicit commands retain their existing behavior.
 
 Behavior change: root and incomplete command prefixes now offer described native choices instead of requiring users to remember arguments.
 
@@ -99,7 +99,7 @@ Context Rail role assets remain under `contextRail.glyphDirectory`, default `~/.
 
 Legacy `~/.config/codesook-omp/prompt-border/config.json` migrates into missing root display sections. An old root-level Prompt Border object is recognized only when root envelope is invalid, then converted. Legacy glyph files copy byte-for-byte only when destination assets are missing. Successful package-config migration removes valid old JSON; invalid files remain for repair. Asset files remain external.
 
-Root `/codesook-omp-plugin` edits persisted Context Rail settings. `/prompt-border rail toggle` changes configured toggle behavior or session-only enabled override; no standalone Context Rail command.
+Root `/omp-plugins` edits persisted Context Rail settings. `/prompt-border rail toggle` changes configured toggle behavior or session-only enabled override; no standalone Context Rail command.
 
 ## Lifecycle and ownership
 

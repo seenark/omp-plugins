@@ -22,7 +22,7 @@ import {
 } from "./config-store.ts";
 
 import { randomUUID } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import type { ExtensionAPI } from "@oh-my-pi/pi-coding-agent";
@@ -31,18 +31,15 @@ import { Input, SettingsList, type Component, type SettingItem } from "@oh-my-pi
 import { truncateToWidth, visibleWidth } from "@oh-my-pi/pi-tui";
 import {
 	CHANNEL,
-	connectSharedDisplay,
 	copyFrameSequence,
 	isDisplaySource,
 	isValidBlockFrame,
 	isValidFrameSequence,
-	parseFrameSequenceAsset,
 	parseSharedDisplayMessage,
 	type BlockFrame,
 	type DisplaySource,
 	type FrameSequence,
 	type SharedDisplayEvents,
-	type SharedDisplayPublisher,
 } from "./client.ts";
 
 export {
@@ -65,21 +62,10 @@ export {
 
 const WIDGET_KEY = "codesook-shared-display";
 const DEFAULT_HORIZONTAL_SEPARATOR = "  ";
-const DEFAULT_PONYTAIL_TEMPLATE = "{activity} {glyph} ponytail: {modeIcon}{mode}";
-const DEFAULT_PONYTAIL_DIRECTORY = "~/.config/codesook-omp/ponytail";
 const SOURCE_ORDER: readonly DisplaySource[] = ["ponytail", "caveman", "headroom", "rtk", "codegraph", "beads"];
-const PONYTAIL_MODES = ["off", "lite", "full", "ultra", "review"] as const;
-const PONYTAIL_MODE_ICONS: Record<PonytailMode, string> = {
-	off: "",
-	lite: "🌿 ",
-	full: "⚡ ",
-	ultra: "🔥 ",
-	review: "",
-};
 
 export type SharedDisplayLayout = "horizontal" | "vertical";
 export type SharedDisplayPlacement = "aboveEditor" | "belowEditor";
-export type PonytailMode = (typeof PONYTAIL_MODES)[number];
 
 export type SharedDisplayConfig = {
 	enabled: boolean;
@@ -88,12 +74,6 @@ export type SharedDisplayConfig = {
 	widgetPlacement: SharedDisplayPlacement;
 	horizontalSeparator: string;
 	verticalGapRows: number;
-	ponytail: {
-		visible: boolean;
-		nativeVisible: boolean;
-		template: string;
-		glyphDirectory: string;
-	};
 };
 
 const LEGACY_SHARED_DISPLAY_CONFIG_PATH = path.join(
@@ -111,12 +91,6 @@ export const DEFAULT_SHARED_DISPLAY_CONFIG: SharedDisplayConfig = {
 	widgetPlacement: "belowEditor",
 	horizontalSeparator: DEFAULT_HORIZONTAL_SEPARATOR,
 	verticalGapRows: 0,
-	ponytail: {
-		visible: true,
-		nativeVisible: false,
-		template: DEFAULT_PONYTAIL_TEMPLATE,
-		glyphDirectory: DEFAULT_PONYTAIL_DIRECTORY,
-	},
 };
 
 function isObject(value: unknown): value is Record<string, unknown> {
@@ -127,17 +101,11 @@ function cloneDefaultConfig(): SharedDisplayConfig {
 	return {
 		...DEFAULT_SHARED_DISPLAY_CONFIG,
 		order: [...DEFAULT_SHARED_DISPLAY_CONFIG.order],
-		ponytail: { ...DEFAULT_SHARED_DISPLAY_CONFIG.ponytail },
 	};
-}
-
-function nonEmptyString(value: unknown, fallback: string): string {
-	return typeof value === "string" && value.trim().length > 0 ? value : fallback;
 }
 
 export function normalizeSharedDisplayConfig(raw: unknown): SharedDisplayConfig {
 	const source = isObject(raw) ? raw : {};
-	const ponytail = isObject(source.ponytail) ? source.ponytail : {};
 	const normalized = cloneDefaultConfig();
 	if (typeof source.enabled === "boolean") normalized.enabled = source.enabled;
 	if (source.layout === "horizontal" || source.layout === "vertical") normalized.layout = source.layout;
@@ -159,13 +127,6 @@ export function normalizeSharedDisplayConfig(raw: unknown): SharedDisplayConfig 
 	) {
 		normalized.verticalGapRows = source.verticalGapRows;
 	}
-	if (typeof ponytail.visible === "boolean") normalized.ponytail.visible = ponytail.visible;
-	if (typeof ponytail.nativeVisible === "boolean") normalized.ponytail.nativeVisible = ponytail.nativeVisible;
-	normalized.ponytail.template = nonEmptyString(ponytail.template, normalized.ponytail.template);
-	normalized.ponytail.glyphDirectory = nonEmptyString(
-		ponytail.glyphDirectory,
-		normalized.ponytail.glyphDirectory,
-	);
 	return normalized;
 }
 
@@ -216,7 +177,6 @@ export function cloneSharedDisplayConfig(config: SharedDisplayConfig): SharedDis
 	return {
 		...config,
 		order: [...config.order],
-		ponytail: { ...config.ponytail },
 	};
 }
 
@@ -245,22 +205,6 @@ export function validateSharedDisplayConfig(config: unknown): string[] {
 		config.verticalGapRows > 10
 	) {
 		errors.push("verticalGapRows must be an integer from 0 through 10");
-	}
-	const ponytail = isObject(config.ponytail) ? config.ponytail : undefined;
-	if (ponytail === undefined) {
-		errors.push("ponytail must be an object");
-	} else {
-		if (typeof ponytail.visible !== "boolean") errors.push("ponytail.visible must be boolean");
-		if (typeof ponytail.nativeVisible !== "boolean") errors.push("ponytail.nativeVisible must be boolean");
-		if (typeof ponytail.template !== "string" || ponytail.template.trim().length === 0) {
-			errors.push("ponytail.template must be nonempty");
-		}
-		if (
-			typeof ponytail.glyphDirectory !== "string" ||
-			ponytail.glyphDirectory.trim().length === 0
-		) {
-			errors.push("ponytail.glyphDirectory must be nonempty");
-		}
 	}
 	return errors;
 }
@@ -291,149 +235,6 @@ export function writeSharedDisplayConfig(
 		}
 		throw error;
 	}
-}
-
-export type PonytailStatus = {
-	active: boolean;
-	mode: PonytailMode;
-};
-
-export function parsePonytailStatus(text: string | undefined): PonytailStatus | undefined {
-	if (text === undefined) return undefined;
-	if (text.length === 0) return { active: false, mode: "off" };
-	const plain = text.replace(/\x1b\[[0-9;:]*m/gu, "");
-	const match = /([○●])?.*\b(off|lite|full|ultra|review)\s*$/iu.exec(plain);
-	if (!match) return undefined;
-	return { active: match[1] === "●", mode: match[2]!.toLowerCase() as PonytailMode };
-}
-
-export function resolvePonytailSessionStatus(entries: readonly unknown[]): PonytailStatus | undefined {
-	for (let index = entries.length - 1; index >= 0; index -= 1) {
-		const entry = entries[index];
-		if (!isObject(entry) || entry.type !== "custom" || entry.customType !== "ponytail-mode") continue;
-		const data = isObject(entry.data) ? entry.data : undefined;
-		const mode = typeof data?.mode === "string" ? data.mode.trim().toLowerCase() : "";
-		if ((PONYTAIL_MODES as readonly string[]).includes(mode)) {
-			return { active: false, mode: mode as PonytailMode };
-		}
-	}
-	return undefined;
-}
-
-function readPonytailConfig(): Record<string, unknown> {
-	const dir = process.env.XDG_CONFIG_HOME
-		? path.join(process.env.XDG_CONFIG_HOME, "ponytail")
-		: path.join(os.homedir(), ".config", "ponytail");
-	try {
-		const parsed: unknown = JSON.parse(readFileSync(path.join(dir, "config.json"), "utf8").replace(/^\uFEFF/u, ""));
-		return isObject(parsed) ? parsed : {};
-	} catch {
-		return {};
-	}
-}
-
-// Mirrors upstream hooks/ponytail-config.js getDefaultMode: env, config defaultMode, then full. review is never a default.
-// ponytail: Windows %APPDATA% config location is not mirrored; add if Windows support is needed.
-function resolvePonytailDefaultMode(): PonytailMode {
-	const runtimeMode = (value: unknown): PonytailMode | undefined => {
-		const mode = typeof value === "string" ? value.toLowerCase() : "";
-		return mode !== "review" && (PONYTAIL_MODES as readonly string[]).includes(mode) ? (mode as PonytailMode) : undefined;
-	};
-	return runtimeMode(process.env.PONYTAIL_DEFAULT_MODE) ?? runtimeMode(readPonytailConfig().defaultMode) ?? "full";
-}
-
-function ponytailStatusHidden(): boolean {
-	const env = process.env.PONYTAIL_HIDE_STATUS;
-	if (env !== undefined) return !["", "0", "false", "no"].includes(env.trim().toLowerCase());
-	return readPonytailConfig().hideStatus === true;
-}
-
-/**
- * Initial Ponytail status for a session. Absent plugin or upstream hideStatus => no segment;
- * otherwise latest `ponytail-mode` entry, else the upstream default mode.
- */
-export function resolvePonytailInitialStatus(entries: readonly unknown[], ponytailLoaded: boolean): PonytailStatus | undefined {
-	if (!ponytailLoaded || ponytailStatusHidden()) return undefined;
-	return resolvePonytailSessionStatus(entries) ?? { active: false, mode: resolvePonytailDefaultMode() };
-}
-
-function expandHome(value: string): string {
-	return value === "~" ? os.homedir() : value.startsWith("~/") ? path.join(os.homedir(), value.slice(2)) : value;
-}
-
-export function loadPackagedPonytailSequence(mode: PonytailMode): FrameSequence | undefined {
-	try {
-		return parseFrameSequenceAsset(readFileSync(new URL(`../assets/ponytail/${mode}.txt`, import.meta.url), "utf8"));
-	} catch {
-		return undefined;
-	}
-}
-export function initializeMissingPonytailAssets(config: SharedDisplayConfig): string[] {
-	const directory = expandHome(config.ponytail.glyphDirectory);
-	mkdirSync(directory, { recursive: true });
-	const created: string[] = [];
-	for (const mode of PONYTAIL_MODES) {
-		const destination = path.join(directory, `${mode}.txt`);
-		if (existsSync(destination)) continue;
-		try {
-			const source = readFileSync(new URL(`../assets/ponytail/${mode}.txt`, import.meta.url), "utf8");
-			writeFileSync(destination, source, "utf8");
-			created.push(destination);
-		} catch {
-			// A missing package asset is not a reason to overwrite another asset.
-		}
-	}
-	return created;
-}
-
-function ponytailAsset(mode: PonytailMode, config: SharedDisplayConfig): FrameSequence {
-	try {
-		const user = parseFrameSequenceAsset(
-			readFileSync(path.join(expandHome(config.ponytail.glyphDirectory), `${mode}.txt`), "utf8"),
-		);
-		if (user !== undefined) return user;
-	} catch {
-		// Package fallback below.
-	}
-	return loadPackagedPonytailSequence(mode) ?? { frames: [["🐴"]] };
-}
-
-function renderPonytailTemplate(
-	template: string,
-	status: PonytailStatus,
-	glyph: string,
-): string {
-	const values = {
-		activity: status.active ? "●" : "○",
-		glyph,
-		mode: status.mode.toUpperCase(),
-		modeIcon: PONYTAIL_MODE_ICONS[status.mode],
-	};
-	return template
-		.replace(/\{(activity|glyph|mode|modeIcon)\}/gu, (_, key: keyof typeof values) => values[key])
-		.replace(/\r\n?/gu, "\n");
-}
-
-export function ponytailFrameSequence(
-	status: PonytailStatus | undefined,
-	config: SharedDisplayConfig,
-): FrameSequence | null {
-	if (status === undefined || status.mode === "off" || !config.ponytail.visible) return null;
-	const asset = ponytailAsset(status.mode, config);
-	const frames = asset.frames
-		.map(frame => renderPonytailTemplate(config.ponytail.template, status, frame.join("\n")).split("\n"))
-		.filter(frame => frame.length > 0);
-	return frames.length > 0
-		? asset.fps === undefined
-			? { frames }
-			: { frames, fps: asset.fps }
-		: null;
-}
-
-function ponytailNativeText(status: PonytailStatus, config: SharedDisplayConfig): string {
-	const asset = ponytailAsset(status.mode, config);
-	const firstRow = asset.frames[0]?.[0] || "🐴";
-	return renderPonytailTemplate(config.ponytail.template, status, firstRow).replace(/[\r\n]+/gu, " ");
 }
 
 export type ComposeDisplayOptions = {
@@ -532,9 +333,7 @@ type HostContext = {
 			content: ((tui: WidgetTui) => WidgetComponent) | undefined,
 			options?: { placement?: string },
 		): void;
-		setStatus(key: string, text: string | undefined): void;
 		notify(message: string, level?: string): void;
-		confirm?: (title: string, message: string) => Promise<boolean>;
 		custom?: <T>(
 			factory: (
 				tui: unknown,
@@ -545,7 +344,6 @@ type HostContext = {
 			options?: unknown,
 		) => Promise<T>;
 	};
-	sessionManager?: { getBranch(): readonly unknown[] };
 	setInterval(callback: (...args: unknown[]) => void, ms?: number): unknown;
 	clearTimer(timer: unknown): void;
 };
@@ -560,7 +358,6 @@ type HostRuntime = {
 	config: SharedDisplayConfig;
 	configPath: string;
 	events?: SharedDisplayEvents;
-	publisher?: SharedDisplayPublisher;
 	unsubscribe?: () => void;
 	configUnsubscribe?: () => void;
 	ctx?: HostContext;
@@ -575,11 +372,6 @@ type HostRuntime = {
 	tui?: WidgetTui;
 	mounted: boolean;
 	mountedPlacement?: SharedDisplayPlacement;
-	capturedNativeText?: string;
-	savedNativeText?: string;
-	ponytailStatus?: PonytailStatus;
-	ponytailLoaded?: () => boolean;
-	wrapper?: { ui: HostContext["ui"]; previous: HostContext["ui"]["setStatus"]; handler: HostContext["ui"]["setStatus"] };
 };
 
 function monotonicNow(): number {
@@ -589,7 +381,6 @@ function monotonicNow(): number {
 function configuredSnapshots(runtime: HostRuntime): ReadonlyMap<DisplaySource, FrameSequence> {
 	const result = new Map<DisplaySource, FrameSequence>();
 	for (const source of runtime.config.order) {
-		if (source === "ponytail" && !runtime.config.ponytail.visible) continue;
 		const sequence = runtime.snapshots.get(source);
 		if (sequence !== undefined) result.set(source, sequence);
 	}
@@ -614,7 +405,6 @@ function hasVisibleSnapshot(runtime: HostRuntime): boolean {
 function fastestFps(runtime: HostRuntime): number | undefined {
 	let fastest: number | undefined;
 	for (const source of runtime.config.order) {
-		if (source === "ponytail" && !runtime.config.ponytail.visible) continue;
 		const sequence = runtime.snapshots.get(source);
 		if (sequence === undefined || sequence.frames.length < 2 || sequence.fps === undefined) continue;
 		if (fastest === undefined || sequence.fps > fastest) fastest = sequence.fps;
@@ -766,53 +556,6 @@ function handleHostMessage(runtime: HostRuntime, data: unknown): void {
 	syncWidget(runtime);
 }
 
-function teardownWrapper(runtime: HostRuntime): void {
-	const wrapper = runtime.wrapper;
-	if (wrapper === undefined) return;
-	runtime.savedNativeText = runtime.capturedNativeText;
-	try {
-		wrapper.previous.call(wrapper.ui, "ponytail", undefined);
-	} catch {
-		// UI teardown should remain best effort during shutdown.
-	}
-	if (wrapper.ui.setStatus === wrapper.handler) wrapper.ui.setStatus = wrapper.previous;
-	runtime.wrapper = undefined;
-}
-
-function reconcileNative(runtime: HostRuntime, ctx: HostContext): void {
-	const wrapper = runtime.wrapper;
-	if (wrapper === undefined) return;
-	let text: string | undefined;
-	if (runtime.config.ponytail.nativeVisible && runtime.ponytailStatus !== undefined && runtime.ponytailStatus.mode !== "off") {
-		const parsedSaved = parsePonytailStatus(runtime.savedNativeText);
-		text =
-			parsedSaved?.mode === runtime.ponytailStatus.mode && runtime.savedNativeText !== undefined
-				? runtime.savedNativeText
-				: ponytailNativeText(runtime.ponytailStatus, runtime.config);
-	}
-	wrapper.previous.call(ctx.ui, "ponytail", text);
-}
-
-function installWrapper(runtime: HostRuntime, ctx: HostContext): void {
-	if (!runtime.config.enabled) return;
-	const previous = ctx.ui.setStatus;
-	const handler = (key: string, text: string | undefined): void => {
-		if (key !== "ponytail") {
-			previous.call(ctx.ui, key, text);
-			return;
-		}
-		runtime.capturedNativeText = text;
-		const status = parsePonytailStatus(text);
-		runtime.ponytailStatus = status;
-		runtime.publisher?.publish(ponytailFrameSequence(status, runtime.config));
-		previous.call(ctx.ui, key, runtime.config.ponytail.nativeVisible ? text : undefined);
-		syncWidget(runtime);
-	};
-	ctx.ui.setStatus = handler;
-	runtime.wrapper = { ui: ctx.ui, previous, handler };
-	reconcileNative(runtime, ctx);
-}
-
 function requestSnapshots(runtime: HostRuntime): void {
 	if (runtime.epoch === undefined || !runtime.config.enabled || !runtime.ctx?.hasUI) return;
 	safeEmit(runtime.events, { protocol: 1, kind: "request", epoch: runtime.epoch });
@@ -826,9 +569,6 @@ function resetSnapshots(runtime: HostRuntime): void {
 function startSession(runtime: HostRuntime, context: unknown): void {
 	const ctx = context as HostContext;
 	announceHost(runtime, false);
-	runtime.publisher?.dispose();
-	teardownWrapper(runtime);
-	runtime.capturedNativeText = undefined;
 	clearWidget(runtime);
 	runtime.active = false;
 	runtime.animationOriginMs = monotonicNow();
@@ -837,15 +577,6 @@ function startSession(runtime: HostRuntime, context: unknown): void {
 	runtime.config = loadSharedDisplayConfig(runtime.configPath);
 	runtime.epoch = randomUUID();
 	announceHost(runtime);
-	runtime.publisher = connectSharedDisplay(runtime.events, "ponytail");
-	runtime.ponytailStatus = resolvePonytailInitialStatus(
-		ctx.sessionManager?.getBranch() ?? [],
-		runtime.ponytailLoaded?.() ?? false,
-	);
-	runtime.publisher.publish(
-		runtime.config.enabled ? ponytailFrameSequence(runtime.ponytailStatus, runtime.config) : null,
-	);
-	if (runtime.config.enabled && ctx.hasUI) installWrapper(runtime, ctx);
 	requestSnapshots(runtime);
 	syncWidget(runtime);
 }
@@ -859,36 +590,17 @@ function startAgent(runtime: HostRuntime): void {
 	if (runtime.active) return;
 	runtime.active = true;
 	if (runtime.animationOriginMs === undefined) runtime.animationOriginMs = monotonicNow();
-	if (runtime.ponytailStatus !== undefined) {
-		runtime.ponytailStatus = { ...runtime.ponytailStatus, active: true };
-		 runtime.publisher?.publish(ponytailFrameSequence(runtime.ponytailStatus, runtime.config));
-		if (runtime.wrapper !== undefined && runtime.config.ponytail.nativeVisible) {
-			runtime.wrapper.previous.call(runtime.wrapper.ui, "ponytail", ponytailNativeText(runtime.ponytailStatus, runtime.config));
-		}
-	}
 	syncWidget(runtime);
 }
 
 function endAgent(runtime: HostRuntime, event: unknown): void {
 	const willContinue = isObject(event) && event.willContinue === true;
 	if (willContinue) return;
-	if (runtime.ponytailStatus !== undefined) {
-		runtime.ponytailStatus = { ...runtime.ponytailStatus, active: false };
-		runtime.publisher?.publish(ponytailFrameSequence(runtime.ponytailStatus, runtime.config));
-		if (runtime.wrapper !== undefined && runtime.config.ponytail.nativeVisible) {
-			runtime.wrapper.previous.call(runtime.wrapper.ui, "ponytail", ponytailNativeText(runtime.ponytailStatus, runtime.config));
-		}
-	}
 	terminalAgentEnd(runtime);
 }
 
 function shutdown(runtime: HostRuntime): void {
 	announceHost(runtime, false);
-	teardownWrapper(runtime);
-	if (runtime.publisher !== undefined) {
-		runtime.publisher.dispose();
-		runtime.publisher = undefined;
-	}
 	clearWidget(runtime);
 	runtime.active = false;
 	runtime.animationOriginMs = undefined;
@@ -930,7 +642,7 @@ export function sharedDisplaySettingsItems(
 			values: ["true", "false"],
 			changed: draft.enabled !== DEFAULT_SHARED_DISPLAY_CONFIG.enabled,
 			description:
-				"Enable the Shared Display host and composed status widget. False removes the widget and stops host-controlled Ponytail routing until re-enabled.",
+				"Enable the Shared Display host and composed status widget. False removes the widget until re-enabled.",
 		},
 		{
 			id: "layout",
@@ -974,52 +686,12 @@ export function sharedDisplaySettingsItems(
 			description:
 				"Blank rows inserted between sources in vertical layout. Enter an integer from 0 through 10.",
 		},
-		{ id: "ponytail", label: "Ponytail", currentValue: "", heading: true },
-		{
-			id: "ponytail.visible",
-			label: "Visible",
-			currentValue: String(draft.ponytail.visible),
-			values: ["true", "false"],
-			description:
-				"Include Ponytail frames in Shared Display. This does not control Ponytail's native footer status.",
-		},
-		{
-			id: "ponytail.nativeVisible",
-			label: "Native status",
-			currentValue: String(draft.ponytail.nativeVisible),
-			values: ["true", "false"],
-			description:
-				"Show captured Ponytail status in OMP's native footer while Shared Display is enabled. Independent of the Ponytail widget row.",
-		},
-		{
-			id: "ponytail.template",
-			label: "Template",
-			currentValue: draft.ponytail.template,
-			submenu: (current, done) => inputSubmenu(current, done),
-			description:
-				"Ponytail format. Tokens: {activity}=●/○, {glyph}=current frame, {mode}=uppercase mode, {modeIcon}=mode icon; other text stays literal.",
-		},
-		{
-			id: "ponytail.glyphDirectory",
-			label: "Glyph directory",
-			currentValue: draft.ponytail.glyphDirectory,
-			submenu: (current, done) => inputSubmenu(current, done),
-			description:
-				"Directory for off.txt, lite.txt, full.txt, ultra.txt, review.txt (off renders nothing). Optional positive fps=N; whitespace frames or blank-line blocks. Invalid/missing files use packaged assets; ~ means home.",
-		},
 		{ id: "actions", label: "Actions", currentValue: "", heading: true },
 		{
 			id: "show-paths",
 			label: "Show paths",
 			currentValue: "Enter",
-			description: "Show the active config.json path and draft Ponytail Glyph directory.",
-		},
-		{
-			id: "initialize-assets",
-			label: "Initialize missing assets",
-			currentValue: "Enter",
-			description:
-				"Create only missing off.txt, lite.txt, full.txt, ultra.txt, and review.txt in the draft directory; existing files stay untouched and created files remain after Cancel.",
+			description: "Show the active config.json path.",
 		},
 		{
 			id: "reload",
@@ -1040,7 +712,7 @@ export function sharedDisplaySettingsItems(
 			label: "Cancel",
 			currentValue: "Enter",
 			description:
-				"Close without saving draft edits or changing live settings; initialized asset files remain on disk.",
+				"Close without saving draft edits or changing live settings.",
 		},
 	];
 }
@@ -1069,31 +741,14 @@ export function updateSharedDisplayDraft(
 		case "verticalGapRows":
 			draft.verticalGapRows = Number(value);
 			break;
-		case "ponytail.visible":
-			draft.ponytail.visible = value === "true";
-			break;
-		case "ponytail.nativeVisible":
-			draft.ponytail.nativeVisible = value === "true";
-			break;
-		case "ponytail.template":
-			draft.ponytail.template = value;
-			break;
-		case "ponytail.glyphDirectory":
-			draft.ponytail.glyphDirectory = value;
-			break;
 	}
 }
 
 function applySharedDisplayRuntime(runtime: HostRuntime, next: SharedDisplayConfig): void {
 	const wasEnabled = runtime.config.enabled;
-	teardownWrapper(runtime);
 	clearWidget(runtime);
 	runtime.config = normalizeSharedDisplayConfig(next);
 	if (runtime.config.enabled !== wasEnabled) announceHost(runtime);
-	runtime.publisher?.publish(
-		runtime.config.enabled ? ponytailFrameSequence(runtime.ponytailStatus, runtime.config) : null,
-	);
-	if (runtime.ctx?.hasUI && runtime.config.enabled) installWrapper(runtime, runtime.ctx);
 	if (runtime.config.enabled && !wasEnabled) requestSnapshots(runtime);
 	syncWidget(runtime);
 }
@@ -1121,26 +776,9 @@ export async function openSharedDisplayConfigDialog(runtime: HostRuntime, contex
 					const id = list.getSelectedItem()?.id;
 					if (id === "show-paths") {
 						context.ui.notify(
-							`Config: ${runtime.configPath}\nGlyphs: ${draft.ponytail.glyphDirectory}`,
+							`Config: ${runtime.configPath}`,
 							"info",
 						);
-						return;
-					}
-					if (id === "initialize-assets") {
-						void (async () => {
-							const confirmed =
-								context.ui.confirm === undefined ||
-								(await context.ui.confirm(
-									"Initialize Shared Display assets?",
-									"Create only missing Ponytail asset files?",
-								));
-							if (!confirmed) return;
-							const created = initializeMissingPonytailAssets(draft);
-							context.ui.notify(
-								created.length > 0 ? `Created:\n${created.join("\n")}` : "No missing assets.",
-								"info",
-							);
-						})();
 						return;
 					}
 					if (id === "reload") {
@@ -1200,15 +838,6 @@ export default function sharedDisplayExtension(pi: ExtensionAPI, options: HostOp
 		mounted: false,
 	};
 	runtime.events = (pi as unknown as { events?: SharedDisplayEvents }).events;
-	// Ponytail presence: the upstream plugin registers an extension command named "ponytail".
-	// Checked at session start, when every extension is loaded; a missing getCommands means absent.
-	runtime.ponytailLoaded = () => {
-		try {
-			return pi.getCommands().some(command => command.name === "ponytail" && command.source === "extension");
-		} catch {
-			return false;
-		}
-	};
 	if (runtime.events !== undefined) {
 		runtime.unsubscribe = runtime.events.on(CHANNEL, data => handleHostMessage(runtime, data));
 		if (isRootConfigPath(runtime.configPath)) {
@@ -1233,6 +862,4 @@ export const __test__ = {
 	fastestFps,
 	fitDisplayRow,
 	hasVisibleSnapshot,
-	ponytailNativeText,
-	ponytailAsset,
 };

@@ -24,6 +24,23 @@ test("staged root settings persist CodeGraph policy and visibility without losin
 	expect(saved.behavior.beads).toEqual({ policy: "off" });
 });
 
+test("Instruction Mode settings persist Mode Levels and fail closed on removed Caveman defaultLevel", () => {
+	const file = path.join(temporary(), "global.json");
+	const root = { version: 1, display: { ponytail: { template: "{mode}", custom: 1 } }, behavior: { caveman: { defaultLevel: "full" }, ponytail: { defaultMode: "ultra" } } };
+	writeFileSync(file, JSON.stringify(root));
+	const draft = draftFromRootConfig(root);
+	expect(draft.behavior.caveman.defaultMode).toBe("off");
+	expect(draft.behavior.ponytail.defaultMode).toBe("ultra");
+	draft.behavior.caveman.defaultMode = "megacave";
+	draft.display.ponytail.nativeVisible = true;
+	persistDraftToRoot(draft, file);
+	const saved = JSON.parse(readFileSync(file, "utf8"));
+	expect(saved.behavior.caveman.defaultMode).toBe("megacave");
+	expect(saved.behavior.ponytail).toEqual({ defaultMode: "ultra" });
+	expect(saved.display.ponytail).toMatchObject({ template: "{mode}", nativeVisible: true, visible: true, custom: 1 });
+	expect(draftFromRootConfig({ version: 1, display: {}, behavior: {} }).behavior).toMatchObject({ caveman: { defaultMode: "caveman" }, ponytail: { defaultMode: "full" } });
+});
+
 test("invalid policy and documents block Apply without rewriting originals", () => {
 	const project = temporary();
 	const global = path.join(project, "global.json");

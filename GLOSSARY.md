@@ -1,19 +1,19 @@
 # omp-plugins
 
-Features that extend OMP. This glossary covers the PStack feature (PStack-style workflows brought to OMP without Cursor) and the token-savings figures shown in the Shared Display.
+Features that extend OMP. This glossary covers content vendored from other projects, the token-savings figures shown in the Shared Display, and the Instruction Modes.
 
-## PStack
+## Vendoring
 
 **Upstream**:
-The `backnotprop/pstack` mirror, whose `main` branch is the only source PStack content is taken from.
-_Avoid_: Cursor PStack, original, the repo
+The external project a piece of Vendored Content comes from, such as `JuliusBrussee/caveman` or `DietrichGebert/ponytail`.
+_Avoid_: original, the repo, source
 
 **Pinned Revision**:
-The exact Upstream commit that the installed PStack content comes from.
+The exact Upstream commit that the installed Vendored Content comes from.
 _Avoid_: version, latest
 
 **Vendored Content**:
-Upstream knowledge (principles, playbooks, helper skills, agent definitions) kept as close to the Pinned Revision as possible so it can be compared with Upstream.
+Upstream files kept byte-for-byte at the Pinned Revision so every update is a reviewable diff.
 _Avoid_: port, copy, fork
 
 **Adaptation**:
@@ -21,36 +21,8 @@ A recorded change that points Upstream wording or tooling at an OMP equivalent.
 _Avoid_: patch, hack, override
 
 **Excluded**:
-Upstream parts deliberately not brought over, such as GitHub pull-request workflows and Cursor-only tools.
+Upstream parts deliberately not brought over, such as Upstream's own CLI, proxy or skills this setup does not use.
 _Avoid_: unsupported, removed, TODO
-
-**Poteto Mode**:
-The per-session state in which PStack routing and principles apply to every new task, until the user turns it off.
-_Avoid_: PStack mode, sticky mode, always-on
-
-**Helper Skill**:
-A single PStack skill the user invokes directly for one request, without turning on Poteto Mode.
-_Avoid_: sub-skill, tool
-
-**Plan Bead**:
-A Beads issue created from a multi-phase PStack plan so the plan and its dependencies outlive the session.
-_Avoid_: ticket, PR, todo
-
-**Role Reference**:
-An OMP model role alias (such as `@task` or `@slow`) that PStack uses wherever Upstream names a specific model.
-_Avoid_: model slug, PStack role, custom role
-
-**Panel**:
-A group of independent subagents, one per listed Role Reference, that answer the same question separately so their answers can be compared.
-_Avoid_: fallback list, team, ensemble
-
-**Validated**:
-An included workflow with passing evidence from offline tests, a headless OMP run and a live AI scenario.
-_Avoid_: supported, working, done
-
-**Unvalidated**:
-An included workflow that is available to use but has no live evidence yet, and is labeled as such.
-_Avoid_: beta, supported, partial
 
 ## Token Savings
 
@@ -69,3 +41,13 @@ _Avoid_: offline, online, idle
 **RTK Savings**:
 The share of shell command output that RTK removed before it reached the model during one Agent Session, kept separate from Headroom Savings.
 _Avoid_: rtk gain, compaction savings, saved chars
+
+## Instruction Modes
+
+**Instruction Mode**:
+A set of standing instructions, such as Ponytail or Caveman, added to every request in an Agent Session until the user turns it off.
+_Avoid_: persona, style plugin, sticky mode
+
+**Mode Level**:
+The setting an Instruction Mode runs at in an Agent Session, named exactly as its Upstream names it (such as `ultracave` or `lite`), where `off` means its instructions are not sent at all.
+_Avoid_: intensity, strength

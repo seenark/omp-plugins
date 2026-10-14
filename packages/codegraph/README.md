@@ -66,7 +66,7 @@ Global defaults: `~/.config/codesook-omp/config.json`. Project overrides: `<Inte
 
 Project values override global defaults. Omitted values inherit; defaults are `auto` and `ready`. Policy values are `auto` and `off`. Visibility values are `ready`, `always`, and `never`. Invalid configuration is reported and preserved, and does not permit guidance. Unknown fields survive settings and policy writes. Settings are never committed automatically.
 
-When installed, `/codesook-omp-plugin` provides global defaults and project overrides in its existing staged dialog. Apply validates both scopes before writing, Reload discards staged edits, and Cancel does not write. Plugin lifecycle rows remain informational.
+When installed, `/omp-plugins` provides global defaults and project overrides in its existing staged dialog. Apply validates both scopes before writing, Reload discards staged edits, and Cancel does not write. Plugin lifecycle rows remain informational.
 
 ## Readiness and display
 

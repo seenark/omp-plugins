@@ -11,12 +11,13 @@ Standalone [oh-my-pi](https://github.com/can1357/oh-my-pi) extensions in one Bun
 | `@codesook/omp-prompt-border-style` | `prompt-border-style` | yes | `packages/prompt-border-style/src/main.ts` |
 | `@codesook/omp-shared-display` | `shared-display` | no | `packages/shared-display/src/index.ts` |
 | `@codesook/omp-caveman` | `caveman` | no | `packages/caveman/src/index.ts` |
+| `@codesook/omp-ponytail` | `ponytail` | no | `packages/ponytail/src/index.ts` |
 | `@codesook/omp-codegraph` | `codegraph` | no | `packages/codegraph/src/index.ts` |
 | `@codesook/omp-beads` | `beads` | no | `packages/beads/src/index.ts` |
 | `@codesook/omp-rtk` | `rtk` | no | `packages/rtk/src/index.ts` |
 | `@codesook/omp-theme-catppuccin` | theme package | — | `packages/theme-catppuccin/bin/install.js` |
 
-Root install loads unified settings plus default Headroom and Prompt Border features. Shared Display, Caveman, CodeGraph, Beads, and RTK remain opt-in.
+Root install loads unified settings plus default Headroom and Prompt Border features. Shared Display, Ponytail, Caveman, CodeGraph, Beads, and RTK remain opt-in.
 
 ## Requirements
 
@@ -33,18 +34,43 @@ omp --version
 ```sh
 omp plugin install github:seenark/omp-plugins
 omp plugin install 'github:seenark/omp-plugins[headroom,prompt-border-style]'
-omp plugin install 'github:seenark/omp-plugins[shared-display,caveman]'
+omp plugin install 'github:seenark/omp-plugins[shared-display,ponytail,caveman]'
 omp plugin install 'github:seenark/omp-plugins[codegraph]'
 omp plugin install 'github:seenark/omp-plugins[beads]'
+omp plugin install 'github:seenark/omp-plugins[rtk]'
 omp plugin install 'github:seenark/omp-plugins[*]'
 ```
 
-### all features
+### All features
 
 ```sh
-omp plugin install 'github:seenark/omp-plugins[headroom,prompt-border-style,shared-display,caveman,codegraph,beads]'
-
+omp plugin install 'github:seenark/omp-plugins[headroom,prompt-border-style,shared-display,ponytail,caveman,codegraph,beads,rtk]'
 ```
+
+The `ponytail` and `rtk` features replace the third-party `@dietrichgebert/ponytail` and `pi-rtk-optimizer` plugins. Remove those first so instructions and command rewrites are not applied twice:
+
+```sh
+omp plugin uninstall @dietrichgebert/ponytail
+omp plugin uninstall pi-rtk-optimizer
+```
+
+The `rtk` feature needs the RTK CLI 0.51.0 or newer on `PATH`:
+
+```sh
+brew install rtk    # or: brew upgrade rtk
+rtk --version
+```
+
+All features from a local checkout (links the repo, so edits load on the next OMP start):
+
+```sh
+bun install
+omp plugin link "$PWD"
+omp plugin features omp-plugins --enable=headroom,prompt-border-style,shared-display,ponytail,caveman,codegraph,beads,rtk
+readlink ~/.omp/plugins/node_modules/omp-plugins   # should print this checkout's path
+```
+
+`omp plugin uninstall` of any other plugin reinstalls the remaining plugins from `~/.omp/plugins/package.json`, which replaces the link with the GitHub copy and resets enabled features. Run the three commands above again afterwards.
 
 Feature selectors are package names, not directories. Keep selectors quoted because `[` and `]` are special in many shells.
 
@@ -55,6 +81,7 @@ bun install
 omp plugin install "$PWD/packages/headroom"
 omp plugin install "$PWD/packages/prompt-border-style"
 omp plugin install "$PWD/packages/shared-display"
+omp plugin install "$PWD/packages/ponytail"
 omp plugin install "$PWD/packages/caveman"
 omp plugin install "$PWD/packages/codegraph"
 omp plugin install "$PWD/packages/beads"
@@ -70,11 +97,14 @@ bun packages/theme-catppuccin/bin/install.js
 ## Command tree
 
 ```text
-/codesook-omp-plugin
-/codesook-omp-plugin status
-/codesook-omp-plugin init config
+/omp-plugins
+/omp-plugins status
+/omp-plugins init config
 /headroom [status|on|off|health|stats|token|init [config|glyphs|all]]
-/caveman [status|off|lite|full|ultra|wenyan-lite|wenyan-full|wenyan-ultra]
+/ponytail [status|off|lite|full|ultra|review]
+/caveman [status|off|caveman|ultracave|megacave]
+/ultracave
+/megacave
 /codegraph [init|status|auto|off]
 /beads [init|status|auto|off]
 /prompt-border [status|<style> [layout]|layout <layout>|reset|rail toggle|glyphs debug [frames|demo|on|off]]
@@ -90,11 +120,11 @@ Beads initialization reuses ready data without setup choices. A new workspace op
 
 Without an interactive selector, bare commands and incomplete menu routes show the available explicit commands and their outcomes. Explicit status routes remain accessible even when persistent status is hidden.
 
-Root settings owns persisted configuration. Feature commands own session behavior; CodeGraph and Beads policy commands explicitly write shared project policy. Feature `config` commands and `/shared-display` are removed. Status commands open focused read-only overlays; Enter/Esc closes. `/codesook-omp-plugin init config` creates the v1 global config only when absent and seeds only missing glyph files.
+Root settings owns persisted configuration. Feature commands own session behavior; CodeGraph and Beads policy commands explicitly write shared project policy. Feature `config` commands and `/shared-display` are removed. Status commands open focused read-only overlays; Enter/Esc closes. `/omp-plugins init config` creates the v1 global config only when absent and seeds only missing glyph files.
 
-`/codesook-omp-plugin` edits a draft. Shift+Enter applies directly. Bare Enter on Apply opens confirmation inside the same focused overlay without saving. Enter confirms; Esc declines and returns to the unchanged draft without writes or live-change events. Reload discards draft; Cancel leaves persisted and live state unchanged.
+`/omp-plugins` edits a draft. Shift+Enter applies directly. Bare Enter on Apply opens confirmation inside the same focused overlay without saving. Enter confirms; Esc declines and returns to the unchanged draft without writes or live-change events. Reload discards draft; Cancel leaves persisted and live state unchanged.
 
-The root settings **Create missing files** action runs immediately from **saved settings**, independently of the draft and Apply. It creates missing configuration and glyphs, preserves existing files, and keeps the draft open. Results appear in the same focused overlay; use ↑↓ to scroll and Enter/Esc to return to editing. Cancel afterward does not undo files created by this explicit action. `/codesook-omp-plugin init` exposes the same initialization choice; the complete `init config` command still runs directly.
+The root settings **Create missing files** action runs immediately from **saved settings**, independently of the draft and Apply. It creates missing configuration and glyphs, preserves existing files, and keeps the draft open. Results appear in the same focused overlay; use ↑↓ to scroll and Enter/Esc to return to editing. Cancel afterward does not undo files created by this explicit action. `/omp-plugins init` exposes the same initialization choice; the complete `init config` command still runs directly.
 
 ### Command menu update
 
@@ -122,6 +152,7 @@ Shape:
 
 ```text
 ~/.config/codesook-omp/caveman/glyphs/
+~/.config/codesook-omp/ponytail/
 ~/.config/codesook-omp/headroom/
 ~/.config/codesook-omp/prompt-border/
 ~/.config/codesook-omp/context-rail/
@@ -161,9 +192,10 @@ See [Beads package documentation](packages/beads/README.md) for independent inst
 
 - Shared Display owns the single `codesook-shared-display` widget, source composition, and animation clock.
 - Headroom remains a compression producer and continues working without Shared Display; proxy lifecycle is external, while health checks may run at session start or live config change and never start the proxy.
-- Caveman injects the pinned skill, recovers session levels from branch entries, and publishes custom/native status independently.
+- Caveman injects the pinned skill, recovers session Mode Levels from branch entries, and publishes custom/native status independently.
+- Ponytail injects its pinned skill, recovers session Mode Levels from branch entries, and publishes custom/native status independently.
 - Prompt Border owns the prompt editor, Context Rail, attachment band, and spinner overrides; it does not publish Shared Display sources.
-- Root settings detects Ponytail and OMP feature presence through `omp plugin list --json`; it never unloads or loads plugins.
+- Root settings detects OMP feature presence through `omp plugin list --json`; it never unloads or loads plugins.
 - CodeGraph owns native project-data inspection, permitted runtime guidance, read-only status, and exclusive Shared Display/footer routing.
 - Beads owns explicit consent-based initialization, native workspace/database inspection, on-demand runtime guidance, read-only status, and exclusive Shared Display/footer routing.
 
@@ -184,6 +216,7 @@ Package publication is dependency ordered:
 
 ```sh
 bun run publish:shared-display
+bun run publish:ponytail
 bun run publish:caveman
 bun run publish:codegraph
 bun run publish:beads
@@ -204,6 +237,7 @@ PI_CODING_AGENT_DIR="$TMP_AGENT" PI_CODING_AGENT_SESSION_DIR="$TMP_SESSIONS" \
 omp --cwd "$TMP_WORK" --session-dir "$TMP_SESSIONS" \
   --extension "$PWD/packages/codesook-omp-plugin/index.ts" \
   --extension "$PWD/packages/shared-display/src/index.ts" \
+  --extension "$PWD/packages/ponytail/src/index.ts" \
   --extension "$PWD/packages/caveman/src/index.ts" \
   --extension "$PWD/packages/headroom/index.ts" \
   --extension "$PWD/packages/prompt-border-style/src/main.ts"

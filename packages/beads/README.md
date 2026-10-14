@@ -56,7 +56,7 @@ Readiness requires the CLI, successful workspace discovery, and successful datab
 
 ## Policy and visibility
 
-The unified `/codesook-omp-plugin` settings dialog stages both global defaults and project overrides:
+The unified `/omp-plugins` settings dialog stages both global defaults and project overrides:
 
 - `behavior.beads.policy`: `auto` (default) or `off`.
 - `display.beads.visibility`: `ready` (default), `always`, or `never`.

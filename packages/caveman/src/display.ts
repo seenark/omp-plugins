@@ -7,30 +7,12 @@ import {
 	type FrameSequence,
 } from "@codesook/omp-shared-display/client";
 import {
-	CAVEMAN_ACTIVE_LEVELS,
+	CAVEMAN_ACTIVE_MODES,
 	PACKAGE_ASSET_DIRECTORY,
 	expandHomePath,
-	type CavemanActiveLevel,
+	type CavemanActiveMode,
 	type CavemanConfig,
 } from "./types.ts";
-
-export const CAVEMAN_LABELS: Readonly<Record<CavemanActiveLevel, string>> = {
-	lite: "LITE",
-	full: "FULL",
-	ultra: "ULTRA",
-	"wenyan-lite": "文言",
-	"wenyan-full": "文言文",
-	"wenyan-ultra": "文言文極",
-};
-
-export const CAVEMAN_ASSET_FPS: Readonly<Record<CavemanActiveLevel, number>> = {
-	lite: 1000 / 300,
-	full: 5,
-	ultra: 10,
-	"wenyan-lite": 1000 / 300,
-	"wenyan-full": 5,
-	"wenyan-ultra": 10,
-};
 
 export type CavemanThemeLike = Pick<Theme, "fg">;
 
@@ -57,22 +39,18 @@ function normalizeRenderedText(text: string): string {
 	return text.replace(/\r\n?/g, "\n");
 }
 
-export function cavemanLabel(level: CavemanActiveLevel): string {
-	return CAVEMAN_LABELS[level];
-}
-
 export function replaceCavemanTemplate(
 	template: string,
-	values: { activity: string; glyph: string; level: string },
+	values: { activity: string; glyph: string; mode: string },
 ): string {
-	return template.replace(/\{(activity|glyph|level)\}/g, (_match, key: keyof typeof values) => values[key]);
+	return template.replace(/\{(activity|glyph|mode)\}/g, (_match, key: keyof typeof values) => values[key]);
 }
 
 export async function loadPackageCavemanSequence(
-	level: CavemanActiveLevel,
+	mode: CavemanActiveMode,
 	packageAssetDirectory = PACKAGE_ASSET_DIRECTORY,
 ): Promise<FrameSequence> {
-	const assetPath = path.join(packageAssetDirectory, `${level}.txt`);
+	const assetPath = path.join(packageAssetDirectory, `${mode}.txt`);
 	let cached = packageSequenceCache.get(assetPath);
 	if (!cached) {
 		cached = readFile(assetPath, "utf8").then(text => {
@@ -86,12 +64,12 @@ export async function loadPackageCavemanSequence(
 }
 
 export async function loadCavemanSequence(
-	level: CavemanActiveLevel,
+	mode: CavemanActiveMode,
 	config: CavemanConfig,
 	options: { homeDirectory?: string; packageAssetDirectory?: string } = {},
 ): Promise<FrameSequence> {
-	const packageAsset = await loadPackageCavemanSequence(level, options.packageAssetDirectory);
-	const userPath = path.join(expandHomePath(config.display.glyphDirectory, options.homeDirectory), `${level}.txt`);
+	const packageAsset = await loadPackageCavemanSequence(mode, options.packageAssetDirectory);
+	const userPath = path.join(expandHomePath(config.display.glyphDirectory, options.homeDirectory), `${mode}.txt`);
 	try {
 		const userText = await readFile(userPath, "utf8");
 		const userAsset = parseFrameSequenceAsset(userText);
@@ -103,7 +81,7 @@ export async function loadCavemanSequence(
 }
 
 export function renderCavemanFrameSequence(
-	level: CavemanActiveLevel,
+	mode: CavemanActiveMode,
 	asset: FrameSequence,
 	config: CavemanConfig,
 	active: boolean,
@@ -118,7 +96,7 @@ export function renderCavemanFrameSequence(
 			replaceCavemanTemplate(config.display.template, {
 				activity: active ? "●" : "○",
 				glyph,
-				level: cavemanLabel(level),
+				mode,
 			}),
 		);
 		renderedFrames.push(rendered.split("\n"));
@@ -131,7 +109,7 @@ export function renderCavemanFrameSequence(
 }
 
 export function renderNativeCavemanStatus(
-	level: CavemanActiveLevel,
+	mode: CavemanActiveMode,
 	asset: FrameSequence,
 	fallbackGlyph: string,
 	config: CavemanConfig,
@@ -145,16 +123,16 @@ export function renderNativeCavemanStatus(
 		replaceCavemanTemplate(config.display.template, {
 			activity: active ? "●" : "○",
 			glyph: accent(theme, glyph),
-			level: cavemanLabel(level),
+			mode,
 		}),
 	).replace(/[\r\n]+/g, " ");
 }
 
 export async function loadAllPackageCavemanSequences(
 	packageAssetDirectory = PACKAGE_ASSET_DIRECTORY,
-): Promise<ReadonlyMap<CavemanActiveLevel, FrameSequence>> {
+): Promise<ReadonlyMap<CavemanActiveMode, FrameSequence>> {
 	const entries = await Promise.all(
-		CAVEMAN_ACTIVE_LEVELS.map(async level => [level, await loadPackageCavemanSequence(level, packageAssetDirectory)] as const),
+		CAVEMAN_ACTIVE_MODES.map(async mode => [mode, await loadPackageCavemanSequence(mode, packageAssetDirectory)] as const),
 	);
 	return new Map(entries);
 }

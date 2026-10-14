@@ -1,0 +1,50 @@
+Third-party notices for @codesook/omp-ponytail
+
+======================================================================
+Ponytail skills (Upstream)
+======================================================================
+
+Upstream: DietrichGebert/ponytail (package @dietrichgebert/ponytail 5.2.0)
+Pinned Revision: 2961b52fc1fe6a5a87c7a959a79512e5c2f3ffe5
+URL: https://github.com/DietrichGebert/ponytail/tree/2961b52fc1fe6a5a87c7a959a79512e5c2f3ffe5
+
+Vendored Content (byte-identical to the Pinned Revision):
+  skills/ponytail/SKILL.md          <- skills/ponytail/SKILL.md
+  skills/ponytail-review/SKILL.md   <- skills/ponytail-review/SKILL.md
+  skills/ponytail-audit/SKILL.md    <- skills/ponytail-audit/SKILL.md
+  skills/ponytail-debt/SKILL.md     <- skills/ponytail-debt/SKILL.md
+  skills/ponytail-gain/SKILL.md     <- skills/ponytail-gain/SKILL.md
+  skills/ponytail-help/SKILL.md     <- skills/ponytail-help/SKILL.md
+
+Adapted from Upstream (reimplemented in TypeScript, not copied): the instruction
+builder hooks/ponytail-instructions.js, the mode rules in hooks/ponytail-config.js,
+and the command and session handling in pi-extension/index.js. Changes made by
+this package are listed in README.md (Adaptations and Excluded).
+
+License: MIT (Upstream LICENSE, verbatim below).
+
+----------------------------------------------------------------------
+Upstream LICENSE (MIT License, verbatim)
+----------------------------------------------------------------------
+
+MIT License
+
+Copyright (c) 2026 DietrichGebert
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.

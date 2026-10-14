@@ -20,6 +20,7 @@
   "dependencies": {
     "@codesook/omp-caveman": "^1.0.0",
     "@codesook/omp-headroom": "^2.0.0",
+    "@codesook/omp-ponytail": "^1.0.0",
     "@codesook/omp-prompt-border-style": "^2.0.0",
     "@codesook/omp-rtk": "^1.0.0",
     "@codesook/omp-shared-display": "^1.2.0"
@@ -31,6 +32,7 @@
   "devDependencies": {
     "@codesook/omp-caveman": "workspace:*",
     "@codesook/omp-headroom": "workspace:*",
+    "@codesook/omp-ponytail": "workspace:*",
     "@codesook/omp-prompt-border-style": "workspace:*",
     "@codesook/omp-rtk": "workspace:*",
     "@codesook/omp-shared-display": "workspace:*",

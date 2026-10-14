@@ -62,7 +62,7 @@ The menu's **Choose files to initialize** action opens a second choice for confi
 
 Behavior change: bare `/headroom` now offers actions instead of opening status automatically. Use `/headroom status` for direct status access.
 
-Persisted settings are owned by root `/codesook-omp-plugin`; Headroom has no config dialog.
+Persisted settings are owned by root `/omp-plugins`; Headroom has no config dialog.
 
 ## Configuration
 

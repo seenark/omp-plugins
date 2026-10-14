@@ -13,6 +13,8 @@ This project uses **bd** (beads) for issue tracking. Run `bd prime` for full wor
 > source of truth; don't `bd import` during normal operation; don't
 > reach for third-party Dolt hosting before trying the default).
 
+**Upstream sync**: before updating Caveman, Ponytail, the Headroom server or the RTK binary to a newer upstream, follow `docs/agents/upstream-sync.md`.
+
 ## Quick Reference
 
 ```bash

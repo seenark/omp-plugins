@@ -33,7 +33,6 @@ import {
 	type IntegrationVisibility,
 } from "@codesook/omp-shared-display/project-integrations";
 import {
-	loadPackagedPonytailSequence,
 	isDisplaySource,
 	normalizeSharedDisplayConfig,
 	validateSharedDisplayConfig,
@@ -42,10 +41,23 @@ import {
 	type SharedDisplayPlacement,
 } from "@codesook/omp-shared-display";
 import {
-	CAVEMAN_ACTIVE_LEVELS,
+	CAVEMAN_ACTIVE_MODES,
+	CAVEMAN_MODES,
 	PACKAGE_ASSET_DIRECTORY,
+	normalizeCavemanConfig,
 	normalizeLegacyCavemanConfig,
+	validateCavemanConfig,
+	type CavemanConfig,
+	type CavemanMode,
 } from "@codesook/omp-caveman";
+import {
+	PACKAGE_ASSET_DIRECTORY as PONYTAIL_ASSET_DIRECTORY,
+	PONYTAIL_MODES,
+	PONYTAIL_RUNTIME_MODES,
+	normalizePonytailConfig,
+	validatePonytailConfig,
+	type PonytailConfig,
+} from "@codesook/omp-ponytail";
 import {
 	normalizeHeadroomConfig,
 	type HeadroomConfig,
@@ -79,68 +91,6 @@ import {
 	type ContextRailVisibility,
 } from "@codesook/omp-prompt-border-style/src/context-rail.ts";
 import { openGlyphStudio, type GlyphTarget } from "./glyph-studio.ts";
-type CavemanLevel = (typeof CAVEMAN_LEVELS)[number];
-type CavemanConfig = {
-	defaultLevel: CavemanLevel;
-	nativeVisible: boolean;
-	display: { visible: boolean; template: string; glyphDirectory: string };
-};
-
-const CAVEMAN_LEVELS = [
-	"off",
-	"lite",
-	"full",
-	"ultra",
-	"wenyan-lite",
-	"wenyan-full",
-	"wenyan-ultra",
-] as const;
-const DEFAULT_CAVEMAN_CONFIG: CavemanConfig = {
-	defaultLevel: "full",
-	nativeVisible: false,
-	display: {
-		visible: true,
-		template: "{activity} {glyph} caveman: {level}",
-		glyphDirectory: "~/.config/codesook-omp/caveman/glyphs",
-	},
-};
-function normalizeCavemanConfig(raw: unknown): CavemanConfig {
-	const source = asRecord(raw);
-	const displaySource = asRecord(source.display);
-	const defaultLevel = CAVEMAN_LEVELS.includes(source.defaultLevel as CavemanLevel)
-		? (source.defaultLevel as CavemanLevel)
-		: "full";
-	return {
-		defaultLevel,
-		nativeVisible: typeof source.nativeVisible === "boolean" ? source.nativeVisible : DEFAULT_CAVEMAN_CONFIG.nativeVisible,
-		display: {
-			visible: typeof displaySource.visible === "boolean" ? displaySource.visible : true,
-			template:
-				typeof displaySource.template === "string" && displaySource.template.trim()
-					? displaySource.template
-					: DEFAULT_CAVEMAN_CONFIG.display.template,
-			glyphDirectory:
-				typeof displaySource.glyphDirectory === "string" && displaySource.glyphDirectory.trim()
-					? displaySource.glyphDirectory.trim()
-					: DEFAULT_CAVEMAN_CONFIG.display.glyphDirectory,
-		},
-	};
-}
-
-function validateCavemanConfig(config: unknown): string | undefined {
-	const source = asRecord(config);
-	if (!CAVEMAN_LEVELS.includes(source.defaultLevel as CavemanLevel)) return "Default level must be canonical Caveman level or off.";
-	if (typeof source.nativeVisible !== "boolean") return "Native visibility must be on or off.";
-	const display = asRecord(source.display);
-	if (typeof display.visible !== "boolean") return "Display visibility must be on or off.";
-	if (typeof display.template !== "string" || !display.template.trim() || /[\r\n]/.test(display.template)) {
-		return "Display template must be nonempty and single-line.";
-	}
-	if (typeof display.glyphDirectory !== "string" || !display.glyphDirectory.trim() || /[\r\n]/.test(display.glyphDirectory)) {
-		return "Glyph directory must be nonempty and single-line.";
-	}
-	return undefined;
-}
 
 const LEGACY_SHARED_DISPLAY_CONFIG_PATH = path.join(
 	os.homedir(),
@@ -159,11 +109,12 @@ const LEGACY_PROMPT_BORDER_CONFIG_PATH = path.join(
 	"config.json",
 );
 
-const PROJECT_FEATURES = ["shared-display", "caveman", "headroom", "rtk", "prompt-border-style", "codegraph", "beads"] as const;
+const PROJECT_FEATURES = ["shared-display", "ponytail", "caveman", "headroom", "rtk", "prompt-border-style", "codegraph", "beads"] as const;
 type ProjectFeature = (typeof PROJECT_FEATURES)[number];
 
 const DEFAULT_PROJECT_FEATURES: Record<ProjectFeature, boolean> = {
 	"shared-display": false,
+	ponytail: false,
 	caveman: false,
 	headroom: true,
 	rtk: false,
@@ -174,6 +125,7 @@ const DEFAULT_PROJECT_FEATURES: Record<ProjectFeature, boolean> = {
 
 const STANDALONE_FEATURE_PACKAGES: Record<ProjectFeature, string> = {
 	"shared-display": "@codesook/omp-shared-display",
+	ponytail: "@codesook/omp-ponytail",
 	caveman: "@codesook/omp-caveman",
 	headroom: "@codesook/omp-headroom",
 	rtk: "@codesook/omp-rtk",
@@ -192,7 +144,7 @@ const RAIL_LABEL_POSITIONS = ["left", "center", "right"] as const satisfies read
 const RAIL_POINTERS = ["auto", "visible", "hidden"] as const satisfies readonly ContextRailPointer[];
 const RAIL_MEANING_PLACEMENTS = ["top", "below", "beside"] as const satisfies readonly ContextRailMeaningPlacement[];
 
-const COMMAND_USAGE = "Usage: /codesook-omp-plugin [status|init config]";
+const COMMAND_USAGE = "Usage: /omp-plugins [status|init config]";
 const STATUS_ACTION_ID = "action:status";
 const GLYPH_STUDIO_ACTION_ID = "action:glyph-studio";
 const INIT_ACTION_ID = "action:init";
@@ -210,9 +162,6 @@ export type PluginListEntry = {
 
 export type PluginPresence = {
 	npm: readonly PluginListEntry[];
-	ponytail: boolean;
-	ponytailEnabled: boolean;
-	ponytailVersion?: string;
 	ompPlugins: boolean;
 	ompPluginsEnabled: boolean;
 	ompPluginsVersion?: string;
@@ -232,6 +181,7 @@ export type UnifiedSettingsDraft = {
 		beads: { visibility: IntegrationVisibility };
 		sharedDisplay: SharedDisplayConfig;
 		caveman: Pick<CavemanConfig, "nativeVisible" | "display">;
+		ponytail: Pick<PonytailConfig, "nativeVisible" | "display">;
 		headroom: HeadroomConfig["display"];
 		rtk: RtkConfig["display"];
 		promptBorder: {
@@ -243,7 +193,8 @@ export type UnifiedSettingsDraft = {
 	behavior: {
 		codegraph: { policy: IntegrationPolicy | undefined };
 		beads: { policy: IntegrationPolicy | undefined };
-		caveman: Pick<CavemanConfig, "defaultLevel">;
+		caveman: Pick<CavemanConfig, "defaultMode">;
+		ponytail: Pick<PonytailConfig, "defaultMode">;
 		headroom: {
 			enabled: boolean;
 			baseUrl: string;
@@ -337,7 +288,6 @@ function pluginEntries(raw: unknown): PluginListEntry[] {
 /** Parse `omp plugin list --json` and project npm feature state into settings status. */
 export function parsePluginList(raw: unknown): PluginPresence {
 	const npm = pluginEntries(raw);
-	const ponytailEntry = npm.find(entry => entry.name === "@dietrichgebert/ponytail");
 	const ompEntry = npm.find(entry => entry.name === "omp-plugins");
 	const projectFeatures = { ...DEFAULT_PROJECT_FEATURES };
 	if (!ompEntry || ompEntry.enabled === false) {
@@ -351,9 +301,6 @@ export function parsePluginList(raw: unknown): PluginPresence {
 	}
 	return {
 		npm,
-		ponytail: ponytailEntry !== undefined,
-		ponytailEnabled: ponytailEntry?.enabled !== false && ponytailEntry !== undefined,
-		ponytailVersion: ponytailEntry?.version,
 		ompPlugins: ompEntry !== undefined,
 		ompPluginsEnabled: ompEntry?.enabled !== false && ompEntry !== undefined,
 		ompPluginsVersion: ompEntry?.version,
@@ -408,9 +355,16 @@ function createDraft(raw: unknown, legacy: LegacySources = {}): UnifiedSettingsD
 	const caveman = normalizeCavemanConfig({
 		...legacyCaveman,
 		...rootCavemanDisplay,
-		defaultLevel: rootCavemanBehavior.defaultLevel ?? legacyCaveman.defaultLevel,
+		...rootCavemanBehavior,
 		nativeVisible: rootCavemanDisplay.nativeVisible ?? legacyCaveman.nativeVisible,
 		display: display.caveman === undefined ? legacyCaveman.display ?? cavemanDisplay : cavemanDisplay,
+	});
+	const rootPonytailDisplay = asRecord(display.ponytail);
+	const rootPonytailBehavior = asRecord(behavior.ponytail);
+	const ponytail = normalizePonytailConfig({
+		...rootPonytailBehavior,
+		nativeVisible: rootPonytailDisplay.nativeVisible,
+		display: rootPonytailDisplay,
 	});
 
 	const legacyHeadroom =
@@ -450,6 +404,7 @@ function createDraft(raw: unknown, legacy: LegacySources = {}): UnifiedSettingsD
 			beads: { visibility: (asRecord(display.beads).visibility ?? "ready") as IntegrationVisibility },
 			sharedDisplay,
 			caveman: { nativeVisible: caveman.nativeVisible, display: clone(caveman.display) },
+			ponytail: { nativeVisible: ponytail.nativeVisible, display: clone(ponytail.display) },
 			headroom: clone(headroom.display),
 			rtk: clone(rtk.display),
 			promptBorder: {
@@ -461,7 +416,8 @@ function createDraft(raw: unknown, legacy: LegacySources = {}): UnifiedSettingsD
 		behavior: {
 			codegraph: { policy: behavior.codegraph !== undefined && !isRecord(behavior.codegraph) ? undefined : codegraphPolicy === undefined ? "auto" : codegraphPolicy === "auto" || codegraphPolicy === "off" ? codegraphPolicy : undefined },
 			beads: { policy: behavior.beads !== undefined && !isRecord(behavior.beads) ? undefined : beadsPolicy === undefined ? "auto" : beadsPolicy === "auto" || beadsPolicy === "off" ? beadsPolicy : undefined },
-			caveman: { defaultLevel: caveman.defaultLevel },
+			caveman: { defaultMode: caveman.defaultMode },
+			ponytail: { defaultMode: ponytail.defaultMode },
 			headroom: {
 				enabled: headroom.enabled,
 				baseUrl: headroom.baseUrl,
@@ -512,11 +468,14 @@ export function draftToRootSections(draft: UnifiedSettingsDraft): {
 				widgetPlacement: shared.widgetPlacement,
 				horizontalSeparator: shared.horizontalSeparator,
 				verticalGapRows: shared.verticalGapRows,
-				ponytail: { ...shared.ponytail },
 			},
 			caveman: {
 				...draft.display.caveman.display,
 				nativeVisible: draft.display.caveman.nativeVisible,
+			},
+			ponytail: {
+				...draft.display.ponytail.display,
+				nativeVisible: draft.display.ponytail.nativeVisible,
 			},
 			headroom: {
 				visible: headroomDisplay.visible,
@@ -551,7 +510,8 @@ export function draftToRootSections(draft: UnifiedSettingsDraft): {
 		behavior: {
 			codegraph: { ...draft.behavior.codegraph },
 			beads: { ...draft.behavior.beads },
-			caveman: { defaultLevel: draft.behavior.caveman.defaultLevel },
+			caveman: { defaultMode: draft.behavior.caveman.defaultMode },
+			ponytail: { defaultMode: draft.behavior.ponytail.defaultMode },
 			headroom: { ...draft.behavior.headroom, autoStart: false },
 			rtk: { ...draft.behavior.rtk },
 		},
@@ -815,15 +775,15 @@ function glyphTargets(draft: UnifiedSettingsDraft, configPath: string): GlyphTar
 		targets.push({ group: "Context Rail", name: role, path: path.join(railDirectory, rail[role].framesFile), surface: "context-rail", fallback: "missing or empty: theme symbol" });
 	}
 	const cavemanDirectory = resolveGlyphDirectory(draft.display.caveman.display.glyphDirectory);
-	for (const level of CAVEMAN_ACTIVE_LEVELS) {
-		targets.push({ group: "Caveman", name: level, path: path.join(cavemanDirectory, `${level}.txt`), surface: "shared-display", fallback: "missing or empty: packaged Caveman glyph" });
+	for (const mode of CAVEMAN_ACTIVE_MODES) {
+		targets.push({ group: "Caveman", name: mode, path: path.join(cavemanDirectory, `${mode}.txt`), surface: "shared-display", fallback: "missing or empty: packaged Caveman glyph" });
 	}
 	const headroomDirectory = resolveGlyphDirectory(draft.display.headroom.glyphDirectory);
 	for (const state of DISPLAY_STATES) {
 		targets.push({ group: "Headroom", name: state, path: path.join(headroomDirectory, `${state}.txt`), surface: "shared-display", fallback: "missing or empty: theme glyph" });
 	}
-	const ponytailDirectory = resolveGlyphDirectory(draft.display.sharedDisplay.ponytail.glyphDirectory);
-	for (const mode of ["off", "lite", "full", "ultra", "review"] as const) {
+	const ponytailDirectory = resolveGlyphDirectory(draft.display.ponytail.display.glyphDirectory);
+	for (const mode of PONYTAIL_MODES) {
 		targets.push({ group: "Ponytail", name: mode, path: path.join(ponytailDirectory, `${mode}.txt`), surface: "shared-display", fallback: "missing or empty: packaged Ponytail glyph" });
 	}
 	return targets;
@@ -831,19 +791,19 @@ function glyphTargets(draft: UnifiedSettingsDraft, configPath: string): GlyphTar
 
 function configuredInitAssets(draft: UnifiedSettingsDraft, theme: unknown): InitAsset[] {
 	const assets: InitAsset[] = [];
-	const ponytailDirectory = resolveGlyphDirectory(draft.display.sharedDisplay.ponytail.glyphDirectory);
-	for (const mode of ["off", "lite", "full", "ultra", "review"] as const) {
-		const frame = loadPackagedPonytailSequence(mode)?.frames[0];
+	const ponytailDirectory = resolveGlyphDirectory(draft.display.ponytail.display.glyphDirectory);
+	for (const mode of PONYTAIL_MODES) {
+		const source = readFileSync(path.join(PONYTAIL_ASSET_DIRECTORY, `${mode}.txt`), "utf8");
 		assets.push({
 			path: path.join(ponytailDirectory, `${mode}.txt`),
-			content: frame === undefined ? "" : `${frame.join("\n")}\n`,
+			content: staticAssetContent(source),
 		});
 	}
 	const cavemanDirectory = resolveGlyphDirectory(draft.display.caveman.display.glyphDirectory);
-	for (const level of CAVEMAN_ACTIVE_LEVELS) {
-		const source = readFileSync(path.join(PACKAGE_ASSET_DIRECTORY, `${level}.txt`), "utf8");
+	for (const mode of CAVEMAN_ACTIVE_MODES) {
+		const source = readFileSync(path.join(PACKAGE_ASSET_DIRECTORY, `${mode}.txt`), "utf8");
 		assets.push({
-			path: path.join(cavemanDirectory, `${level}.txt`),
+			path: path.join(cavemanDirectory, `${mode}.txt`),
 			content: staticAssetContent(source),
 		});
 	}
@@ -943,11 +903,17 @@ function validateDraft(draft: UnifiedSettingsDraft): string | undefined {
 	const sharedErrors = validateSharedDisplayConfig(clone(draft.display.sharedDisplay));
 	if (sharedErrors.length > 0) return sharedErrors[0];
 	const cavemanError = validateCavemanConfig({
-		defaultLevel: draft.behavior.caveman.defaultLevel,
+		defaultMode: draft.behavior.caveman.defaultMode,
 		nativeVisible: draft.display.caveman.nativeVisible,
 		display: draft.display.caveman.display,
 	});
 	if (cavemanError) return cavemanError;
+	const ponytailError = validatePonytailConfig({
+		defaultMode: draft.behavior.ponytail.defaultMode,
+		nativeVisible: draft.display.ponytail.nativeVisible,
+		display: draft.display.ponytail.display,
+	});
+	if (ponytailError) return ponytailError;
 	const headroom = draft.behavior.headroom;
 	try {
 		const url = new URL(headroom.baseUrl);
@@ -1062,16 +1028,15 @@ function settingsItems(
 	draft: UnifiedSettingsDraft,
 	presence: PluginPresence,
 ): SettingItem[] {
-	const ponytailWarning = presence.ponytail
-		? undefined
-		: "Ponytail is not installed; rows are read-only. Install @dietrichgebert/ponytail to edit these controls.";
 	const headroomWarning = featureWarning(presence, "headroom");
 	const rtkWarning = featureWarning(presence, "rtk");
 	const cavemanWarning = featureWarning(presence, "caveman");
+	const ponytailWarning = featureWarning(presence, "ponytail");
 	const sharedWarning = featureWarning(presence, "shared-display");
 	const promptWarning = featureWarning(presence, "prompt-border-style");
 	const shared = draft.display.sharedDisplay;
 	const caveman = draft.display.caveman;
+	const ponytail = draft.display.ponytail;
 	const headroom = draft.display.headroom;
 	const behavior = draft.behavior;
 	const rail = draft.display.contextRail;
@@ -1088,15 +1053,6 @@ function settingsItems(
 	});
 	return [
 		{ id: "section:presence", label: "Presence (read-only)", currentValue: "", heading: true },
-		{
-			id: "presence.ponytail",
-			label: "Ponytail",
-			currentValue: presence.ponytail ? `installed${presence.ponytailEnabled ? ", enabled" : ", disabled"}` : "not installed",
-			warning: ponytailWarning,
-			description: presence.ponytail
-				? "External lifecycle is informational. Use /ponytail off|lite|full for current-session mode; settings apply on next start."
-				: "No editable values until external Ponytail package is installed.",
-		},
 		...PROJECT_FEATURES.map(feature => ({
 			id: `presence.${feature}`,
 			label: feature,
@@ -1121,16 +1077,17 @@ function settingsItems(
 		selectItem("shared.placement", "Placement", shared.widgetPlacement, SHARED_PLACEMENTS, "Widget placement relative to editor.", sharedWarning),
 		textItem("shared.separator", "Separator", shared.horizontalSeparator, "One-line separator for horizontal layout.", sharedWarning),
 		numberItem("shared.gap", "Vertical gap", shared.verticalGapRows, "Blank rows between vertical sources, 0-10.", sharedWarning),
-		{ id: "section:ponytail", label: "Ponytail Display", currentValue: "", heading: true },
-		boolItem("ponytail.visible", "Visible", shared.ponytail.visible, "Include Ponytail segment in Shared Display.", ponytailWarning, !presence.ponytail),
-		boolItem("ponytail.nativeVisible", "Native status", shared.ponytail.nativeVisible, "Show captured Ponytail text in OMP native footer.", ponytailWarning, !presence.ponytail),
-		textItem("ponytail.template", "Template", shared.ponytail.template, "Tokens: {activity}, {glyph}, {modeIcon}, {mode}.", ponytailWarning, !presence.ponytail),
-		textItem("ponytail.glyphDirectory", "Glyph directory", shared.ponytail.glyphDirectory, "External Ponytail glyph directory; frame contents stay in files.", ponytailWarning, !presence.ponytail),
+		{ id: "section:ponytail", label: "Ponytail", currentValue: "", heading: true },
+		selectItem("ponytail.defaultMode", "Default mode", behavior.ponytail.defaultMode, PONYTAIL_RUNTIME_MODES, "Mode Level new Agent Sessions start at; session entries and /ponytail override per session. Unparseable config fails closed to off.", ponytailWarning),
+		boolItem("ponytail.nativeVisible", "Native status", ponytail.nativeVisible, "Show Ponytail in OMP native footer status.", ponytailWarning),
+		boolItem("ponytail.visible", "Display visible", ponytail.display.visible, "Include Ponytail frames in Shared Display. Independent of native footer status.", ponytailWarning),
+		textItem("ponytail.template", "Display template", ponytail.display.template, "Tokens: {activity}, {glyph}, {mode}, {modeIcon}.", ponytailWarning),
+		textItem("ponytail.glyphDirectory", "Glyph directory", ponytail.display.glyphDirectory, "External Ponytail glyph directory; frame contents stay in files.", ponytailWarning),
 		{ id: "section:caveman", label: "Caveman", currentValue: "", heading: true },
-		selectItem("caveman.defaultLevel", "Default level", behavior.caveman.defaultLevel, CAVEMAN_LEVELS, "Behavior default. Live only when Caveman extension is loaded.", cavemanWarning),
+		selectItem("caveman.defaultMode", "Default mode", behavior.caveman.defaultMode, CAVEMAN_MODES, "Caveman Mode Level a new Agent Session starts at; off sends no Caveman instructions.", cavemanWarning),
 		boolItem("caveman.nativeVisible", "Native status", caveman.nativeVisible, "Show Caveman in OMP native footer.", cavemanWarning),
 		boolItem("caveman.visible", "Display visible", caveman.display.visible, "Publish Caveman segment to Shared Display.", cavemanWarning),
-		textItem("caveman.template", "Display template", caveman.display.template, "Tokens: {activity}, {glyph}, {level}.", cavemanWarning),
+		textItem("caveman.template", "Display template", caveman.display.template, "Tokens: {activity}, {glyph}, {mode}.", cavemanWarning),
 		textItem("caveman.glyphDirectory", "Glyph directory", caveman.display.glyphDirectory, "External Caveman glyph directory; frame contents stay in files.", cavemanWarning),
 		{ id: "section:headroom", label: "Headroom", currentValue: "", heading: true },
 		boolItem("headroom.enabled", "Enabled", behavior.headroom.enabled, "Compression behavior; live only when Headroom extension is loaded.", headroomWarning),
@@ -1219,11 +1176,12 @@ function updateDraft(draft: UnifiedSettingsDraft, id: string, value: string): vo
 		case "shared.placement": if (SHARED_PLACEMENTS.includes(value as SharedDisplayPlacement)) draft.display.sharedDisplay.widgetPlacement = value as SharedDisplayPlacement; return;
 		case "shared.separator": draft.display.sharedDisplay.horizontalSeparator = value; return;
 		case "shared.gap": draft.display.sharedDisplay.verticalGapRows = Number(value); return;
-		case "ponytail.visible": draft.display.sharedDisplay.ponytail.visible = bool; return;
-		case "ponytail.nativeVisible": draft.display.sharedDisplay.ponytail.nativeVisible = bool; return;
-		case "ponytail.template": draft.display.sharedDisplay.ponytail.template = value; return;
-		case "ponytail.glyphDirectory": draft.display.sharedDisplay.ponytail.glyphDirectory = value; return;
-		case "caveman.defaultLevel": if (CAVEMAN_LEVELS.includes(value as CavemanLevel)) draft.behavior.caveman.defaultLevel = value as CavemanLevel; return;
+		case "ponytail.defaultMode": if ((PONYTAIL_RUNTIME_MODES as readonly string[]).includes(value)) draft.behavior.ponytail.defaultMode = value as PonytailConfig["defaultMode"]; return;
+		case "ponytail.nativeVisible": draft.display.ponytail.nativeVisible = bool; return;
+		case "ponytail.visible": draft.display.ponytail.display.visible = bool; return;
+		case "ponytail.template": draft.display.ponytail.display.template = value; return;
+		case "ponytail.glyphDirectory": draft.display.ponytail.display.glyphDirectory = value; return;
+		case "caveman.defaultMode": if ((CAVEMAN_MODES as readonly string[]).includes(value)) draft.behavior.caveman.defaultMode = value as CavemanMode; return;
 		case "caveman.nativeVisible": draft.display.caveman.nativeVisible = bool; return;
 		case "caveman.visible": draft.display.caveman.display.visible = bool; return;
 		case "caveman.template": draft.display.caveman.display.template = value; return;
@@ -1289,12 +1247,10 @@ function statusText(snapshot: StatusSnapshot): string {
 	const lines = [
 		"Codesook OMP Plugin",
 		`Root config: ${CODESOOK_OMP_CONFIG_PATH}${root?.exists ? (root.valid ? " (valid)" : " (invalid)") : " (not created)"}`,
-		`Ponytail: ${presence.ponytail ? `installed${presence.ponytailEnabled ? ", enabled" : ", disabled"}` : "not installed"}`,
 		`omp-plugins: ${presence.ompPlugins ? `installed${presence.ompPluginsEnabled ? ", enabled" : ", disabled"}` : "not installed"}`,
 		...PROJECT_FEATURES.map(feature => `  ${feature}: ${featureEnabled(presence, feature) ? "enabled for next start" : "not enabled"}`),
 		"",
 		"Lifecycle toggles are informational; this extension does not unload or load plugins.",
-		"Ponytail live mode: /ponytail off|lite|full.",
 	];
 	if (snapshot.error) lines.push(`Plugin detection warning: ${snapshot.error}`);
 	return lines.join("\n");
@@ -1512,7 +1468,7 @@ export async function openSettings(pi: ExtensionAPI, ctx: ExtensionContext, conf
 
 export default function codesookOmpPluginSettings(pi: ExtensionAPI): void {
 	pi.setLabel("Codesook OMP Plugin Settings");
-	pi.registerCommand("codesook-omp-plugin", {
+	pi.registerCommand("omp-plugins", {
 		description: `Unified Codesook OMP plugin settings. ${COMMAND_USAGE}`,
 		getArgumentCompletions(argumentPrefix) {
 			const prefix = argumentPrefix.trim().toLowerCase();
@@ -1521,7 +1477,7 @@ export default function codesookOmpPluginSettings(pi: ExtensionAPI): void {
 		handler: async (args, ctx) => {
 			let argument = args.trim().toLowerCase();
 			if ((argument === "" || argument === "init") && (!ctx.hasUI || (argument === "init" ? typeof ctx.ui.select !== "function" : typeof ctx.ui.custom !== "function"))) {
-				ctx.ui.notify("Codesook OMP settings require an interactive UI.\n/codesook-omp-plugin status — Show plugin and configuration status.\n/codesook-omp-plugin init config — Create missing configuration and glyphs from saved settings; preserve existing files.", "info");
+				ctx.ui.notify("Codesook OMP settings require an interactive UI.\n/omp-plugins status — Show plugin and configuration status.\n/omp-plugins init config — Create missing configuration and glyphs from saved settings; preserve existing files.", "info");
 				return;
 			}
 			if (argument === "init") {

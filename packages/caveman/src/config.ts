@@ -8,7 +8,8 @@ import {
 } from "@codesook/omp-shared-display/config-store";
 import { parseFrameSequenceAsset } from "@codesook/omp-shared-display/client";
 import {
-	CAVEMAN_LEVELS,
+	CAVEMAN_ACTIVE_MODES,
+	CAVEMAN_MODES,
 	CONFIG_PATH,
 	DEFAULT_CAVEMAN_CONFIG,
 	DEFAULT_GLYPH_DIRECTORY,
@@ -18,9 +19,8 @@ import {
 	getCodesookOmpConfigPath,
 	getLegacyConfigPath,
 	getLegacyPackageConfigPath,
-	isCavemanLevel,
+	isCavemanMode,
 	isRecord,
-	type CavemanActiveLevel,
 	type CavemanConfig,
 } from "./types.ts";
 
@@ -45,7 +45,6 @@ export interface CavemanConfigLoadResult {
 	migrated: boolean;
 }
 
-const ACTIVE_LEVELS = CAVEMAN_LEVELS.filter(level => level !== "off") as readonly CavemanActiveLevel[];
 
 function hasOwn(record: Record<string, unknown>, key: string): boolean {
 	return Object.prototype.hasOwnProperty.call(record, key);
@@ -59,9 +58,9 @@ function warn(onWarning: CavemanWarning | undefined, message: string): void {
 	onWarning?.(message);
 }
 
-// Unparseable config must never silently enable Caveman: default level fails closed to off.
+// Unparseable config must never silently enable Caveman: default mode fails closed to off.
 function failClosedConfig(): CavemanConfig {
-	return { ...cloneCavemanConfig(DEFAULT_CAVEMAN_CONFIG), defaultLevel: "off" };
+	return { ...cloneCavemanConfig(DEFAULT_CAVEMAN_CONFIG), defaultMode: "off" };
 }
 
 function isRootConfigPath(configPath: string, options: CavemanConfigLoadOptions = {}): boolean {
@@ -93,7 +92,8 @@ function normalizeRootCavemanConfig(raw: unknown, onWarning?: CavemanWarning): C
 		nativeVisible: displayRoot.nativeVisible,
 		display: displayConfig,
 	};
-	if (hasOwn(behaviorRoot, "defaultLevel")) standalone.defaultLevel = behaviorRoot.defaultLevel;
+	if (hasOwn(behaviorRoot, "defaultMode")) standalone.defaultMode = behaviorRoot.defaultMode;
+	else if (hasOwn(behaviorRoot, "defaultLevel")) standalone.defaultLevel = behaviorRoot.defaultLevel;
 	return normalizeCavemanConfig(standalone, onWarning);
 }
 
@@ -106,24 +106,27 @@ function rootCavemanSections(config: CavemanConfig): {
 			...config.display,
 			nativeVisible: config.nativeVisible,
 		},
-		behavior: { defaultLevel: config.defaultLevel },
+		behavior: { defaultMode: config.defaultMode },
 	};
 }
 
 export function normalizeCavemanConfig(raw: unknown, onWarning?: CavemanWarning): CavemanConfig {
 	const source = isRecord(raw) ? raw : {};
-	let defaultLevel: CavemanConfig["defaultLevel"] = "full";
-	if (hasOwn(source, "defaultLevel")) {
-		if (isCavemanLevel(source.defaultLevel)) defaultLevel = source.defaultLevel;
+	let defaultMode: CavemanConfig["defaultMode"] = "caveman";
+	if (hasOwn(source, "defaultMode")) {
+		if (isCavemanMode(source.defaultMode)) defaultMode = source.defaultMode;
 		else {
-			defaultLevel = "off";
-			warn(onWarning, "Caveman config has a noncanonical defaultLevel; using off.");
+			defaultMode = "off";
+			warn(onWarning, "Caveman config has an unknown defaultMode; using off.");
 		}
+	} else if (hasOwn(source, "defaultLevel")) {
+		defaultMode = "off";
+		warn(onWarning, "Caveman config uses removed defaultLevel; set defaultMode to off, caveman, ultracave, or megacave. Using off.");
 	}
 
 	const displaySource = isRecord(source.display) ? source.display : {};
 	return {
-		defaultLevel,
+		defaultMode,
 		nativeVisible: typeof source.nativeVisible === "boolean" ? source.nativeVisible : false,
 		display: {
 			visible: typeof displaySource.visible === "boolean" ? displaySource.visible : true,
@@ -139,26 +142,22 @@ export function normalizeCavemanConfig(raw: unknown, onWarning?: CavemanWarning)
 
 export function normalizeLegacyCavemanConfig(raw: unknown, onWarning?: CavemanWarning): CavemanConfig {
 	const source = isRecord(raw) ? raw : {};
-	let defaultLevel: CavemanConfig["defaultLevel"] = "full";
-	if (hasOwn(source, "defaultLevel") && typeof source.defaultLevel === "string") {
-		if (source.defaultLevel === "wenyan") defaultLevel = "wenyan-full";
-		else if (isCavemanLevel(source.defaultLevel)) defaultLevel = source.defaultLevel;
-		else {
-			defaultLevel = "off";
-			warn(onWarning, "Legacy Caveman config has a noncanonical defaultLevel; using off.");
-		}
+	let defaultMode: CavemanConfig["defaultMode"] = "caveman";
+	if (hasOwn(source, "defaultLevel")) {
+		defaultMode = "off";
+		warn(onWarning, "Legacy Caveman config uses removed defaultLevel; using off.");
 	}
 	const nativeVisible = typeof source.showStatus === "boolean" ? source.showStatus : true;
 	return {
 		...cloneCavemanConfig(DEFAULT_CAVEMAN_CONFIG),
-		defaultLevel,
+		defaultMode,
 		nativeVisible,
 	};
 }
 
 export function validateCavemanConfig(config: unknown): string | undefined {
 	if (!isRecord(config)) return "Caveman config must be an object.";
-	if (!isCavemanLevel(config.defaultLevel)) return "Default level must be canonical Caveman level or off.";
+	if (!isCavemanMode(config.defaultMode)) return "Default mode must be off, caveman, ultracave, or megacave.";
 	if (typeof config.nativeVisible !== "boolean") return "Native visibility must be on or off.";
 	if (!isRecord(config.display)) return "Display config is required.";
 	if (typeof config.display.visible !== "boolean") return "Display visibility must be on or off.";
@@ -220,10 +219,10 @@ export async function seedMissingCavemanGlyphs(
 	const glyphDirectory = expandHomePath(config.display.glyphDirectory, homeDirectory);
 	const packageDirectory = options.packageAssetDirectory ?? PACKAGE_ASSET_DIRECTORY;
 	const created: string[] = [];
-	for (const level of ACTIVE_LEVELS) {
-		const destination = path.join(glyphDirectory, `${level}.txt`);
+	for (const mode of CAVEMAN_ACTIVE_MODES) {
+		const destination = path.join(glyphDirectory, `${mode}.txt`);
 		if (fs.existsSync(destination)) continue;
-		const source = path.join(packageDirectory, `${level}.txt`);
+		const source = path.join(packageDirectory, `${mode}.txt`);
 		const sequence = parseFrameSequenceAsset(await readFile(source, "utf8"));
 		const firstFrame = sequence?.frames[0];
 		if (firstFrame === undefined) throw new Error(`Invalid packaged Caveman glyph asset: ${source}`);

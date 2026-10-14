@@ -9,7 +9,6 @@
     "src/client.ts",
     "src/config-store.ts",
     "src/project-integrations.ts",
-    "assets",
     "README.md",
     "tsconfig.json"
   ],

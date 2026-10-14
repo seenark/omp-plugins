@@ -71,6 +71,10 @@ Use the five default triage labels. Before triaging or applying role labels, rea
 
 Use single-context domain docs at root `CONTEXT.md` and `docs/adr/`. Before exploring the codebase, read `docs/agents/domain.md`.
 
+### Upstream sync
+
+Before updating Caveman, Ponytail, the Headroom server or the RTK binary to a newer upstream, read `docs/agents/upstream-sync.md`.
+
 
 ## Build & Test
 

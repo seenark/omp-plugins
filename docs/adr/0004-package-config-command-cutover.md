@@ -3,7 +3,9 @@ status: accepted
 ---
 # Unified Root Configuration and Feature Commands
 
-Codesook OMP Plugin owns one root slash command, `/codesook-omp-plugin`, and one canonical document at `~/.config/codesook-omp/config.json`. Document envelope is `{version: 1, display: {...}, behavior: {...}}`; unknown root keys survive writes. Shared Display owns presentation state, while Caveman, Headroom, and other feature packages own behavior state.
+Codesook OMP Plugin owns one root slash command, `/omp-plugins`, and one canonical document at `~/.config/codesook-omp/config.json`. Document envelope is `{version: 1, display: {...}, behavior: {...}}`; unknown root keys survive writes. Shared Display owns presentation state, while Caveman, Headroom, and other feature packages own behavior state.
+
+The root slash command was renamed from `/codesook-omp-plugin` to `/omp-plugins` with no alias; config path, npm package names, and folder names are unchanged.
 
 Settings dialog edits staged draft state. `Shift+Enter` applies immediately; bare `Enter` on `Apply` asks confirmation. Successful Apply validates all fields, atomically replaces root document, then emits a versioned EventBus event. Loaded project extensions consume that event and update live behavior; current provider request remains unchanged. `Reload` discards draft edits. `Cancel` changes neither disk nor runtime.
 
