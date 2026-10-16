@@ -24,7 +24,7 @@
 		".": "./src/index.ts"
 	},
 	"dependencies": {
-		"@codesook/omp-shared-display": "^1.2.0"
+		"@codesook/omp-shared-display": "^1.3.0"
 	},
 	"peerDependencies": {
 		"@oh-my-pi/pi-coding-agent": ">=18.11.1"

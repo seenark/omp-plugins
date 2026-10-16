@@ -46,6 +46,7 @@ function createHarness(options: { hasUI?: boolean; configured?: string[]; models
 	const ctx = {
 		hasUI: options.hasUI ?? true,
 		ui: { notify: (message: string, level: string) => void notices.push({ level, message }) },
+		sessionManager: { getBranch: () => [] },
 		models: options.models ?? {
 			resolve: (spec: string) => (options.configured?.includes(spec) ? { provider: "test", id: spec.slice(1) } : undefined),
 		},
@@ -217,7 +218,7 @@ describe("Behavior Configuration through the extension", () => {
 		fs.mkdirSync(path.dirname(file), { recursive: true });
 		fs.writeFileSync(file, "{ not json");
 		const warnings: string[] = [];
-		pstackExtension({ events: { on: () => () => {} }, on() {}, registerCommand() {}, logger: { warn: (m: string) => warnings.push(m) } } as never, { homeDirectory: home });
+		pstackExtension({ events: { on: () => () => {}, emit() {} }, on() {}, registerCommand() {}, logger: { warn: (m: string) => warnings.push(m) } } as never, { homeDirectory: home });
 		expect(warnings).toHaveLength(1);
 	});
 });

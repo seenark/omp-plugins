@@ -1,0 +1,392 @@
+import { afterEach, describe, expect, it } from "bun:test";
+import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
+import { isRecord } from "@codesook/omp-shared-display/config-store";
+import { SHARED_DISPLAY_CHANNEL, type FrameSequence } from "@codesook/omp-shared-display/client";
+import pstackExtension from "./index.ts";
+import { INACTIVE_RUN, RECEIPT_ENTRY_TYPE, RUN_ENTRY_TYPE, rebuildRunState } from "./run-state.ts";
+
+type Handler = (event: unknown, ctx: unknown) => unknown;
+type Command = { handler: (args: string, ctx: unknown) => unknown };
+type Snapshot = { kind: string; source: string; sequence: FrameSequence | null };
+type SessionEntry = { type: "custom"; customType: string; data: unknown };
+
+const roots: string[] = [];
+afterEach(() => {
+	for (const root of roots.splice(0)) fs.rmSync(root, { recursive: true, force: true });
+});
+
+function tempDirectory(): string {
+	const root = fs.mkdtempSync(path.join(os.tmpdir(), "pstack-run-test-"));
+	roots.push(root);
+	return root;
+}
+
+function skillFixture(): string {
+	const directory = tempDirectory();
+	fs.writeFileSync(path.join(directory, "SKILL.md"), "---\nname: poteto-mode\n---\n\n# Poteto mode\n\nSKILL-BODY-SENTINEL\n");
+	return directory;
+}
+
+const SEAT_MODELS: Record<string, string> = { "@pstack-panel-a": "anthropic/a", "@pstack-panel-b": "openai/b", "@pstack-panel-c": "google/c" };
+
+/** `entries` is the session branch: pass the same array to a second harness to model resuming the session. */
+function createHarness(options: { entries?: SessionEntry[]; idle?: boolean; maxPanelSize?: number; home?: string } = {}) {
+	const handlers = new Map<string, Handler>();
+	const commands = new Map<string, Command>();
+	const bus = new Map<string, Array<(data: unknown) => void>>();
+	const entries = options.entries ?? [];
+	const notices: Array<{ level: string; message: string }> = [];
+	const sentMessages: Array<{ message: { customType?: string; content?: string; display?: boolean }; options?: unknown }> = [];
+	const sentPrompts: Array<{ text: string; options?: unknown }> = [];
+	const snapshots: Snapshot[] = [];
+	const events = {
+		on(channel: string, handler: (data: unknown) => void) {
+			bus.set(channel, [...(bus.get(channel) ?? []), handler]);
+			return () => void bus.set(channel, (bus.get(channel) ?? []).filter(other => other !== handler));
+		},
+		emit(channel: string, data: unknown) {
+			if (channel === SHARED_DISPLAY_CHANNEL && isRecord(data) && data.kind === "snapshot" && data.source === "pstack") snapshots.push(data as Snapshot);
+			for (const handler of bus.get(channel) ?? []) handler(data);
+			// A running host answers a producer's ready message, so every publish becomes a snapshot.
+			if (isRecord(data) && data.kind === "ready" && data.source === "pstack") events.emit(SHARED_DISPLAY_CHANNEL, { protocol: 1, kind: "host", epoch: "e1", active: true });
+		},
+	};
+	const pi = {
+		events,
+		on: (name: string, handler: Handler) => void handlers.set(name, handler),
+		registerCommand: (name: string, command: Command) => void commands.set(name, command),
+		appendEntry: (customType: string, data: unknown) => void entries.push({ type: "custom", customType, data }),
+		sendMessage: (message: never, sendOptions?: unknown) => void sentMessages.push({ message, options: sendOptions }),
+		sendUserMessage: (text: string, sendOptions?: unknown) => void sentPrompts.push({ text, options: sendOptions }),
+		logger: { info() {}, warn() {}, error() {} },
+	};
+	let idle = options.idle ?? true;
+	const ctx = {
+		hasUI: true,
+		isIdle: () => idle,
+		ui: { notify: (message: string, level: string) => void notices.push({ level, message }) },
+		sessionManager: { getBranch: () => entries },
+		models: { resolve: (spec: string) => (SEAT_MODELS[spec] ? { provider: SEAT_MODELS[spec]!.split("/")[0], id: SEAT_MODELS[spec]!.split("/")[1] } : undefined) },
+	};
+	const home = options.home ?? tempDirectory();
+	if (options.maxPanelSize !== undefined) {
+		const file = path.join(home, ".config", "codesook-omp", "config.json");
+		fs.mkdirSync(path.dirname(file), { recursive: true });
+		fs.writeFileSync(file, JSON.stringify({ version: 1, display: {}, behavior: { pstack: { maxPanelSize: options.maxPanelSize } } }));
+	}
+	pstackExtension(pi as never, { homeDirectory: home, skillDirectory: skillFixture() });
+	const fire = (name: string, event: unknown = {}) => handlers.get(name)!(event, ctx);
+	const lifecycle = (id: string, agent: string, status: string) => events.emit("task:subagent:lifecycle", { id, agent, status, index: 0 });
+	return {
+		entries,
+		notices,
+		sentMessages,
+		sentPrompts,
+		snapshots,
+		events,
+		fire,
+		setIdle: (value: boolean) => void (idle = value),
+		command: (name: string, args = "") => commands.get(name)!.handler(args, ctx),
+		status: async () => {
+			notices.length = 0;
+			await commands.get("pstack")!.handler("status", ctx);
+			return notices[0]!.message;
+		},
+		segment: () => snapshots.at(-1)?.sequence?.frames[0]?.[0],
+		lifecycle,
+		seatRun: (id: string, agent: string, status = "completed") => {
+			lifecycle(id, agent, "started");
+			lifecycle(id, agent, status);
+		},
+		skillPrompt: (name: string, attribution: string, args?: string) =>
+			fire("message_start", { type: "message_start", message: { role: "custom", customType: "skill-prompt", attribution, details: { name, args } } }),
+		todo: (phases: Array<{ name: string; tasks: Array<{ content: string; status: string }> }>, isError = false) =>
+			fire("tool_result", { type: "tool_result", toolName: "todo", input: {}, content: [], isError, details: { op: "init", phases } }),
+		read: (target: string, isError = false) =>
+			fire("tool_result", { type: "tool_result", toolName: "read", input: { path: target }, content: [], isError, details: undefined }),
+	};
+}
+
+const todo = (done: number, total: number) => [
+	{ name: "Steps", tasks: Array.from({ length: total }, (_, index) => ({ content: `step ${index + 1}`, status: index < done ? "completed" : index === done ? "in_progress" : "pending" })) },
+];
+const PLAYBOOK = "/pkg/skills/poteto-mode/playbooks/feature.md";
+
+const activatedEntries = (entries: SessionEntry[]) => entries.filter(entry => entry.customType === RUN_ENTRY_TYPE && (entry.data as { kind: string }).kind === "activated");
+
+describe("activation", () => {
+	it("/poteto <task> starts poteto-mode on the task and reports pstack active", async () => {
+		const h = createHarness();
+		await h.fire("session_start");
+		await h.command("poteto", "ship the thing");
+		expect(h.sentPrompts).toHaveLength(1);
+		expect(h.sentPrompts[0]!.text).toContain("SKILL-BODY-SENTINEL");
+		expect(h.sentPrompts[0]!.text).toContain("ship the thing");
+		expect(h.sentPrompts[0]!.options).toBeUndefined();
+		expect(await h.status()).toContain("active");
+		expect(await h.status()).toContain("ship the thing");
+		expect(h.segment()).toBe("pstack");
+	});
+
+	it("/poteto queues as a follow-up while the agent is busy", async () => {
+		const h = createHarness({ idle: false });
+		await h.fire("session_start");
+		await h.command("poteto", "later");
+		expect(h.sentPrompts[0]!.options).toEqual({ deliverAs: "followUp" });
+		expect(h.segment()).toBe("pstack");
+	});
+
+	it("/poteto without a task still starts poteto-mode", async () => {
+		const h = createHarness();
+		await h.fire("session_start");
+		await h.command("poteto");
+		expect(h.sentPrompts).toHaveLength(1);
+		expect(h.segment()).toBe("pstack");
+	});
+
+	it("/skill:poteto-mode typed by the user activates through the input event", async () => {
+		const h = createHarness();
+		await h.fire("session_start");
+		await h.fire("input", { type: "input", text: "/skill:poteto-mode fix the bug", source: "interactive" });
+		expect(await h.status()).toContain("fix the bug");
+		expect(h.segment()).toBe("pstack");
+		expect(h.sentPrompts).toEqual([]);
+	});
+
+	it("/skill:poteto-mode activates through its skill-prompt message where no input event exists", async () => {
+		const h = createHarness();
+		await h.fire("session_start");
+		await h.skillPrompt("poteto-mode", "user", "fix the bug");
+		expect(await h.status()).toContain("fix the bug");
+		expect(h.segment()).toBe("pstack");
+	});
+
+	it("does not activate on other input, extension input, other skills or autoloaded skill prompts", async () => {
+		const h = createHarness();
+		await h.fire("session_start");
+		await h.fire("input", { type: "input", text: "fix the bug", source: "interactive" });
+		await h.fire("input", { type: "input", text: "explain /skill:poteto-mode to me", source: "interactive" });
+		await h.fire("input", { type: "input", text: "/skill:poteto-mode-extra x", source: "interactive" });
+		await h.fire("input", { type: "input", text: "/skill:poteto-mode x", source: "extension" });
+		await h.skillPrompt("how", "user");
+		await h.skillPrompt("poteto-mode", "agent");
+		expect(await h.status()).toContain("inactive");
+		expect(h.entries).toEqual([]);
+	});
+
+	it("activates once: a second start in an active session records nothing new", async () => {
+		const h = createHarness();
+		await h.fire("session_start");
+		await h.fire("input", { type: "input", text: "/skill:poteto-mode a", source: "interactive" });
+		await h.skillPrompt("poteto-mode", "user", "a");
+		await h.command("poteto", "again");
+		expect(activatedEntries(h.entries)).toHaveLength(1);
+	});
+
+	it("tells the session which panel seats are configured, as a hidden note for the next turn", async () => {
+		const h = createHarness();
+		await h.fire("session_start");
+		await h.command("poteto", "x");
+		expect(h.sentMessages).toHaveLength(1);
+		const { message, options } = h.sentMessages[0]!;
+		expect(message.display).toBe(false);
+		expect(options).toEqual({ deliverAs: "nextTurn" });
+		for (const seat of ["pstack-panel-a", "pstack-panel-b", "pstack-panel-c"]) expect(message.content).toContain(seat);
+		expect(message.content).not.toContain("pstack-panel-d");
+	});
+
+	it("caps the roster by the maximum panel size", async () => {
+		const h = createHarness({ maxPanelSize: 2 });
+		await h.fire("session_start");
+		await h.command("poteto", "x");
+		expect(h.sentMessages[0]!.message.content).toContain("pstack-panel-b");
+		expect(h.sentMessages[0]!.message.content).not.toContain("pstack-panel-c");
+	});
+});
+
+describe("Status Segment", () => {
+	it("is absent in a session that never activates pstack", async () => {
+		const h = createHarness();
+		await h.fire("session_start");
+		await h.fire("input", { type: "input", text: "hello", source: "interactive" });
+		await h.todo(todo(1, 3));
+		await h.read(PLAYBOOK);
+		h.seatRun("0-Critic", "pstack-panel-a-critic");
+		await h.fire("session_compact");
+		expect(h.snapshots.filter(snapshot => snapshot.sequence !== null)).toEqual([]);
+		expect(h.sentMessages).toEqual([]);
+		expect(h.entries).toEqual([]);
+	});
+
+	it("reflects playbook, step progress and panel attendance", async () => {
+		const h = createHarness();
+		await h.fire("session_start");
+		await h.command("poteto", "x");
+		await h.read(PLAYBOOK);
+		expect(h.segment()).toBe("pstack · feature");
+		await h.todo(todo(3, 7));
+		expect(h.segment()).toBe("pstack · feature · 3/7");
+		h.seatRun("0-Critic", "pstack-panel-a-critic");
+		h.seatRun("1-Critic", "pstack-panel-b-critic");
+		expect(h.segment()).toBe("pstack · feature · 3/7 · panel 2/3");
+		h.seatRun("2-Critic", "pstack-panel-c-critic", "failed");
+		expect(h.segment()).toBe("pstack · feature · 3/7 · panel 2/3");
+		await h.todo(todo(4, 7));
+		expect(h.segment()).toBe("pstack · feature · 4/7 · panel 2/3");
+	});
+
+	it("shows a seat that fell back to another model as a dropout", async () => {
+		const h = createHarness();
+		await h.fire("session_start");
+		await h.command("poteto", "x");
+		h.lifecycle("0-Critic", "pstack-panel-b-critic", "started");
+		h.events.emit("task:subagent:event", { id: "0-Critic", event: { type: "retry_fallback_applied", from: "openai/b", to: "anthropic/a" } });
+		expect(h.segment()).toBe("pstack · dropouts 1");
+		expect(await h.status()).toContain("anthropic/a");
+	});
+
+	it("keeps the playbook through the Opening a PR playbook that every playbook ends with, and follows a change of playbook", async () => {
+		const h = createHarness();
+		await h.fire("session_start");
+		await h.command("poteto", "x");
+		await h.read(PLAYBOOK);
+		await h.read("/pkg/skills/poteto-mode/playbooks/opening-a-pr.md");
+		expect(h.segment()).toBe("pstack · feature");
+		await h.read("skill://poteto-mode/playbooks/bug-fix.md:1-40");
+		expect(h.segment()).toBe("pstack · bug-fix");
+	});
+
+	it("ignores failed reads, other files and failed or empty todo results", async () => {
+		const h = createHarness();
+		await h.fire("session_start");
+		await h.command("poteto", "x");
+		await h.read(PLAYBOOK, true);
+		await h.read("/pkg/skills/other/playbooks/feature.md");
+		await h.read("/repo/src/playbooks/feature.md");
+		await h.todo(todo(1, 3), true);
+		await h.todo([]);
+		expect(h.segment()).toBe("pstack");
+	});
+
+	it("counts abandoned todo items as done and names the item in progress", async () => {
+		const h = createHarness();
+		await h.fire("session_start");
+		await h.command("poteto", "x");
+		await h.todo([{ name: "P", tasks: [{ content: "a", status: "abandoned" }, { content: "b", status: "in_progress" }, { content: "c", status: "blocked" }] }]);
+		expect(h.segment()).toBe("pstack · 1/3");
+		expect(await h.status()).toContain("now: b");
+	});
+
+	it("publishes a tombstone when the session moves to one where pstack is not active, and at shutdown", async () => {
+		const h = createHarness();
+		await h.fire("session_start");
+		await h.command("poteto", "x");
+		expect(h.segment()).toBe("pstack");
+		h.entries.length = 0;
+		await h.fire("session_switch");
+		expect(h.snapshots.at(-1)?.sequence).toBeNull();
+		expect(await h.status()).toContain("inactive");
+
+		const ended = createHarness();
+		await ended.fire("session_start");
+		await ended.command("poteto", "x");
+		await ended.fire("session_shutdown");
+		expect(ended.snapshots.at(-1)?.sequence).toBeNull();
+	});
+});
+
+describe("run state rebuild", () => {
+	it("restores the active flag, playbook, progress, receipts and segment when a session is resumed", async () => {
+		const first = createHarness();
+		await first.fire("session_start");
+		await first.command("poteto", "resume me");
+		await first.read(PLAYBOOK);
+		await first.todo(todo(2, 5));
+		first.seatRun("0-Critic", "pstack-panel-a-critic");
+		first.lifecycle("1-Critic", "pstack-panel-b-critic", "started");
+		first.events.emit("task:subagent:event", { id: "1-Critic", event: { type: "retry_fallback_applied", from: "openai/b", to: "anthropic/a" } });
+		const expected = first.segment();
+		expect(expected).toBe("pstack · feature · 2/5 · panel 1/3 · dropouts 1");
+
+		const resumed = createHarness({ entries: first.entries });
+		await resumed.fire("session_start");
+		expect(resumed.segment()).toBe(expected);
+		const report = await resumed.status();
+		expect(report).toContain("resume me");
+		expect(report).toContain("feature");
+		expect(report).toContain("2/5");
+		expect(resumed.sentMessages).toEqual([]);
+	});
+
+	it("rebuilds on session_switch, session_branch and session_tree", async () => {
+		const source = createHarness();
+		await source.fire("session_start");
+		await source.command("poteto", "x");
+		await source.read(PLAYBOOK);
+		for (const event of ["session_switch", "session_branch", "session_tree"]) {
+			const h = createHarness({ entries: source.entries });
+			await h.fire(event);
+			expect(h.segment()).toBe("pstack · feature");
+		}
+	});
+
+	it("keeps the run through a second session_start without double-counting", async () => {
+		const h = createHarness();
+		await h.fire("session_start");
+		await h.command("poteto", "x");
+		h.seatRun("0-Critic", "pstack-panel-a-critic");
+		await h.fire("session_start");
+		expect(h.segment()).toBe("pstack · panel 1/3");
+	});
+
+	it("does not count receipts or dropouts recorded before activation, nor malformed entries", () => {
+		const custom = (customType: string, data: unknown): SessionEntry => ({ type: "custom", customType, data });
+		const receipt = { seat: "a", agent: "pstack-panel-a-critic", id: "0", status: "completed" };
+		const dropout = { seat: "a", agent: "pstack-panel-a-critic", id: "0", from: "x/a", to: "y/b" };
+		const activated = custom(RUN_ENTRY_TYPE, { kind: "activated", seats: ["a", "b"] });
+		expect(rebuildRunState([custom(RECEIPT_ENTRY_TYPE, receipt), custom("dev.codesook.pstack.dropout", dropout)])).toBe(INACTIVE_RUN);
+		const state = rebuildRunState([
+			custom(RECEIPT_ENTRY_TYPE, receipt),
+			activated,
+			custom(RUN_ENTRY_TYPE, { kind: "progress", done: 5, total: 2 }),
+			custom(RUN_ENTRY_TYPE, { kind: "activated", seats: ["a", "b", "c"] }),
+			custom(RUN_ENTRY_TYPE, { kind: "playbook", playbook: "" }),
+			custom(RUN_ENTRY_TYPE, "junk"),
+			custom(RECEIPT_ENTRY_TYPE, { ...receipt, seat: "z" }),
+			custom(RECEIPT_ENTRY_TYPE, receipt),
+			{ type: "message", customType: RECEIPT_ENTRY_TYPE, data: receipt } as never,
+		]);
+		expect(state.active).toBe(true);
+		expect(state.seats).toEqual(["a", "b"]);
+		expect(state.progress).toBeUndefined();
+		expect(state.playbook).toBeUndefined();
+		expect(state.receipts).toHaveLength(1);
+	});
+});
+
+describe("compaction", () => {
+	it("keeps the state and segment, and sends the model a hidden reminder of the playbook and step", async () => {
+		const h = createHarness();
+		await h.fire("session_start");
+		await h.command("poteto", "x");
+		await h.read(PLAYBOOK);
+		await h.todo(todo(3, 7));
+		h.sentMessages.length = 0;
+		await h.fire("session_compact", { type: "session_compact", fromExtension: false });
+		expect(h.sentMessages).toHaveLength(1);
+		const { message, options } = h.sentMessages[0]!;
+		expect(message.display).toBe(false);
+		expect(options).toEqual({ deliverAs: "nextTurn" });
+		expect(message.content).toContain("feature");
+		expect(message.content).toContain("3/7");
+		expect(message.content).toContain("step 4");
+		expect(h.segment()).toBe("pstack · feature · 3/7");
+		expect(await h.status()).toContain("feature");
+
+		const rebuilt = createHarness({ entries: h.entries });
+		await rebuilt.fire("session_start");
+		expect(rebuilt.segment()).toBe("pstack · feature · 3/7");
+	});
+});
