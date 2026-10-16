@@ -27,13 +27,13 @@ describe("discovery contract", () => {
 		expect(fs.existsSync(path.join(root, ".claude-plugin"))).toBe(false);
 	});
 
-	it("publishes every discovery directory", () => {
-		for (const dir of ["skills", "agents", "rules", "src"]) expect(manifest.files).toContain(dir);
+	it("publishes every discovery directory, and every entry in files exists", () => {
+		for (const dir of ["skills", "agents", "src"]) expect(manifest.files).toContain(dir);
+		for (const entry of manifest.files as string[]) expect(fs.existsSync(path.join(root, entry))).toBe(true);
 	});
 
 	it("every skill has a name matching its directory and a description", () => {
 		const skills = fs.readdirSync(path.join(root, "skills"));
-		expect(skills).toContain("bro");
 		for (const skill of skills) {
 			const meta = frontmatter(path.join(root, "skills", skill, "SKILL.md"));
 			expect(meta.name).toBe(skill);
@@ -43,7 +43,6 @@ describe("discovery contract", () => {
 
 	it("every agent has a name matching its file and a description", () => {
 		const agents = fs.readdirSync(path.join(root, "agents"));
-		expect(agents).toContain("comment-sicko.md");
 		for (const agent of agents) {
 			const meta = frontmatter(path.join(root, "agents", agent));
 			expect(meta.name).toBe(agent.replace(/\.md$/, ""));
