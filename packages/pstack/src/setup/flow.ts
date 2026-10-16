@@ -29,8 +29,9 @@ function roleTitle(role: ModelRole): string {
 }
 
 async function chooseStart(ctx: SetupContext, deps: SetupDeps, choices: readonly ModelChoice[]): Promise<Assignment | undefined> {
+	const current = readAssignment(deps.settings);
 	const presets = PRESET_NAMES.flatMap(name => {
-		const assignment = presetAssignment(name, choices);
+		const assignment = presetAssignment(name, choices, current);
 		return assignment ? [{ name, assignment }] : [];
 	});
 	const picked = await ctx.ui.select("pstack setup: start from a preset", [
@@ -38,7 +39,7 @@ async function chooseStart(ctx: SetupContext, deps: SetupDeps, choices: readonly
 		{ label: KEEP_CURRENT, description: "Edit the pstack roles already in your config." },
 		CANCEL,
 	]);
-	if (picked === KEEP_CURRENT) return readAssignment(deps.settings);
+	if (picked === KEEP_CURRENT) return current;
 	return presets.find(({ name }) => name === picked)?.assignment;
 }
 
@@ -116,13 +117,13 @@ export async function runSetup(ctx: SetupContext, deps: SetupDeps, notify: Setup
 	}
 }
 
-/** `/pstack preset <name>`: fill every role from the preset, then validate, probe and write exactly as setup's Save does. */
+/** `/pstack preset <name>`: apply the preset (a delta on your roles for claude-codex), then validate, probe and write exactly as setup's Save does. */
 export async function runPreset(ctx: SetupContext, deps: SetupDeps, notify: SetupNotify, name: string): Promise<void> {
 	if (!ctx.hasUI) return notify("warning", "/pstack preset is interactive and needs a UI session.");
 	const preset = PRESET_NAMES.find(candidate => candidate === name);
 	if (!preset) return notify("warning", `Unknown preset "${name}". Presets: ${PRESET_NAMES.join(", ")}.`);
 	const choices = listChoices(ctx.models);
-	const assignment = presetAssignment(preset, choices);
+	const assignment = presetAssignment(preset, choices, readAssignment(deps.settings));
 	if (!assignment) return notify("error", `The OMP registry does not serve the models the ${preset} preset needs. Log in to the missing provider, or run /pstack setup.`);
 	await save(ctx, deps, notify, choices, assignment);
 }

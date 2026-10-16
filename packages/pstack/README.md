@@ -98,7 +98,7 @@ Running it again with the same choices changes nothing. Presets pick tiers from 
 
 ## Presets and doctor
 
-`/pstack preset <name>` fills every role from the preset (`claude-only`, `claude-codex` or `lean`) and then saves it exactly as setup's Save does: seat and single-vendor rules, one probe turn per model (nothing is written when one fails), the isolation question, a write limited to `pstack-*` roles, readback and restore. `claude-codex` verifies Codex first, adds a Codex seat and moves `pstack-judge` to Codex. It does not change your other roles.
+`/pstack preset <name>` applies a preset (`claude-only`, `claude-codex` or `lean`) and then saves it exactly as setup's Save does: seat and single-vendor rules, one probe turn per model (nothing is written when one fails), the isolation question, a write limited to `pstack-*` roles, readback and restore. The presets fill only the seats they need: `claude-only` fills the work roles and seats A to C with the top, mid and cheap Claude models, `lean` fills seats A and B, and unfilled seats stay unset. `claude-codex` is `claude-only` plus one Codex seat (seat D) with `pstack-judge` on Codex. When you already have `pstack-*` roles, `claude-codex` is a delta: it verifies Codex first, adds one Codex seat in your first free seat (none when a seat already runs Codex), moves `pstack-judge` to Codex and keeps every other role. `claude-only` and `lean` replace the `pstack-*` roles with their own set.
 
 `/pstack doctor` is read-only and prints one line per finding at the worst severity found:
 
