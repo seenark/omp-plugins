@@ -14,7 +14,8 @@
 	],
 	"scripts": {
 		"check:types": "tsc -p tsconfig.json --noEmit",
-		"test": "bun test",
+		"test": "bun test src",
+		"sync": "bun src/sync/cli.ts",
 		"pack:check": "bun ../../scripts/check-package-files.ts"
 	},
 	"exports": {
