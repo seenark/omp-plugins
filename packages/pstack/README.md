@@ -33,6 +33,7 @@ OMP discovers `skills/`, `agents/` and `rules/` from the package root through it
 /poteto <task>   Start poteto-mode on the task and mark pstack active for this Agent Session
 /pstack          Show the run state
 /pstack status   Same
+/pstack setup    Choose models for the pstack roles
 ```
 
 pstack does nothing until you start it. `/skill:poteto-mode` has the same effect as `/poteto`: the extension detects it from the `input` event (interactive and RPC modes) and from the session's user-invoked `skill-prompt` message (every mode). Activation is idempotent. On activation the session receives a hidden note listing the configured panel seats (capped by `maxPanelSize`) and the absent ones.
@@ -74,6 +75,20 @@ After compaction the model gets a short hidden reminder of the playbook and step
 ## Status Segment
 
 pstack is a Shared Display producer (source `pstack`, needs `@codesook/omp-shared-display` 1.3.0 or newer). While active it publishes one segment, for example `pstack · feature · 3/7 · panel 3/4`: playbook, todo progress, panel attendance once a seat has run, and a dropout count when a seat fell back. It publishes a tombstone when the session is not active, and nothing is shown in a session that never started pstack.
+
+## Setup
+
+`/pstack setup` is interactive. It lists only models your OMP registry serves, offers the presets `claude-only`, `claude-codex` and `lean` (a preset appears only when the registry has the models it needs), then shows one menu per role with what the role is, when pstack uses it and what kind of model suits it. Edit the pstack roles by hand in your OMP config instead if you prefer: setup is a convenience.
+
+On Save it:
+
+- refuses two seats on the same model (the same model through another provider or thinking suffix counts as the same) and warns `diversity reduced: single vendor` when every seat shares a vendor;
+- probes each selected model with one real turn, and writes nothing if any probe fails;
+- asks before enabling `task.isolation.enabled` when it is off, and leaves it unchanged unless you confirm;
+- writes only `pstack-*` model roles, plus an empty fallback chain for every configured seat, through OMP's in-process settings API, so `default`, `commit`, `vision`, `tiny`, `advisor` and every other role stay as they are;
+- reads the config back and restores the previous one when it differs from what was written.
+
+Running it again with the same choices changes nothing. Presets pick tiers from model-id keywords (`opus`, `sonnet`, `haiku`, `mini`, ...), because OMP exposes no capability tier: adjust a role by hand when a vendor names its models differently.
 
 ## Model roles
 

@@ -16,8 +16,9 @@ import { DROPOUT_ENTRY_TYPE, watchDropouts } from "./dropouts.ts";
 import { playbookOpenedBy, progressFromTodo } from "./observe.ts";
 import { activeSeats, guardSeatSpawn } from "./panel.ts";
 import { createRunStore } from "./run-state.ts";
+import { runSetupCommand, type SetupOptions } from "./setup/index.ts";
 
-const COMMAND_USAGE = "Usage: /pstack [status]";
+const COMMAND_USAGE = "Usage: /pstack [status|setup]";
 
 function notify(pi: ExtensionAPI, ctx: ExtensionContext, level: "info" | "warning" | "error", message: string): void {
 	if (ctx.hasUI) ctx.ui.notify(message, level);
@@ -27,6 +28,8 @@ function notify(pi: ExtensionAPI, ctx: ExtensionContext, level: "info" | "warnin
 export interface PstackExtensionOptions extends Pick<BehaviorStoreOptions, "configPath" | "homeDirectory"> {
 	/** Directory of the vendored poteto-mode skill. Tests point it at a fixture. */
 	skillDirectory?: string;
+	/** Seams for `/pstack setup`: tests inject a fake settings writer and model probe. */
+	setup?: SetupOptions;
 }
 
 export default function pstackExtension(pi: ExtensionAPI, options: PstackExtensionOptions = {}): void {
@@ -130,6 +133,7 @@ export default function pstackExtension(pi: ExtensionAPI, options: PstackExtensi
 		handler: async (args, ctx) => {
 			const subcommand = args.trim().split(/\s+/)[0] ?? "";
 			if (subcommand === "" || subcommand === "status") notify(pi, ctx, "info", statusReport(runs.state()));
+			else if (subcommand === "setup") await runSetupCommand(pi, ctx, (level, message) => notify(pi, ctx, level, message), options.setup);
 			else notify(pi, ctx, "warning", `Unknown /pstack subcommand. ${COMMAND_USAGE}`);
 		},
 	});
