@@ -59,12 +59,5 @@ export const core: Group = {
 				"Upstream README link": /\.\.\/\.\.\/README\.md/,
 			},
 		},
-		{
-			id: "guards",
-			owner: "omp-plugins-4nv.12",
-			patterns: {
-				"check-plan": /check-plan/,
-			},
-		},
 	],
 };
