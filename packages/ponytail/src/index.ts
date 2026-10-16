@@ -6,6 +6,7 @@ import type {
 } from "@oh-my-pi/pi-coding-agent";
 import { CODESOOK_OMP_CONFIG_CHANGED, isRecord } from "@codesook/omp-shared-display/config-store";
 import { connectSharedDisplay } from "@codesook/omp-shared-display/client";
+import { onInstructionModeSuspension } from "@codesook/omp-shared-display/instruction-mode";
 import {
 	envDefaultMode,
 	loadPonytailConfig,
@@ -165,6 +166,15 @@ export default function ponytailExtension(pi: ExtensionAPI, options: PonytailExt
 		notify(pi, ctx, "info", `Ponytail mode set to ${mode}.`);
 	};
 
+	// pstack asks for Mode Level off for the rest of the session. Recorded as a session entry like /ponytail off, so a later rehydrate keeps it; the Root Plugin Configuration is never written.
+	const unsubscribeSuspension = onInstructionModeSuspension(pi.events, "ponytail", () => {
+		if (disposed || (sessionModeExplicit && mode === "off")) return;
+		sessionModeExplicit = true;
+		mode = "off";
+		pi.appendEntry(PONYTAIL_SESSION_ENTRY, { mode });
+		if (activeContext) void syncDisplay(activeContext);
+	});
+
 	pi.on("session_start", async (_event, ctx) => {
 		await rehydrateSession(ctx, true);
 	});
@@ -196,6 +206,7 @@ export default function ponytailExtension(pi: ExtensionAPI, options: PonytailExt
 		syncVersion += 1;
 		activeContext = undefined;
 		unsubscribeConfig?.();
+		unsubscribeSuspension();
 		ctx.ui.setStatus("ponytail", undefined);
 		publisher.publish(null);
 		publisher.dispose();

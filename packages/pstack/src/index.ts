@@ -1,5 +1,6 @@
 import type { ExtensionAPI, ExtensionContext } from "@oh-my-pi/pi-coding-agent";
 import { connectSharedDisplay } from "@codesook/omp-shared-display/client";
+import { suspendInstructionModes, type SuspendableInstructionMode } from "@codesook/omp-shared-display/instruction-mode";
 import {
 	buildPotetoPrompt,
 	DEFAULT_POTETO_DIRECTORY,
@@ -10,15 +11,17 @@ import {
 	taskOfSkillInput,
 	taskOfSkillPrompt,
 } from "./activation.ts";
-import { createBehaviorStore, type BehaviorStoreOptions } from "./behavior.ts";
+import { blocksEnabled, createBehaviorStore, type BehaviorStoreOptions } from "./behavior.ts";
 import { reminderText, segmentText, statusReport } from "./display.ts";
+import { blockingFinding, spawnFinding, toolCallResult } from "./guards/blocking.ts";
 import { DROPOUT_ENTRY_TYPE, watchDropouts } from "./dropouts.ts";
 import { playbookOpenedBy, progressFromTodo } from "./observe.ts";
 import { activeSeats, guardSeatSpawn } from "./panel.ts";
 import { createRunStore } from "./run-state.ts";
+import { runSetupCommand, type SetupOptions } from "./setup/index.ts";
 import { createWarningGuards } from "./warn-guards.ts";
 
-const COMMAND_USAGE = "Usage: /pstack [status]";
+const COMMAND_USAGE = "Usage: /pstack [status|setup]";
 
 function notify(pi: ExtensionAPI, ctx: ExtensionContext, level: "info" | "warning" | "error", message: string): void {
 	if (ctx.hasUI) ctx.ui.notify(message, level);
@@ -28,6 +31,8 @@ function notify(pi: ExtensionAPI, ctx: ExtensionContext, level: "info" | "warnin
 export interface PstackExtensionOptions extends Pick<BehaviorStoreOptions, "configPath" | "homeDirectory"> {
 	/** Directory of the vendored poteto-mode skill. Tests point it at a fixture. */
 	skillDirectory?: string;
+	/** Seams for `/pstack setup`: tests inject a fake settings writer and model probe. */
+	setup?: SetupOptions;
 }
 
 export default function pstackExtension(pi: ExtensionAPI, options: PstackExtensionOptions = {}): void {
@@ -37,8 +42,15 @@ export default function pstackExtension(pi: ExtensionAPI, options: PstackExtensi
 	let stopDropouts: (() => void) | undefined;
 	let disposed = false;
 
-	runs.subscribe(state => {
+	runs.subscribe((state, change) => {
 		if (disposed) return;
+		if (state.active && (change === "activated" || change === "restored")) {
+			const { suspendCaveman, suspendPonytail } = behavior.current();
+			const modes: SuspendableInstructionMode[] = [];
+			if (suspendCaveman) modes.push("caveman");
+			if (suspendPonytail) modes.push("ponytail");
+			suspendInstructionModes(pi.events, modes);
+		}
 		const text = segmentText(state);
 		publisher.publish(text === undefined ? null : { frames: [[text]] });
 	});
@@ -81,7 +93,24 @@ export default function pstackExtension(pi: ExtensionAPI, options: PstackExtensi
 		behavior.dispose();
 		publisher.dispose();
 	});
-	pi.on("before_subagent_spawn", (event, ctx) => guardSeatSpawn(event, ctx));
+	pi.on("before_subagent_spawn", (event, ctx) => {
+		const finding = spawnFinding(ctx.agent.name);
+		if (finding && blocksEnabled(behavior.current().guardStrictness)) return { block: true, reason: finding.reason };
+		return guardSeatSpawn(event, ctx);
+	});
+
+	pi.on("tool_call", async (event, ctx) => {
+		const strictness = behavior.current().guardStrictness;
+		if (strictness === "off") return undefined;
+		const finding = await blockingFinding({
+			toolName: event.toolName,
+			input: event.input,
+			agentName: ctx.agent.name,
+			runActive: runs.state().active,
+			cwd: ctx.cwd,
+		});
+		return toolCallResult(finding, strictness);
+	});
 
 	// Interactive and RPC modes emit `input` before skill dispatch; print and ACP modes only reach the skill-prompt message.
 	pi.on("input", (event, ctx) => {
@@ -138,6 +167,7 @@ export default function pstackExtension(pi: ExtensionAPI, options: PstackExtensi
 		handler: async (args, ctx) => {
 			const subcommand = args.trim().split(/\s+/)[0] ?? "";
 			if (subcommand === "" || subcommand === "status") notify(pi, ctx, "info", statusReport(runs.state()));
+			else if (subcommand === "setup") await runSetupCommand(pi, ctx, (level, message) => notify(pi, ctx, level, message), options.setup);
 			else notify(pi, ctx, "warning", `Unknown /pstack subcommand. ${COMMAND_USAGE}`);
 		},
 	});

@@ -33,6 +33,7 @@ OMP discovers `skills/`, `agents/` and `rules/` from the package root through it
 /poteto <task>   Start poteto-mode on the task and mark pstack active for this Agent Session
 /pstack          Show the run state
 /pstack status   Same
+/pstack setup    Choose models for the pstack roles
 ```
 
 pstack does nothing until you start it. `/skill:poteto-mode` has the same effect as `/poteto`: the extension detects it from the `input` event (interactive and RPC modes) and from the session's user-invoked `skill-prompt` message (every mode). Activation is idempotent. On activation the session receives a hidden note listing the configured panel seats (capped by `maxPanelSize`) and the absent ones.
@@ -75,6 +76,24 @@ After compaction the model gets a short hidden reminder of the playbook and step
 
 pstack is a Shared Display producer (source `pstack`, needs `@codesook/omp-shared-display` 1.3.0 or newer). While active it publishes one segment, for example `pstack · feature · 3/7 · panel 3/4`: playbook, todo progress, panel attendance once a seat has run, and a dropout count when a seat fell back. It publishes a tombstone when the session is not active, and nothing is shown in a session that never started pstack.
 
+## Instruction Mode suspension
+
+When pstack activates, and again whenever an active session is restored (resume, `/new` into an active branch, branch or tree navigation), it emits one suspension message on `codesook/instruction-mode-suspension/v1` (`{ protocol: 1, source: "pstack", modes: ["caveman", "ponytail"] }`, helpers in `@codesook/omp-shared-display/instruction-mode`). Caveman and Ponytail react by applying a Session Override at Mode Level `off` for that Agent Session. The Root Plugin Configuration is never written, a parallel session keeps its Mode Levels, and the user's own `/caveman` and `/ponytail` commands still switch a mode back on. `suspendCaveman` and `suspendPonytail` (below) drop a mode from the message; both default to on.
+
+## Setup
+
+`/pstack setup` is interactive. It lists only models your OMP registry serves, offers the presets `claude-only`, `claude-codex` and `lean` (a preset appears only when the registry has the models it needs), then shows one menu per role with what the role is, when pstack uses it and what kind of model suits it. Edit the pstack roles by hand in your OMP config instead if you prefer: setup is a convenience.
+
+On Save it:
+
+- refuses two seats on the same model (the same model through another provider or thinking suffix counts as the same) and warns `diversity reduced: single vendor` when every seat shares a vendor;
+- probes each selected model with one real turn, and writes nothing if any probe fails;
+- asks before enabling `task.isolation.enabled` when it is off, and leaves it unchanged unless you confirm;
+- writes only `pstack-*` model roles, plus an empty fallback chain for every configured seat, through OMP's in-process settings API, so `default`, `commit`, `vision`, `tiny`, `advisor` and every other role stay as they are;
+- reads the config back and restores the previous one when it differs from what was written.
+
+Running it again with the same choices changes nothing. Presets pick tiers from model-id keywords (`opus`, `sonnet`, `haiku`, `mini`, ...), because OMP exposes no capability tier: adjust a role by hand when a vendor names its models differently.
+
 ## Model roles
 
 Every lane resolves its model through `pstack-*` model roles in your OMP config. The table lives in `src/roles.ts` and generates the `agents/pstack-*.md` files; run `bun run generate:agents` after editing it. `bun test` fails when the files drift from the table.
@@ -101,6 +120,18 @@ Work-role agents list the pstack role, then the built-in role, so OMP skips an u
 | `suspendPonytail` | `true` | boolean |
 | `maxPanelSize` | `5` | integer 1 to 5 |
 | `guardStrictness` | `block-and-warn` | `block-and-warn`, `warn-only`, `off` |
+
+## Guards
+
+A `tool_call` guard stops a damaging action before it runs and returns a reason that names the right tool; the agent continues its turn. Guards live in `src/guards/` and apply while pstack is active and, always, to pstack lanes.
+
+| Guard | Stops |
+| --- | --- |
+| In-place edit | `sed -i` and `perl -i` (any spelling, inside `&&` chains, `bash -c`, `xargs`, `find -exec`) on repository files. Reads, `sed -n` and files outside the repository pass. |
+| Read-only lane | Every mutating tool call from a read-only lane; `write` only to `local://`. |
+| Lane spawn | A lane starting subagents, through the `task` tool or `before_subagent_spawn`. |
+
+`guardStrictness` sets the response: `block-and-warn` blocks, `warn-only` lets the call run with a warning, `off` disables the guards.
 
 ## Warnings
 
@@ -133,6 +164,8 @@ Adaptations are code, in `src/sync/rules/`, one file per group so tickets add ru
 A group exports any of `rules`, `exclusions`, `forks`, `renames`, `moves` and `terms`. A move (`from`, `to`, `reason`) places a vendored file at another package-relative path before rules run, so rules and links use the new path; a move whose source is missing fails the sync. Removing or moving an entry does not delete the file an earlier sync wrote: delete it by hand. Rules apply in table order (renames, then groups in `rules/index.ts` order) and each needs a `rationale`. A rule that matches text only because it comes too late (shadowed by an earlier rule) fails the sync. A fork entry (`path`, `kind`, `reason`, `since`) keeps a path from being overwritten: `patched` forks 3-way merge Upstream changes into our edits and leave conflict markers, `rewritten` forks keep ours and report any Upstream change as a conflict.
 
 Fixed by the engine rather than by rules: principle skills get `hide: true` (still loadable with `/skill:principle-...`); the `icon` and `color` frontmatter of Cursor's mode UI is stripped; every skill and agent `name` is set to its directory or file name.
+
+The dispatch group records three forks, each with its reason in `rules/dispatch.ts`. `skills/poteto-mode/references/provider-dispatch.md` is rewritten: Upstream's provider runner (other vendors' CLIs) is Excluded, Upstream at this pin has no such file, and every workflow skill points at this one for the real model roles, panel seats, dropout policy and isolation. `agents/poteto-agent.md` is patched to run on `pstack-build` with `@task` as fallback and to autoload the poteto-mode skill. `skills/setup-pstack/SKILL.md` is rewritten to point at the `/pstack setup` command. A rewritten fork that Upstream never had is not a conflict; one Upstream removed still is.
 
 ## Syncing
 

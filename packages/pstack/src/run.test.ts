@@ -4,6 +4,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { isRecord } from "@codesook/omp-shared-display/config-store";
 import { SHARED_DISPLAY_CHANNEL, type FrameSequence } from "@codesook/omp-shared-display/client";
+import { INSTRUCTION_MODE_SUSPENSION_CHANNEL } from "@codesook/omp-shared-display/instruction-mode";
 import pstackExtension from "./index.ts";
 import { INACTIVE_RUN, RECEIPT_ENTRY_TYPE, RUN_ENTRY_TYPE, rebuildRunState } from "./run-state.ts";
 
@@ -32,7 +33,7 @@ function skillFixture(): string {
 const SEAT_MODELS: Record<string, string> = { "@pstack-panel-a": "anthropic/a", "@pstack-panel-b": "openai/b", "@pstack-panel-c": "google/c" };
 
 /** `entries` is the session branch: pass the same array to a second harness to model resuming the session. */
-function createHarness(options: { entries?: SessionEntry[]; idle?: boolean; maxPanelSize?: number; home?: string } = {}) {
+function createHarness(options: { entries?: SessionEntry[]; idle?: boolean; maxPanelSize?: number; behavior?: Record<string, unknown>; home?: string } = {}) {
 	const handlers = new Map<string, Handler>();
 	const commands = new Map<string, Command>();
 	const bus = new Map<string, Array<(data: unknown) => void>>();
@@ -41,6 +42,7 @@ function createHarness(options: { entries?: SessionEntry[]; idle?: boolean; maxP
 	const sentMessages: Array<{ message: { customType?: string; content?: string; display?: boolean }; options?: unknown }> = [];
 	const sentPrompts: Array<{ text: string; options?: unknown }> = [];
 	const snapshots: Snapshot[] = [];
+	const suspensions: Array<{ protocol: number; source: string; modes: string[] }> = [];
 	const events = {
 		on(channel: string, handler: (data: unknown) => void) {
 			bus.set(channel, [...(bus.get(channel) ?? []), handler]);
@@ -48,6 +50,7 @@ function createHarness(options: { entries?: SessionEntry[]; idle?: boolean; maxP
 		},
 		emit(channel: string, data: unknown) {
 			if (channel === SHARED_DISPLAY_CHANNEL && isRecord(data) && data.kind === "snapshot" && data.source === "pstack") snapshots.push(data as Snapshot);
+			if (channel === INSTRUCTION_MODE_SUSPENSION_CHANNEL) suspensions.push(data as (typeof suspensions)[number]);
 			for (const handler of bus.get(channel) ?? []) handler(data);
 			// A running host answers a producer's ready message, so every publish becomes a snapshot.
 			if (isRecord(data) && data.kind === "ready" && data.source === "pstack") events.emit(SHARED_DISPLAY_CHANNEL, { protocol: 1, kind: "host", epoch: "e1", active: true });
@@ -71,10 +74,11 @@ function createHarness(options: { entries?: SessionEntry[]; idle?: boolean; maxP
 		models: { resolve: (spec: string) => (SEAT_MODELS[spec] ? { provider: SEAT_MODELS[spec]!.split("/")[0], id: SEAT_MODELS[spec]!.split("/")[1] } : undefined) },
 	};
 	const home = options.home ?? tempDirectory();
-	if (options.maxPanelSize !== undefined) {
+	const pstackBehavior = { ...(options.maxPanelSize === undefined ? {} : { maxPanelSize: options.maxPanelSize }), ...options.behavior };
+	if (Object.keys(pstackBehavior).length > 0) {
 		const file = path.join(home, ".config", "codesook-omp", "config.json");
 		fs.mkdirSync(path.dirname(file), { recursive: true });
-		fs.writeFileSync(file, JSON.stringify({ version: 1, display: {}, behavior: { pstack: { maxPanelSize: options.maxPanelSize } } }));
+		fs.writeFileSync(file, JSON.stringify({ version: 1, display: {}, behavior: { pstack: pstackBehavior } }));
 	}
 	pstackExtension(pi as never, { homeDirectory: home, skillDirectory: skillFixture() });
 	const fire = (name: string, event: unknown = {}) => handlers.get(name)!(event, ctx);
@@ -85,6 +89,7 @@ function createHarness(options: { entries?: SessionEntry[]; idle?: boolean; maxP
 		sentMessages,
 		sentPrompts,
 		snapshots,
+		suspensions,
 		events,
 		fire,
 		setIdle: (value: boolean) => void (idle = value),
@@ -388,5 +393,46 @@ describe("compaction", () => {
 		const rebuilt = createHarness({ entries: h.entries });
 		await rebuilt.fire("session_start");
 		expect(rebuilt.segment()).toBe("pstack · feature · 3/7");
+	});
+});
+
+describe("Instruction Mode suspension", () => {
+	it("asks Caveman and Ponytail to switch off when pstack activates, once", async () => {
+		const h = createHarness();
+		await h.fire("session_start");
+		expect(h.suspensions).toEqual([]);
+		await h.command("poteto", "x");
+		expect(h.suspensions).toEqual([{ protocol: 1, source: "pstack", modes: ["caveman", "ponytail"] }]);
+		await h.command("poteto", "again");
+		expect(h.suspensions).toHaveLength(1);
+	});
+
+	it("re-emits when an active session is resumed or navigated, and stays silent for an inactive one", async () => {
+		const first = createHarness();
+		await first.fire("session_start");
+		await first.command("poteto", "x");
+		for (const event of ["session_start", "session_switch", "session_branch", "session_tree"]) {
+			const resumed = createHarness({ entries: first.entries });
+			await resumed.fire(event);
+			expect(resumed.suspensions).toHaveLength(1);
+		}
+		const inactive = createHarness();
+		await inactive.fire("session_start");
+		expect(inactive.suspensions).toEqual([]);
+	});
+
+	it("leaves a mode alone when its suspend toggle is off", async () => {
+		const ponytailOnly = createHarness({ behavior: { suspendCaveman: false } });
+		await ponytailOnly.fire("session_start");
+		await ponytailOnly.command("poteto", "x");
+		expect(ponytailOnly.suspensions[0]?.modes).toEqual(["ponytail"]);
+		const cavemanOnly = createHarness({ behavior: { suspendPonytail: false } });
+		await cavemanOnly.fire("session_start");
+		await cavemanOnly.command("poteto", "x");
+		expect(cavemanOnly.suspensions[0]?.modes).toEqual(["caveman"]);
+		const neither = createHarness({ behavior: { suspendCaveman: false, suspendPonytail: false } });
+		await neither.fire("session_start");
+		await neither.command("poteto", "x");
+		expect(neither.suspensions).toEqual([]);
 	});
 });

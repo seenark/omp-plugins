@@ -59,15 +59,5 @@ export const core: Group = {
 				"Upstream README link": /\.\.\/\.\.\/README\.md/,
 			},
 		},
-		{
-			id: "cursor-other",
-			owner: "unassigned",
-			patterns: {
-				Cursor: /\bCursor\b/,
-				".mdc rule": /\.mdc\b/,
-				"model slug": /\b(?:claude-(?:opus|sonnet|haiku)|gpt-\d)[\w.-]*|\bxhigh\b/,
-				"pstack-models": /pstack-models/,
-			},
-		},
 	],
 };
