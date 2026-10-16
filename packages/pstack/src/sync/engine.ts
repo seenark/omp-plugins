@@ -6,7 +6,7 @@ import { editFrontmatter } from "./frontmatter.ts";
 import { renderNotices } from "./notices.ts";
 import { IMPORT_MAP, PSTACK_LICENSE, PSTACK_MANIFEST, TEAM_KIT_LICENSE } from "./source.ts";
 import { renderTermReport, scanTerms, type TermFinding } from "./terms.ts";
-import type { Exclusion, Fork, Group, Pin, Rename, Rule, TermCategory, Tree, VFile } from "./types.ts";
+import type { Exclusion, Fork, Group, Move, Pin, Rename, Rule, TermCategory, Tree, VFile } from "./types.ts";
 
 export const PIN_FILE = "upstream.json";
 export const NOTICES_FILE = "THIRD-PARTY-NOTICES.txt";
@@ -64,6 +64,7 @@ interface Config {
 	exclusions: Exclusion[];
 	forks: Map<string, Fork>;
 	renames: Rename[];
+	moves: Move[];
 	terms: TermCategory[];
 }
 
@@ -85,6 +86,7 @@ function compile(groups: readonly Group[]): Config {
 	const renames = groups.flatMap(group => group.renames ?? []);
 	const rules = [...renames.flatMap(renameRules), ...groups.flatMap(group => group.rules ?? [])];
 	const exclusions = groups.flatMap(group => group.exclusions ?? []);
+	const moves = groups.flatMap(group => group.moves ?? []);
 	const problems: string[] = [];
 
 	const ids = new Set<string>();
@@ -96,6 +98,7 @@ function compile(groups: readonly Group[]): Config {
 	}
 	for (const exclusion of exclusions) if (exclusion.rationale.trim() === "") problems.push(`exclusion ${exclusion.path} has no rationale`);
 	for (const rename of renames) if (rename.reason.trim() === "") problems.push(`rename ${rename.from} has no reason`);
+	for (const move of moves) if (move.reason.trim() === "") problems.push(`move ${move.from} has no reason`);
 
 	const forks = new Map<string, Fork>();
 	for (const fork of groups.flatMap(group => group.forks ?? [])) {
@@ -104,7 +107,7 @@ function compile(groups: readonly Group[]): Config {
 		forks.set(fork.path, fork);
 	}
 	if (problems.length > 0) throw new SyncConfigError(problems.join("\n"));
-	return { rules, exclusions, forks, renames, terms: groups.flatMap(group => group.terms ?? []) };
+	return { rules, exclusions, forks, renames, moves, terms: groups.flatMap(group => group.terms ?? []) };
 }
 
 function importPath(upstreamPath: string): string | undefined {
@@ -150,6 +153,14 @@ function build(upstream: Tree, config: Config): BuildResult {
 	for (const [upstreamPath, file] of upstream) {
 		const mapped = importPath(upstreamPath);
 		if (mapped !== undefined && !excluded.some(glob => glob.match(mapped))) files.set(mapped, file);
+	}
+
+	for (const { from, to } of config.moves) {
+		const file = files.get(from);
+		if (file === undefined) throw new SyncConfigError(`move ${from} matches no file`);
+		if (files.has(to)) throw new SyncConfigError(`move ${from} to ${to} collides with an existing file`);
+		files.delete(from);
+		files.set(to, file);
 	}
 
 	for (const { from, to } of config.renames) {

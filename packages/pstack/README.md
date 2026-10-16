@@ -30,12 +30,51 @@ OMP discovers `skills/`, `agents/` and `rules/` from the package root through it
 ## Commands
 
 ```text
-/pstack          Report the run state
+/poteto <task>   Start poteto-mode on the task and mark pstack active for this Agent Session
+/pstack          Show the run state
 /pstack status   Same
 /pstack setup    Choose models for the pstack roles
 ```
 
-pstack is currently always inactive: activation arrives with later work.
+pstack does nothing until you start it. `/skill:poteto-mode` has the same effect as `/poteto`: the extension detects it from the `input` event (interactive and RPC modes) and from the session's user-invoked `skill-prompt` message (every mode). Activation is idempotent. On activation the session receives a hidden note listing the configured panel seats (capped by `maxPanelSize`) and the absent ones.
+
+## Run state
+
+The run state is the contract that suspension, guards, warnings and doctor read. It lives in `src/run-state.ts`.
+
+```ts
+interface RunState {
+	active: boolean;
+	task?: string;
+	playbook?: string; // kebab-case title, e.g. "feature"
+	progress?: { done: number; total: number; current?: string };
+	seats: readonly PanelSeat[]; // seats that had a model at activation
+	receipts: readonly PanelReceipt[]; // finished seat runs; only "completed" counts as attendance
+	dropouts: readonly Dropout[]; // seat runs that fell back to another model
+}
+interface RunReader {
+	state(): RunState;
+	subscribe(listener: (state: RunState, change: "activated" | "restored" | "updated") => void): () => void;
+}
+```
+
+Consumers take a `RunReader`. `panelAttendance(state)` gives attended seats out of configured seats. A listener sees `restored` after every rebuild, so a consumer that must act on an active session at resume (re-emitting the Instruction Mode suspension) reacts to `restored` as well as `activated`.
+
+State is stored as custom session entries and rebuilt by folding the session branch (`rebuildRunState`) on `session_start`, `session_switch`, `session_branch` and `session_tree`. Compaction keeps custom entries, so it does not touch the state. Live updates and the rebuild share one reducer, `applyEntry`, so they cannot drift. Entries before activation and malformed entries are ignored.
+
+| Entry type | Data | Written when |
+| --- | --- | --- |
+| `dev.codesook.pstack.run` | `{ kind: "activated", task?, seats }` | pstack starts |
+| `dev.codesook.pstack.run` | `{ kind: "playbook", playbook }` | the model reads `poteto-mode/playbooks/<title>.md` (`opening-a-pr`, which every playbook ends with, never replaces the playbook) |
+| `dev.codesook.pstack.run` | `{ kind: "progress", done, total, current? }` | a successful `todo` call; abandoned items count as done |
+| `dev.codesook.pstack.receipt` | `{ seat, agent, id, status }` | a panel seat's run ends while pstack is active |
+| `dev.codesook.pstack.dropout` | see Model roles | a seat's run falls back to another model, active or not |
+
+After compaction the model gets a short hidden reminder of the playbook and step (`dev.codesook.pstack.reminder`, delivered with the next turn).
+
+## Status Segment
+
+pstack is a Shared Display producer (source `pstack`, needs `@codesook/omp-shared-display` 1.3.0 or newer). While active it publishes one segment, for example `pstack · feature · 3/7 · panel 3/4`: playbook, todo progress, panel attendance once a seat has run, and a dropout count when a seat fell back. It publishes a tombstone when the session is not active, and nothing is shown in a session that never started pstack.
 
 ## Setup
 
@@ -90,9 +129,9 @@ Adaptations are code, in `src/sync/rules/`, one file per group so tickets add ru
 | --- | --- |
 | `collisions.ts` | Skill renames (`tdd` to `pstack-tdd`, `teach` to `pstack-teach`); the engine moves the skill and derives the rules that rewrite references to it |
 | `core.ts` | Excluded parts (`make-bot-ui`; `automations` and `docs/guide` are never imported), the references they leave dangling, residual terms nobody owns |
-| `dispatch.ts`, `pr.ts`, `sessions.ts` | Cursor primitives replaced by later tickets: subagent dispatch, PR workflows, session paths and drivers |
+| `dispatch.ts`, `pr.ts`, `sessions.ts` | Cursor primitives replaced by later tickets: subagent dispatch, PR workflows, session paths, goal mode, drivers, and the `/skill:<name>` form of slash commands (the skill list lives in `sessions.ts`; a test fails when `skills/` outgrows it) |
 
-A group exports any of `rules`, `exclusions`, `forks`, `renames` and `terms`. Rules apply in table order (renames, then groups in `rules/index.ts` order) and each needs a `rationale`. A rule that matches text only because it comes too late (shadowed by an earlier rule) fails the sync. A fork entry (`path`, `kind`, `reason`, `since`) keeps a path from being overwritten: `patched` forks 3-way merge Upstream changes into our edits and leave conflict markers, `rewritten` forks keep ours and report any Upstream change as a conflict.
+A group exports any of `rules`, `exclusions`, `forks`, `renames`, `moves` and `terms`. A move (`from`, `to`, `reason`) places a vendored file at another package-relative path before rules run, so rules and links use the new path; a move whose source is missing fails the sync. Removing or moving an entry does not delete the file an earlier sync wrote: delete it by hand. Rules apply in table order (renames, then groups in `rules/index.ts` order) and each needs a `rationale`. A rule that matches text only because it comes too late (shadowed by an earlier rule) fails the sync. A fork entry (`path`, `kind`, `reason`, `since`) keeps a path from being overwritten: `patched` forks 3-way merge Upstream changes into our edits and leave conflict markers, `rewritten` forks keep ours and report any Upstream change as a conflict.
 
 Fixed by the engine rather than by rules: principle skills get `hide: true` (still loadable with `/skill:principle-...`); the `icon` and `color` frontmatter of Cursor's mode UI is stripped; every skill and agent `name` is set to its directory or file name.
 

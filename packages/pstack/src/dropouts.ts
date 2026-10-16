@@ -20,17 +20,43 @@ export interface Dropout {
 	reason?: string;
 }
 
+/** A panel seat's run reached a terminal state, whatever model it ran on. */
+export interface SeatSettled {
+	seat: PanelSeat;
+	agent: string;
+	id: string;
+	status: "completed" | "failed" | "aborted";
+}
+
 interface EventSource {
 	on(channel: string, handler: (data: unknown) => void): () => void;
 }
 
-/** Observe child fallbacks on the parent bus and report those that happen inside a panel seat's run. */
-export function watchDropouts(events: EventSource, record: (dropout: Dropout) => void): () => void {
+const SETTLED_STATUSES: readonly string[] = ["completed", "failed", "aborted"];
+
+/**
+ * Observe child runs on the parent bus: report a fallback that happens inside a panel seat's run as a dropout,
+ * and each seat run's end through `settled`.
+ */
+export function watchDropouts(
+	events: EventSource,
+	record: (dropout: Dropout) => void,
+	settled?: (seat: SeatSettled) => void,
+): () => void {
 	const agentById = new Map<string, string>();
 	const offLifecycle = events.on(SUBAGENT_LIFECYCLE_CHANNEL, data => {
 		if (!isRecord(data) || typeof data.id !== "string") return;
-		if (data.status === "started" && typeof data.agent === "string") agentById.set(data.id, data.agent);
-		else if (data.status !== "started") agentById.delete(data.id);
+		if (data.status === "started" && typeof data.agent === "string") {
+			agentById.set(data.id, data.agent);
+			return;
+		}
+		if (data.status === "started") return;
+		const agent = agentById.get(data.id);
+		agentById.delete(data.id);
+		const role = seatOfAgent(agent);
+		if (agent && role && typeof data.status === "string" && SETTLED_STATUSES.includes(data.status)) {
+			settled?.({ seat: role.seat, agent, id: data.id, status: data.status as SeatSettled["status"] });
+		}
 	});
 	const offEvent = events.on(SUBAGENT_EVENT_CHANNEL, data => {
 		if (!isRecord(data) || typeof data.id !== "string" || !isRecord(data.event)) return;

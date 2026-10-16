@@ -3,9 +3,13 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { NOTICES_FILE, PIN_FILE, runSync, SyncConfigError, type SyncOptions } from "./engine.ts";
-import { groups as shippedGroups } from "./rules/index.ts";
+import { collisions } from "./rules/collisions.ts";
+import { sessions } from "./rules/sessions.ts";
 import { loadTree } from "./source.ts";
 import type { Group } from "./types.ts";
+
+/** Fixture trees lack the files the other groups move or fork, so these tests run the collision renames and the slash-form rewrite alone. */
+const shippedGroups = [collisions, sessions];
 
 const temporary: string[] = [];
 afterEach(() => {
@@ -206,7 +210,7 @@ describe("collision renames", () => {
 		expect(read(packageRoot, "skills/pstack-tdd/SKILL.md")).toContain("name: pstack-tdd\n");
 		expect(read(packageRoot, "skills/pstack-teach/SKILL.md")).toContain("name: pstack-teach\n");
 		expect(read(packageRoot, "skills/poteto-mode/playbooks/bug-fix.md")).toBe(
-			"See the **pstack-tdd** skill.\nTry `/pstack-tdd` or [tdd](../../pstack-tdd/SKILL.md) and /pstack-teach.\nA tddish word and /tdds stay.\n",
+			"See the **pstack-tdd** skill.\nTry `/skill:pstack-tdd` or [tdd](../../pstack-tdd/SKILL.md) and /skill:pstack-teach.\nA tddish word and /tdds stay.\n",
 		);
 	});
 
