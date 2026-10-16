@@ -72,7 +72,7 @@ State is stored as custom session entries and rebuilt by folding the session bra
 | `dev.codesook.pstack.receipt` | `{ seat, agent, id, status }` | a panel seat's run ends while pstack is active |
 | `dev.codesook.pstack.dropout` | see Model roles | a seat's run falls back to another model, active or not |
 
-After compaction the model gets a short hidden reminder of the playbook and step (`dev.codesook.pstack.reminder`, delivered with the next turn).
+After compaction the model gets a short hidden reminder of the playbook and step (`dev.codesook.pstack.reminder`) and the seat roster again, because a summary can drop the models each panel verdict must name. Both are delivered with the next turn.
 
 ## Status Segment
 
