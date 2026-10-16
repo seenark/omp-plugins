@@ -1,6 +1,4 @@
-import * as fs from "node:fs";
-import * as path from "node:path";
-import type { Group, Rule } from "../types.ts";
+import type { Group, Rule, SkillPattern } from "../types.ts";
 
 /**
  * Session paths, goal mode, CLI/UI drivers, other cursor-team-kit skills, and
@@ -13,19 +11,14 @@ const BROWSER_TOOL = "the OMP `browser` tool (the `browser` global in `eval`, do
 const GOAL_MODE = "OMP goal mode (an extension cannot start it, so tell the user to run `/goal set <objective>`)";
 
 /**
- * Every skill pstack ships, by the name its slash command takes, read from the generated `skills/` directory.
- * A skill Upstream adds is rewritten from the second sync on: the first run writes it, the next run sees it.
+ * `/name` outside a path, URL or longer word, for every skill this sync run produces (after exclusions and renames),
+ * so a skill Upstream adds is rewritten in the run that adds it. The placeholder forms `/verify-<app>` and
+ * `/principle-<name>` are skills too; real `principle-*` names match the placeholder pattern.
  */
-const SKILL_COMMANDS: readonly string[] = fs
-	.readdirSync(path.join(import.meta.dirname, "..", "..", "..", "skills"), { withFileTypes: true })
-	.filter(entry => entry.isDirectory() && !entry.name.startsWith("principle-"))
-	.map(entry => entry.name)
-	.sort();
-
-/** `/name` outside a path, URL or longer word; the placeholder forms `/verify-<app>` and `/principle-<name>` are skills too. */
-const SLASH_FORM = new RegExp(
-	`(?<![\\w/.:~<>-])/((?:${SKILL_COMMANDS.join("|")}|principle-(?:<name>|[a-z-]+)|verify-<app>))(?![\\w/-])`,
-);
+const slashForm: SkillPattern = skills =>
+	new RegExp(
+		`(?<![\\w/.:~<>-])/((?:${skills.filter(name => !name.startsWith("principle-")).join("|")}|principle-(?:<name>|[a-z-]+)|verify-<app>))(?![\\w/-])`,
+	);
 
 const transcripts: Rule[] = [
 	{
@@ -273,7 +266,7 @@ const slashCommands: Rule[] = [
 	{
 		id: "sessions/skill-slash-form",
 		reason: "OMP runs a skill as /skill:<name>; the bare /<name> form only works in Cursor. /poteto and /pstack are real extension commands and stay.",
-		pattern: SLASH_FORM,
+		pattern: slashForm,
 		replacement: "/skill:$1",
 	},
 ];
@@ -293,7 +286,7 @@ export const sessions: Group = {
 				"control-cli/control-ui": /control-(?:cli|ui)/,
 				"cursor-team-kit": /cursor-team-kit/,
 				"team-kit skill": /\b(?:verify-this|loop-on-ci|review-and-ship|new-branch-and-pr|run-smoke-tests|pr-review-canvas|workflow-from-chats|check-compiler-errors|weekly-review|get-pr-comments)\b/,
-				"bare /<skill> slash form": new RegExp(SLASH_FORM.source),
+				"bare /<skill> slash form": slashForm,
 			},
 		},
 	],

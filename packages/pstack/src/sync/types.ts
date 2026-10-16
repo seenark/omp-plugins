@@ -6,6 +6,9 @@ export interface VFile {
 
 export type Tree = Map<string, VFile>;
 
+/** Builds a regex from the skill names the current sync run produces (after exclusions and renames). */
+export type SkillPattern = (skills: readonly string[]) => RegExp;
+
 /** One literal or regex substitution over the text of matching files, applied in table order. */
 export interface Rule {
 	/** Unique across all groups, by convention `<group>/<name>`. */
@@ -14,8 +17,8 @@ export interface Rule {
 	reason: string;
 	/** Glob over package-relative paths. Defaults to every Markdown file. */
 	files?: string;
-	/** A string matches literally. A regex is applied globally. */
-	pattern: string | RegExp;
+	/** A string matches literally. A regex is applied globally. A function builds the regex from the names of the skills this sync run produces. */
+	pattern: string | RegExp | SkillPattern;
 	replacement: string | ((substring: string, ...args: any[]) => string);
 }
 
@@ -53,7 +56,7 @@ export interface Rename {
 /** Cursor-specific terms scanned for in the output. Patterns are keyed by a human label. */
 export interface TermCategory {
 	id: string;
-	patterns: Record<string, RegExp>;
+	patterns: Record<string, RegExp | SkillPattern>;
 }
 
 /**

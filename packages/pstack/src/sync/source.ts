@@ -83,3 +83,8 @@ export function resolveTree(revision: string, checkout?: string): Tree {
 		fs.rmSync(directory, { recursive: true, force: true });
 	}
 }
+
+/** Names of the skills in a tree keyed by package-relative path: the directories that hold a `SKILL.md`. */
+export function skillNames(paths: Iterable<string>): string[] {
+	return [...paths].flatMap(file => /^skills\/([^/]+)\/SKILL\.md$/.exec(file)?.[1] ?? []).sort();
+}

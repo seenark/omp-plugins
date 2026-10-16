@@ -112,9 +112,14 @@ describe("sessions group", () => {
 		expect(read("skills/poteto-mode/playbooks/bug-fix.md")).toContain("/goal set");
 	});
 
+	const skillFixtures = Object.fromEntries(["how", "poteto-mode", "pstack-tdd"].map(name => [`skills/${name}/SKILL.md`, withFrontmatter(`skills/${name}/SKILL.md`, "x\n")]));
+
 	it("rewrites bare skill slash commands to /skill:<name>", () => {
 		const { read } = syncFiles(
-			{ "skills/a/SKILL.md": withFrontmatter("skills/a/SKILL.md", "Use /how and `/poteto-mode`, `/pstack-tdd`, /principle-<name>, /verify-<app>. Start /poteto. Run /pstack setup.\n") },
+			{
+				...skillFixtures,
+				"skills/a/SKILL.md": withFrontmatter("skills/a/SKILL.md", "Use /how and `/poteto-mode`, `/pstack-tdd`, /principle-<name>, /verify-<app>. Start /poteto. Run /pstack setup.\n"),
+			},
 			sessions,
 		);
 		const body = read("skills/a/SKILL.md");
@@ -125,6 +130,19 @@ describe("sessions group", () => {
 		expect(body).toContain("/skill:verify-<app>");
 		expect(body).toContain("Start /poteto.");
 		expect(body).toContain("Run /pstack setup.");
+	});
+
+	it("rewrites a skill Upstream just added in the same run, and leaves an Excluded skill's slash form alone", () => {
+		const group: Group = { ...sessions, exclusions: [{ path: "skills/dropped/**", reason: "Excluded in this fixture." }] };
+		const { read } = syncFiles(
+			{
+				"skills/brand-new/SKILL.md": withFrontmatter("skills/brand-new/SKILL.md", "x\n"),
+				"skills/dropped/SKILL.md": withFrontmatter("skills/dropped/SKILL.md", "x\n"),
+				"skills/a/SKILL.md": withFrontmatter("skills/a/SKILL.md", "Run /brand-new first, then /dropped.\n"),
+			},
+			group,
+		);
+		expect(read("skills/a/SKILL.md")).toContain("Run /skill:brand-new first, then /dropped.");
 	});
 
 	it("leaves paths, URLs and non-pstack slash commands alone", () => {

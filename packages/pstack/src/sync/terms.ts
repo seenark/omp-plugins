@@ -1,3 +1,4 @@
+import { skillNames } from "./source.ts";
 import type { TermAllowance, TermCategory, Tree } from "./types.ts";
 
 export interface TermFinding {
@@ -14,12 +15,14 @@ function globally(pattern: RegExp): RegExp {
 /** Counts matches per category, term and file over the text files of `files`. Sync itself never fails on findings; `gateTerms` is what the verify gate applies. */
 export function scanTerms(files: Tree, categories: readonly TermCategory[]): TermFinding[] {
 	const findings: TermFinding[] = [];
+	const skills = skillNames(files.keys());
 	for (const [file, { data }] of [...files].sort(([a], [b]) => a.localeCompare(b))) {
 		if (data.includes(0)) continue;
 		const text = data.toString("utf8");
 		for (const category of categories) {
 			for (const [term, pattern] of Object.entries(category.patterns)) {
-				const count = text.match(globally(pattern))?.length ?? 0;
+				const resolved = typeof pattern === "function" ? pattern(skills) : pattern;
+				const count = text.match(globally(resolved))?.length ?? 0;
 				if (count > 0) findings.push({ category: category.id, file, term, count });
 			}
 		}

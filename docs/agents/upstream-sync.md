@@ -53,7 +53,7 @@ Before running the sync with a new `--rev`, diff old against new in an Upstream 
    - **Skills sync removes**: confirm the owner agreed to the removal.
    - **Remaining Cursor-specific terms** and **terms the verify gate rejects**: add or extend a rule in the group that owns the primitive (`dispatch.ts`, `pr.ts`, `sessions.ts`, `core.ts`) until the gate list is empty. Match the OMP equivalent; do not delete meaning.
    - **Rules that matched nothing**: a rule whose Upstream text vanished; remove or rewrite it.
-3. `SKILL_COMMANDS` in `src/sync/rules/sessions.ts` is read from the shipped `skills/` directory, so a skill added or renamed needs no list edit. The `/<name>` form of a new skill is rewritten to `/skill:<name>` on the next run, so re-run step 2 until it reports no drift: the sync is idempotent.
+3. The `/<name>` form of every skill in the run (Upstream skill directories after exclusions and renames) is rewritten to `/skill:<name>` by `sessions/skill-slash-form`, so a skill Upstream adds needs no list edit and one run is enough. Then re-run step 2: the sync is idempotent.
 4. Run `bun run generate:agents` if the vendored agents or role table changed, then `bun run verify` from the repo root. Its `check:sync` step re-runs the sync read-only at the pin and fails, naming each path or term, on a vendored file that differs from the sync output without a fork entry, a stale file, a conflict marker, or any Cursor-specific term not covered by an `allowances` entry. Fix the rule or fork, never the vendored file.
 5. Smoke: start `omp` with the package, run `/skill:poteto-help`, and run `/skill:<name>` for each skill the bump added.
 
