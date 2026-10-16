@@ -15,16 +15,23 @@
 	"scripts": {
 		"check:types": "tsc -p tsconfig.json --noEmit",
 		"test": "bun test",
+		"generate:agents": "bun src/generate-agents.ts",
+		"check:agents": "bun src/generate-agents.ts --check",
 		"pack:check": "bun ../../scripts/check-package-files.ts"
 	},
 	"exports": {
 		".": "./src/index.ts"
 	},
+	"dependencies": {
+		"@codesook/omp-shared-display": "^1.2.0"
+	},
 	"peerDependencies": {
 		"@oh-my-pi/pi-coding-agent": ">=18.11.1"
 	},
 	"devDependencies": {
+		"@codesook/omp-shared-display": "workspace:*",
 		"@oh-my-pi/pi-coding-agent": "18.11.1",
+		"@oh-my-pi/pi-utils": "18.11.1",
 		"bun-types": "latest",
 		"typescript": "latest"
 	},

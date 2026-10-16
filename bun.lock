@@ -151,8 +151,13 @@
     "packages/pstack": {
       "name": "@codesook/omp-pstack",
       "version": "1.0.0",
+      "dependencies": {
+        "@codesook/omp-shared-display": "^1.2.0",
+      },
       "devDependencies": {
+        "@codesook/omp-shared-display": "workspace:*",
         "@oh-my-pi/pi-coding-agent": "18.11.1",
+        "@oh-my-pi/pi-utils": "18.11.1",
         "bun-types": "latest",
         "typescript": "latest",
       },
