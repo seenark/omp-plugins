@@ -66,15 +66,5 @@ export const core: Group = {
 				"check-plan": /check-plan/,
 			},
 		},
-		{
-			id: "cursor-other",
-			owner: "unassigned",
-			patterns: {
-				Cursor: /\bCursor\b/,
-				".mdc rule": /\.mdc\b/,
-				"model slug": /\b(?:claude-(?:opus|sonnet|haiku)|gpt-\d)[\w.-]*|\bxhigh\b/,
-				"pstack-models": /pstack-models/,
-			},
-		},
 	],
 };
