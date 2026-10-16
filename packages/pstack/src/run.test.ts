@@ -6,6 +6,8 @@ import { isRecord } from "@codesook/omp-shared-display/config-store";
 import { SHARED_DISPLAY_CHANNEL, type FrameSequence } from "@codesook/omp-shared-display/client";
 import { INSTRUCTION_MODE_SUSPENSION_CHANNEL } from "@codesook/omp-shared-display/instruction-mode";
 import pstackExtension from "./index.ts";
+import { SINGLE_VENDOR_WARNING } from "./setup/rules.ts";
+import { duplicateCandidates, mergeVerdicts } from "./verdict.ts";
 import { INACTIVE_RUN, RECEIPT_ENTRY_TYPE, RUN_ENTRY_TYPE, rebuildRunState } from "./run-state.ts";
 
 type Handler = (event: unknown, ctx: unknown) => unknown;
@@ -33,7 +35,7 @@ function skillFixture(): string {
 const SEAT_MODELS: Record<string, string> = { "@pstack-panel-a": "anthropic/a", "@pstack-panel-b": "openai/b", "@pstack-panel-c": "google/c" };
 
 /** `entries` is the session branch: pass the same array to a second harness to model resuming the session. */
-function createHarness(options: { entries?: SessionEntry[]; idle?: boolean; maxPanelSize?: number; behavior?: Record<string, unknown>; home?: string } = {}) {
+function createHarness(options: { entries?: SessionEntry[]; idle?: boolean; maxPanelSize?: number; behavior?: Record<string, unknown>; home?: string; seatModels?: Record<string, string> } = {}) {
 	const handlers = new Map<string, Handler>();
 	const commands = new Map<string, Command>();
 	const bus = new Map<string, Array<(data: unknown) => void>>();
@@ -71,7 +73,13 @@ function createHarness(options: { entries?: SessionEntry[]; idle?: boolean; maxP
 		isIdle: () => idle,
 		ui: { notify: (message: string, level: string) => void notices.push({ level, message }) },
 		sessionManager: { getBranch: () => entries },
-		models: { resolve: (spec: string) => (SEAT_MODELS[spec] ? { provider: SEAT_MODELS[spec]!.split("/")[0], id: SEAT_MODELS[spec]!.split("/")[1] } : undefined) },
+		models: {
+			resolve: (spec: string) => {
+				const model = (options.seatModels ?? SEAT_MODELS)[spec];
+				return model ? { provider: model.split("/")[0], id: model.split("/")[1] } : undefined;
+			},
+			family: (model: { provider: string }) => model.provider,
+		},
 	};
 	const home = options.home ?? tempDirectory();
 	const pstackBehavior = { ...(options.maxPanelSize === undefined ? {} : { maxPanelSize: options.maxPanelSize }), ...options.behavior };
@@ -208,6 +216,125 @@ describe("activation", () => {
 		await h.command("poteto", "x");
 		expect(h.sentMessages[0]!.message.content).toContain("pstack-panel-b");
 		expect(h.sentMessages[0]!.message.content).not.toContain("pstack-panel-c");
+	});
+});
+
+describe("seat roster and the panel skills", () => {
+	const CLAUDE_ONLY = { "@pstack-panel-a": "anthropic/claude-a", "@pstack-panel-b": "anthropic/claude-b" };
+	const roster = (h: ReturnType<typeof createHarness>) => h.sentMessages.filter(sent => sent.message.customType === "dev.codesook.pstack.roster");
+
+	it("names each seat's model and vendor so a merged verdict can name them", async () => {
+		const h = createHarness();
+		await h.fire("session_start");
+		await h.command("poteto", "x");
+		const content = h.sentMessages[0]!.message.content!;
+		for (const model of ["anthropic/a", "openai/b", "google/c"]) expect(content).toContain(model);
+		for (const vendor of ["anthropic", "openai", "google"]) expect(content).toContain(`vendor ${vendor}`);
+		expect(content).not.toContain(SINGLE_VENDOR_WARNING);
+	});
+
+	it("tells the session when every configured seat is one vendor", async () => {
+		const h = createHarness({ seatModels: CLAUDE_ONLY });
+		await h.fire("session_start");
+		await h.command("poteto", "x");
+		expect(h.sentMessages[0]!.message.content).toContain(SINGLE_VENDOR_WARNING);
+	});
+
+	it("sends the roster when a panel skill starts outside a run, for interactive and print modes", async () => {
+		for (const skill of ["interrogate", "arena", "swarm", "architect", "how"]) {
+			const typed = createHarness();
+			await typed.fire("session_start");
+			await typed.fire("input", { type: "input", text: `/skill:${skill} the diff`, source: "interactive" });
+			expect(roster(typed)).toHaveLength(1);
+			expect(roster(typed)[0]!.options).toEqual({ deliverAs: "nextTurn" });
+			const printed = createHarness();
+			await printed.fire("session_start");
+			await printed.skillPrompt(skill, "user", "the diff");
+			expect(roster(printed)).toHaveLength(1);
+			expect(await printed.status()).toContain("inactive");
+		}
+	});
+
+	it("sends the roster once when both the input event and the skill-prompt message arrive", async () => {
+		const h = createHarness();
+		await h.fire("session_start");
+		await h.fire("input", { type: "input", text: "/skill:interrogate", source: "interactive" });
+		await h.skillPrompt("interrogate", "user");
+		expect(roster(h)).toHaveLength(1);
+		await h.skillPrompt("interrogate", "user");
+		expect(roster(h)).toHaveLength(2);
+	});
+
+	it("does not resend the roster inside an active run, for other skills, autoloaded prompts or extension input", async () => {
+		const h = createHarness();
+		await h.fire("session_start");
+		await h.command("poteto", "x");
+		expect(roster(h)).toHaveLength(1);
+		await h.fire("input", { type: "input", text: "/skill:interrogate", source: "interactive" });
+		await h.skillPrompt("interrogate", "user");
+		expect(roster(h)).toHaveLength(1);
+		const idle = createHarness();
+		await idle.fire("session_start");
+		await idle.fire("input", { type: "input", text: "/skill:why x", source: "interactive" });
+		await idle.fire("input", { type: "input", text: "/skill:how-to x", source: "interactive" });
+		await idle.fire("input", { type: "input", text: "/skill:interrogate", source: "extension" });
+		await idle.skillPrompt("interrogate", "autoload");
+		await idle.skillPrompt("why", "user");
+		expect(roster(idle)).toHaveLength(0);
+	});
+
+	it("lists no seats when none is configured", async () => {
+		const h = createHarness({ seatModels: {} });
+		await h.fire("session_start");
+		await h.fire("input", { type: "input", text: "/skill:interrogate", source: "interactive" });
+		expect(roster(h)[0]!.message.content).not.toContain("vendor");
+	});
+});
+
+describe("interrogate dispatch shape", () => {
+	const spawn = (agent: string) => ({ type: "before_subagent_spawn", agent, patterns: [], modelRole: undefined });
+	const verdict = (value: string, findings: object[] = []) => ({ verdict: value, summary: "s", findings });
+	const finding = (severity: string, claim: string) => ({ severity, file: "src/a.ts", line: 3, claim, evidence: "e" });
+
+	/** The seats the roster names are the seats the skill dispatches: read them back out of the hidden note, as the model does. */
+	const rosterSeats = (h: ReturnType<typeof createHarness>): string[] => [...(h.sentMessages[0]!.message.content!.matchAll(/(?:^|, |: )([A-E]) \(pstack-panel-[a-e]: ([^,]+), vendor ([^)]+)\)/g))].map(match => match[1]!.toLowerCase());
+
+	it("with three configured seats dispatches three critics and merges them into one verdict naming each seat's model", async () => {
+		const h = createHarness();
+		await h.fire("session_start");
+		await h.fire("input", { type: "input", text: "/skill:interrogate the diff", source: "interactive" });
+		const seats = rosterSeats(h);
+		expect(seats).toEqual(["a", "b", "c"]);
+		for (const seat of seats) expect(await h.fire("before_subagent_spawn", spawn(`pstack-panel-${seat}-critic`))).toBeUndefined();
+		const runs = seats.map(seat => ({ seat: seat as never, model: SEAT_MODELS[`@pstack-panel-${seat}`]!, vendor: SEAT_MODELS[`@pstack-panel-${seat}`]!.split("/")[0]!, verdict: seat === "c" ? verdict("approve") : verdict("concerns", [finding(seat === "a" ? "major" : "blocker", `claim ${seat}`)]) }));
+		const merged = mergeVerdicts(runs, Object.keys(duplicateCandidates(runs)).filter(key => key === "a0~b0"));
+		expect(merged.findings).toHaveLength(1);
+		expect(merged.findings[0]!.raisedBy).toEqual(["a", "b"]);
+		expect(merged.seats.map(seat => seat.model)).toEqual(Object.values(SEAT_MODELS));
+		expect(merged.notes).toEqual([]);
+	});
+
+	it("a Claude-only panel's merged verdict carries the single-vendor note", async () => {
+		const h = createHarness({ seatModels: { "@pstack-panel-a": "anthropic/claude-a", "@pstack-panel-b": "anthropic/claude-b" } });
+		await h.fire("session_start");
+		await h.fire("input", { type: "input", text: "/skill:interrogate", source: "interactive" });
+		const vendors = [...h.sentMessages[0]!.message.content!.matchAll(/vendor (\w+)/g)].map(match => match[1]!);
+		const runs = rosterSeats(h).map((seat, index) => ({ seat: seat as never, model: `anthropic/claude-${seat}`, vendor: vendors[index]!, verdict: verdict("approve") }));
+		expect(mergeVerdicts(runs, []).notes).toContain(SINGLE_VENDOR_WARNING);
+	});
+
+	it("skips unset seats without error and caps the panel at the maximum panel size", async () => {
+		const gaps = createHarness({ seatModels: { "@pstack-panel-b": "openai/b", "@pstack-panel-d": "google/d" } });
+		await gaps.fire("session_start");
+		await gaps.fire("input", { type: "input", text: "/skill:interrogate", source: "interactive" });
+		expect(rosterSeats(gaps)).toEqual(["b", "d"]);
+		expect(await gaps.fire("before_subagent_spawn", spawn("pstack-panel-a-critic"))).toMatchObject({ block: true });
+		expect(await gaps.fire("before_subagent_spawn", spawn("pstack-panel-b-critic"))).toBeUndefined();
+
+		const capped = createHarness({ maxPanelSize: 2, seatModels: { "@pstack-panel-a": "x/a", "@pstack-panel-b": "y/b", "@pstack-panel-c": "z/c", "@pstack-panel-d": "w/d" } });
+		await capped.fire("session_start");
+		await capped.fire("input", { type: "input", text: "/skill:interrogate", source: "interactive" });
+		expect(rosterSeats(capped)).toEqual(["a", "b"]);
 	});
 });
 

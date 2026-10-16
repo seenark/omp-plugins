@@ -4,6 +4,8 @@ import { suspendInstructionModes, type SuspendableInstructionMode } from "@codes
 import {
 	buildPotetoPrompt,
 	DEFAULT_POTETO_DIRECTORY,
+	isPanelSkillInput,
+	isPanelSkillPrompt,
 	POTETO_SKILL,
 	REMINDER_MESSAGE_TYPE,
 	ROSTER_MESSAGE_TYPE,
@@ -63,6 +65,14 @@ export default function pstackExtension(pi: ExtensionAPI, options: PstackExtensi
 		return true;
 	};
 
+	/** A panel skill started outside a run has no activation roster, so tell the session its seats now. */
+	let panelInputSeen = false;
+	const announceSeats = (ctx: ExtensionContext): void => {
+		if (runs.state().active) return;
+		const seats = activeSeats(ctx.models, behavior.current().maxPanelSize);
+		pi.sendMessage({ customType: ROSTER_MESSAGE_TYPE, content: rosterText(seats), display: false }, { deliverAs: "nextTurn" });
+	};
+
 	pi.on("session_start", (_event, ctx) => {
 		behavior.reload();
 		stopDropouts?.();
@@ -93,11 +103,19 @@ export default function pstackExtension(pi: ExtensionAPI, options: PstackExtensi
 	pi.on("input", (event, ctx) => {
 		const task = event.source === "extension" ? undefined : taskOfSkillInput(event.text);
 		if (task !== undefined) activate(ctx, task);
+		else if (event.source !== "extension" && isPanelSkillInput(event.text)) {
+			panelInputSeen = true;
+			announceSeats(ctx);
+		}
 		return undefined;
 	});
 	pi.on("message_start", (event, ctx) => {
 		const task = taskOfSkillPrompt(event.message);
 		if (task !== undefined) activate(ctx, task);
+		else if (isPanelSkillPrompt(event.message)) {
+			if (!panelInputSeen) announceSeats(ctx);
+			panelInputSeen = false;
+		}
 	});
 
 	pi.on("tool_result", event => {

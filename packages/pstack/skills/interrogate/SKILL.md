@@ -24,7 +24,7 @@ Before spawning reviewers, state the intent in one clear paragraph from the user
 
 ## Step 3, Spawn Reviewers
 
-Launch all reviewers in a single `task` call, one critic per configured panel seat (see `../poteto-mode/references/provider-dispatch.md`), labeled Reviewer A for seat A, Reviewer B for seat B, and so on. A seat with no model is skipped, not an error. At most `maxPanelSize` seats run, and never more than five. With no seat configured, stop and tell the user to run `/pstack setup`.
+Launch all reviewers in a single `task` call, one critic per seat on the roster, labeled Reviewer A for seat A, Reviewer B for seat B, and so on. The roster is the hidden note of configured panel seats, already capped by `maxPanelSize` (see `../poteto-mode/references/panel-verdicts.md`). A seat with no model is skipped, not an error. With no seat configured, stop and tell the user to run `/pstack setup`.
 
 | Subagent | Agent |
 |----------|-------|
@@ -34,17 +34,17 @@ Launch all reviewers in a single `task` call, one critic per configured panel se
 | Reviewer D | `pstack-panel-d-critic` |
 | Reviewer E | `pstack-panel-e-critic` |
 
-Each critic is read-only and returns a structured verdict with findings. Report any seat whose run fell back to another model as a dropout. When every seat that ran resolves to one vendor, the verdict states `diversity reduced: single vendor`.
+Each critic is read-only and returns a structured verdict with findings. Report any seat whose run fell back to another model as a dropout. Never rerun a seat on another model to cover a gap.
 
 Read `references/reviewer-prompt.md` and fill in the same template for every reviewer with the stated intent, the diff or file contents, the rubric from `references/rubric.md`, and the code-quality lens from `references/code-quality-review.md`. Pick each subagent's lane and `effort` for the job, per the Subagents section of the **poteto-mode** skill.
 
 ## Step 4, Synthesize
 
-As results come back, build a unified picture. Parse every reviewer's findings. Merge findings that describe the same issue differently, and note which models raised each one. Findings two or more models raised independently are the highest signal. Read a lone model's finding, but weight it accordingly. Note disagreements. If one model flags something and another explicitly says the opposite, that is context for the verdict.
+When every critic has settled, merge as `../poteto-mode/references/panel-verdicts.md` prescribes: findings that describe the same issue differently collapse into one, found with `judge_batch` over the candidate pairs, and each keeps the seats that raised it. Findings two or more seats raised independently are the highest signal. Read a lone seat's finding, but weight it accordingly. If one seat flags something and another explicitly says the opposite, that is context for the verdict.
 
 ## Step 5, Lead Judgment
 
-You are the lead reviewer, a pragmatic senior engineer, not a neutral aggregator. Read `references/lead-judgment.md` for the full framework. Put every finding in one of four buckets, with the model(s) that raised it and a one-line rationale.
+Spawn one `pstack-judge` agent as the lead reviewer, a pragmatic senior engineer, not a neutral aggregator. Hand it the merged result, the intent, the diff, and `references/lead-judgment.md` for the full framework. It puts every finding in one of four buckets, with the seat(s) and model(s) that raised it and a one-line rationale. You present its judgment and check that it dropped no finding without a reason.
 
 - **Act on**. Real issues affecting correctness, security, or maintainability given the actual goals. They would block a real PR.
 - **Consider**. Legitimate, but you're not sure they outweigh the cost of addressing them now. Worth the user's attention.
@@ -57,7 +57,7 @@ You are the lead reviewer, a pragmatic senior engineer, not a neutral aggregator
 > [The stated intent paragraph from Step 2]
 
 ### Reviewers
-- Reviewer [label]: [model name], [N findings] (one bullet per reviewer)
+- Reviewer [label]: [model name, from the roster], [N findings], [verdict] (one bullet per reviewer; a seat with no verdict says so)
 
 ### Act On
 [Each: description, which models raised it, why it matters.]
@@ -73,3 +73,6 @@ You are the lead reviewer, a pragmatic senior engineer, not a neutral aggregator
 
 ### Agreement Map
 [Where models agreed and diverged, and what that pattern tells us.]
+
+### Notes
+[Every note from the merge, word for word: `diversity reduced: single vendor` when every reviewer is one vendor, seats without a verdict, fallbacks, seats that ran one model.]

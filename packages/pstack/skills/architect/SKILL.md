@@ -28,11 +28,11 @@ Skip Phase A only when the work is genuinely greenfield with no surrounding syst
 
 Run the **arena** skill with the design-sketch task and the Phase A grounding artifacts. Pass `references/runner-prompt.md` as each runner's prompt.
 
-Take the runners from the configured panel seats, exactly as the **arena** skill's Phase A does.
+Take the runners from the roster of configured panel seats, exactly as the **arena** skill's Phase A does: each runner is a seat's builder (`pstack-panel-<seat>-builder`), isolated, so it can write its sketch files, and arena's rules for the roster, `maxPanelSize`, isolation, unset seats and the single-vendor note apply unchanged. `pstack-design` is read-only and takes no runner's place.
 
 Design it twice. Require at least two structurally distinct candidates before synthesis, even when the first looks sufficient. This is the **exhaust-the-design-space** principle skill made concrete. Whole-shape alternatives, not point fixes inside one shape.
 
-Screen every candidate against [`references/design-red-flags.md`](references/design-red-flags.md) before synthesis. Assume the next contributor is an agent that sees only the files it opened, copies the nearest example, and takes the shortest path that compiles. Prefer the design where a change that looks right from one file is right for the whole repo.
+Screen every candidate against [`references/design-red-flags.md`](references/design-red-flags.md) before synthesis. A read-only `pstack-design` task per candidate can do the screening. Assume the next contributor is an agent that sees only the files it opened, copies the nearest example, and takes the shortest path that compiles. Prefer the design where a change that looks right from one file is right for the whole repo.
 
 Compare viable candidates on interface depth. Prefer the design that hides more complexity behind a smaller, simpler public surface. A rich interface can keep call chains short by concentrating capability instead of scattering it across layers.
 
