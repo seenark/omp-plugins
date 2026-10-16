@@ -357,3 +357,99 @@ test("RTK settings default, persist, and block an invalid retention", () => {
 	draft.behavior.rtk.retentionDays = 0;
 	expect(() => persistDraftToRoot(draft, file)).toThrow("RTK retention days");
 });
+
+test("pstack settings default, persist beside unknown keys, and block invalid values", () => {
+	const file = path.join(temporary(), "global.json");
+	const root = { version: 1, display: {}, behavior: { pstack: { suspendCaveman: false, maxPanelSize: 9, custom: 1 }, ponytail: { defaultMode: "lite" } } };
+	writeFileSync(file, JSON.stringify(root));
+	expect(draftFromRootConfig({ version: 1, display: {}, behavior: {} }).behavior.pstack).toEqual({ suspendCaveman: true, suspendPonytail: true, maxPanelSize: 5, guardStrictness: "block-and-warn" });
+	const draft = draftFromRootConfig(root);
+	expect(draft.behavior.pstack).toEqual({ suspendCaveman: false, suspendPonytail: true, maxPanelSize: 5, guardStrictness: "block-and-warn" });
+	draft.behavior.pstack.maxPanelSize = 2;
+	draft.behavior.pstack.guardStrictness = "warn-only";
+	persistDraftToRoot(draft, file);
+	const saved = JSON.parse(readFileSync(file, "utf8"));
+	expect(saved.behavior.pstack).toEqual({ suspendCaveman: false, suspendPonytail: true, maxPanelSize: 2, guardStrictness: "warn-only", custom: 1 });
+	expect(saved.behavior.ponytail).toMatchObject({ defaultMode: "lite" });
+
+	const before = readFileSync(file, "utf8");
+	for (const size of [0, 6, 2.5, Number.NaN]) {
+		draft.behavior.pstack.maxPanelSize = size;
+		expect(() => persistDraftToRoot(draft, file)).toThrow("pstack maximum panel size");
+	}
+	draft.behavior.pstack.maxPanelSize = 3;
+	draft.behavior.pstack.guardStrictness = "strict" as never;
+	expect(() => persistDraftToRoot(draft, file)).toThrow("pstack guard strictness");
+	expect(readFileSync(file, "utf8")).toBe(before);
+});
+
+test("pstack presence is only the standalone package, enabled or not", () => {
+	expect(parsePluginList({ npm: [{ name: "@codesook/omp-pstack", enabled: true }] }).projectFeatures.pstack).toBe(true);
+	expect(parsePluginList({ npm: [{ name: "@codesook/omp-pstack", enabled: false }] }).projectFeatures.pstack).toBe(false);
+	expect(parsePluginList({ npm: [{ name: "omp-plugins", enabledFeatures: ["pstack"] }] }).projectFeatures.pstack).toBe(true);
+	expect(parsePluginList({ npm: [] }).projectFeatures.pstack).toBe(false);
+});
+
+async function openWithPstack(installed: boolean, drive: (page: { render(): string; press(key: string): void; goTo(label: string): void }) => void) {
+	const project = temporary();
+	const global = path.join(project, "global.json");
+	writeFileSync(global, JSON.stringify({ version: 1, display: {}, behavior: { pstack: { custom: 1 } } }));
+	const events: Array<{ config: { behavior: { pstack: Record<string, unknown> } } }> = [];
+	const npm = installed ? [{ name: "@codesook/omp-pstack", enabled: true }] : [];
+	const pi = {
+		exec: async () => ({ code: 0, stdout: JSON.stringify({ npm }), stderr: "" }),
+		events: { emit: (_channel: string, value: never) => events.push(value) },
+	} as unknown as Parameters<typeof openSettings>[0];
+	const ctx = {
+		cwd: project,
+		hasUI: true,
+		ui: {
+			custom: async (builder: (tui: unknown, theme: unknown, keybindings: unknown, done: () => void) => Component) => {
+				const component = builder({ requestRender() {} }, { fg: (_color: string, value: string) => value, bold: (value: string) => value }, {}, () => {});
+				const goTo = (label: string): void => {
+					for (let index = 0; index < 150; index++) {
+						if (component.render(140).join("\n").includes(`> ${label}`)) return;
+						component.handleInput?.("\x1b[B");
+					}
+					throw new Error(`Setting not reachable: ${label}`);
+				};
+				drive({ render: () => component.render(140).join("\n"), press: key => component.handleInput?.(key), goTo });
+			},
+		},
+	} as unknown as Parameters<typeof openSettings>[1];
+	await openSettings(pi, ctx, global);
+	return { global, events };
+}
+
+test("applying a pstack setting writes it and emits the config-changed event that running pstack reads live", async () => {
+	const { global, events } = await openWithPstack(true, page => {
+		page.goTo("pstack");
+		page.press("\r");
+		page.goTo("Suspend Caveman");
+		page.press("\r");
+		page.press("\x1b[13;2~");
+	});
+	const saved = JSON.parse(readFileSync(global, "utf8"));
+	expect(saved.behavior.pstack).toMatchObject({ suspendCaveman: false, suspendPonytail: true, maxPanelSize: 5, guardStrictness: "block-and-warn", custom: 1 });
+	expect(events).toHaveLength(1);
+	expect(events[0]!.config.behavior.pstack).toEqual(saved.behavior.pstack);
+});
+
+test("the pstack page reports a missing plugin as not installed and points at /pstack setup", async () => {
+	const pages: Record<string, string> = {};
+	const lists: Record<string, string> = {};
+	for (const installed of [false, true]) {
+		await openWithPstack(installed, page => {
+			page.goTo("pstack");
+			lists[String(installed)] = page.render();
+			page.press("\r");
+			page.goTo("Model roles");
+			pages[String(installed)] = page.render();
+		});
+	}
+	expect(lists.false).toContain("not installed");
+	expect(lists.true).not.toContain("not installed");
+	expect(pages.false).toContain("not installed");
+	expect(pages.true).not.toContain("not installed");
+	for (const page of Object.values(pages)) expect(page).toContain("/pstack setup");
+});
