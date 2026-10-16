@@ -1,4 +1,5 @@
 import { isRecord } from "@codesook/omp-shared-display/config-store";
+import { instructionModeEntryType, type SuspendableInstructionMode } from "@codesook/omp-shared-display/instruction-mode";
 import { DROPOUT_ENTRY_TYPE, type Dropout, type SeatSettled } from "./dropouts.ts";
 import { PANEL_SEATS, type PanelSeat } from "./roles.ts";
 
@@ -137,6 +138,22 @@ export function rebuildRunState(entries: readonly unknown[]): RunState {
 		}
 	}
 	return state;
+}
+
+/** Modes whose latest Session Override after the run's activation entry is not `off`: the user switched them back on. */
+export function reenabledInstructionModes(entries: readonly unknown[], modes: readonly SuspendableInstructionMode[]): SuspendableInstructionMode[] {
+	let activated = false;
+	const latest = new Map<SuspendableInstructionMode, unknown>();
+	for (const entry of entries) {
+		if (!isRecord(entry) || entry.type !== "custom" || typeof entry.customType !== "string") continue;
+		if (!activated) {
+			activated = entry.customType === RUN_ENTRY_TYPE && parseRunEntry(entry.data)?.kind === "activated";
+			continue;
+		}
+		const mode = modes.find(candidate => instructionModeEntryType(candidate) === entry.customType);
+		if (mode && isRecord(entry.data)) latest.set(mode, entry.data.mode);
+	}
+	return modes.filter(mode => latest.has(mode) && latest.get(mode) !== "off");
 }
 
 /** Seats that sat on the panel (at least one completed run) out of the seats that had a model at activation. */

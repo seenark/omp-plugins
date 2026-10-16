@@ -1,7 +1,7 @@
 import * as path from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "@oh-my-pi/pi-coding-agent";
 import { connectSharedDisplay } from "@codesook/omp-shared-display/client";
-import { suspendInstructionModes, type SuspendableInstructionMode } from "@codesook/omp-shared-display/instruction-mode";
+import { SUSPENDABLE_INSTRUCTION_MODES, suspendInstructionModes } from "@codesook/omp-shared-display/instruction-mode";
 import {
 	buildPotetoPrompt,
 	DEFAULT_POTETO_DIRECTORY,
@@ -21,7 +21,7 @@ import { blockingFinding, spawnFinding, toolCallResult } from "./guards/blocking
 import { DROPOUT_ENTRY_TYPE, watchDropouts } from "./dropouts.ts";
 import { playbookOpenedBy, progressFromTodo } from "./observe.ts";
 import { activeSeats, guardSeatSpawn } from "./panel.ts";
-import { createRunStore } from "./run-state.ts";
+import { createRunStore, reenabledInstructionModes } from "./run-state.ts";
 import { loadSetupSettings, runPresetCommand, runSetupCommand, type SetupOptions } from "./setup/index.ts";
 import { createWarningGuards } from "./warn-guards.ts";
 
@@ -46,15 +46,17 @@ export default function pstackExtension(pi: ExtensionAPI, options: PstackExtensi
 	let stopDropouts: (() => void) | undefined;
 	let disposed = false;
 
+	/** Ask the Instruction Modes the user left suspendable to switch off, except those switched back on after `entries`' activation. */
+	const suspendModes = (entries: readonly unknown[] = []): void => {
+		const toggles = behavior.current();
+		const wanted = { caveman: toggles.suspendCaveman, ponytail: toggles.suspendPonytail };
+		const reenabled = reenabledInstructionModes(entries, SUSPENDABLE_INSTRUCTION_MODES);
+		suspendInstructionModes(pi.events, SUSPENDABLE_INSTRUCTION_MODES.filter(mode => wanted[mode] && !reenabled.includes(mode)));
+	};
+
 	runs.subscribe((state, change) => {
 		if (disposed) return;
-		if (state.active && (change === "activated" || change === "restored")) {
-			const { suspendCaveman, suspendPonytail } = behavior.current();
-			const modes: SuspendableInstructionMode[] = [];
-			if (suspendCaveman) modes.push("caveman");
-			if (suspendPonytail) modes.push("ponytail");
-			suspendInstructionModes(pi.events, modes);
-		}
+		if (state.active && change === "activated") suspendModes();
 		const text = segmentText(state);
 		publisher.publish(text === undefined ? null : { frames: [[text]] });
 	});
@@ -93,6 +95,8 @@ export default function pstackExtension(pi: ExtensionAPI, options: PstackExtensi
 			receipt => runs.recordReceipt(receipt),
 		);
 		restore(ctx);
+		// Only a session resumed at startup is suspended again: navigating within a session must not undo the user's own /caveman or /ponytail.
+		if (runs.state().active) suspendModes(ctx.sessionManager.getBranch());
 	});
 	// session_switch (/new, resume) and session_branch replace the branch; session_tree moves within one.
 	pi.on("session_switch", (_event, ctx) => restore(ctx));

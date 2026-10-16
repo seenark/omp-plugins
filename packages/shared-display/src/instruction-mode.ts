@@ -4,6 +4,9 @@ export const INSTRUCTION_MODE_SUSPENSION_CHANNEL = "codesook/instruction-mode-su
 export const SUSPENDABLE_INSTRUCTION_MODES = ["caveman", "ponytail"] as const;
 export type SuspendableInstructionMode = (typeof SUSPENDABLE_INSTRUCTION_MODES)[number];
 
+/** Session entry type under which an Instruction Mode records its Session Override (`data: { mode }`). */
+export const instructionModeEntryType = (mode: SuspendableInstructionMode): string => `${mode}-mode`;
+
 export interface InstructionModeSuspension {
 	readonly protocol: 1;
 	readonly source: "pstack";

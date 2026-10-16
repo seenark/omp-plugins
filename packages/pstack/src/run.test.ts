@@ -536,18 +536,50 @@ describe("Instruction Mode suspension", () => {
 		expect(h.suspensions).toHaveLength(1);
 	});
 
-	it("re-emits when an active session is resumed or navigated, and stays silent for an inactive one", async () => {
+	it("does not suspend again when the session is navigated, so a mode the user switched back on stays on", async () => {
+		const h = createHarness();
+		await h.fire("session_start");
+		await h.command("poteto", "x");
+		h.suspensions.length = 0;
+		for (const event of ["session_switch", "session_branch", "session_tree"]) await h.fire(event);
+		expect(h.suspensions).toEqual([]);
+	});
+
+	it("suspends again when an active session is resumed at startup, and stays silent for an inactive one", async () => {
 		const first = createHarness();
 		await first.fire("session_start");
 		await first.command("poteto", "x");
-		for (const event of ["session_start", "session_switch", "session_branch", "session_tree"]) {
-			const resumed = createHarness({ entries: first.entries });
-			await resumed.fire(event);
-			expect(resumed.suspensions).toHaveLength(1);
-		}
+		const resumed = createHarness({ entries: first.entries });
+		await resumed.fire("session_start");
+		expect(resumed.suspensions).toEqual([{ protocol: 1, source: "pstack", modes: ["caveman", "ponytail"] }]);
 		const inactive = createHarness();
 		await inactive.fire("session_start");
 		expect(inactive.suspensions).toEqual([]);
+	});
+
+	it("does not override a mode the user switched back on after activation when the session is resumed", async () => {
+		const first = createHarness();
+		await first.fire("session_start");
+		await first.command("poteto", "x");
+		const modeEntry = (mode: string, value: string): SessionEntry => ({ type: "custom", customType: `${mode}-mode`, data: { mode: value } });
+		first.entries.push(modeEntry("caveman", "off"), modeEntry("ponytail", "off"), modeEntry("caveman", "full"));
+		const oneBack = createHarness({ entries: first.entries });
+		await oneBack.fire("session_start");
+		expect(oneBack.suspensions).toEqual([{ protocol: 1, source: "pstack", modes: ["ponytail"] }]);
+		first.entries.push(modeEntry("ponytail", "lite"));
+		const bothBack = createHarness({ entries: first.entries });
+		await bothBack.fire("session_start");
+		expect(bothBack.suspensions).toEqual([]);
+	});
+
+	it("still suspends a mode the user switched on before activation", async () => {
+		const entries: SessionEntry[] = [{ type: "custom", customType: "caveman-mode", data: { mode: "full" } }];
+		const first = createHarness({ entries });
+		await first.fire("session_start");
+		await first.command("poteto", "x");
+		const resumed = createHarness({ entries: first.entries });
+		await resumed.fire("session_start");
+		expect(resumed.suspensions).toEqual([{ protocol: 1, source: "pstack", modes: ["caveman", "ponytail"] }]);
 	});
 
 	it("leaves a mode alone when its suspend toggle is off", async () => {
