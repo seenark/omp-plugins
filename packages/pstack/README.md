@@ -98,7 +98,7 @@ Running it again with the same choices changes nothing. Presets pick tiers from 
 
 ## Presets and doctor
 
-`/pstack preset <name>` applies a preset (`claude-only`, `claude-codex` or `lean`) and then saves it exactly as setup's Save does: seat and single-vendor rules, one probe turn per model (nothing is written when one fails), the isolation question, a write limited to `pstack-*` roles, readback and restore. The presets fill only the seats they need: `claude-only` fills the work roles and seats A to C with the top, mid and cheap Claude models, `lean` fills seats A and B, and unfilled seats stay unset. `claude-codex` is `claude-only` plus one Codex seat (seat D) with `pstack-judge` on Codex. When you already have `pstack-*` roles, `claude-codex` is a delta: it verifies Codex first, adds one Codex seat in your first free seat (none when a seat already runs Codex), moves `pstack-judge` to Codex and keeps every other role. `claude-only` and `lean` replace the `pstack-*` roles with their own set.
+`/pstack preset <name>` applies a preset (`claude-only`, `claude-codex` or `lean`) and then saves it exactly as setup's Save does: seat and single-vendor rules, one probe turn per model (nothing is written when one fails), the isolation question, a write limited to `pstack-*` roles and, if you agree, `task.isolation.enabled`, readback and restore. The presets fill only the seats they need: `claude-only` fills the work roles and seats A to C with the top, mid and cheap Claude models, `lean` fills seats A and B, and unfilled seats stay unset. `claude-codex` is `claude-only` plus one Codex seat (seat D) with `pstack-judge` on Codex. When you already have `pstack-*` roles, `claude-codex` is a delta: it verifies Codex first, adds one Codex seat in your first free seat (none when a seat already runs Codex), moves `pstack-judge` to Codex and keeps every other role. `claude-only` and `lean` replace the `pstack-*` roles with their own set.
 
 `/pstack doctor` is read-only and prints one line per finding at the worst severity found:
 
@@ -185,7 +185,7 @@ A stop continuation fires once per stop: it never answers a `stop_hook_active` t
 
 ## Adaptations
 
-Adaptations are code, in `src/sync/rules/`, one file per group so tickets add rules without touching each other:
+Adaptations are code, in `src/sync/rules/`, one file per group:
 
 | File | Owns |
 | --- | --- |
@@ -193,7 +193,8 @@ Adaptations are code, in `src/sync/rules/`, one file per group so tickets add ru
 | `core.ts` | Excluded parts (`make-bot-ui`; `automations` and `docs/guide` are never imported), the references they leave dangling, residual terms nobody owns |
 | `panel.ts` | Forks for the multi-model skills (`interrogate`, `arena`, `swarm`, `architect`, `how`) and the `panel-verdicts.md` reference, all hand-edited; their reasons live in the file |
 | `guards.ts` | Upstream's `check-plan` script (Excluded; the todo guard replaces it) and the playbook text that called it |
-| `dispatch.ts`, `pr.ts`, `sessions.ts` | Cursor primitives replaced by later tickets: subagent dispatch, PR workflows, session paths, goal mode, drivers, and the `/skill:<name>` form of slash commands (the skill list lives in `sessions.ts`; a test fails when `skills/` outgrows it) |
+| `frontmatter.ts` | Skill frontmatter: principle skills get `hide: true`, Cursor's `icon` and `color` keys are stripped |
+| `dispatch.ts`, `pr.ts`, `sessions.ts` | Cursor primitives replaced by OMP ones: lane dispatch, PR workflows, session paths, goal mode, drivers, and the `/skill:<name>` form of slash commands (the skill list is read from the shipped `skills/`, so a skill Upstream adds is rewritten from the second sync on) |
 
 A group exports any of `rules`, `exclusions`, `forks`, `renames`, `moves`, `terms` and `allowances`. A move (`from`, `to`, `reason`) places a vendored file at another package-relative path before rules run, so rules and links use the new path; a move whose source is missing fails the sync. Removing or moving an entry makes the file an earlier sync wrote stale: `bun run sync` deletes it, `--check` fails naming it. Rules apply in table order (renames, then groups in `rules/index.ts` order) and each needs a `reason`. A rule that matches text only because it comes too late (shadowed by an earlier rule) fails the sync. A fork entry (`path`, `kind`, `reason`, `since`) keeps a path from being overwritten: `patched` forks 3-way merge Upstream changes into our edits and leave conflict markers, `rewritten` forks keep ours and report any Upstream change as a conflict.
 
@@ -218,7 +219,7 @@ The report lists the Cursor-specific terms that remain, by category and file, th
 - a vendored file that differs from the sync output and has no fork entry;
 - a file under `skills/` or `agents/` that the sync does not produce and no fork entry covers (the generated `pstack-*` agents belong to `generate:agents` and are exempt);
 - a conflict, or conflict markers left in a fork;
-- any Cursor-specific term in the shipped files. A group tolerates a known leftover with an `allowances` entry (`category`, `file`, `term`, exact `count`, `ticket`, `reason`). An allowance that no longer matches fails the gate, so deleting the term forces deleting the entry. Allowances are the exception: leave none when the ticket that owns the category is closed.
+- any Cursor-specific term in the shipped files. A group tolerates a known leftover with an `allowances` entry (`category`, `file`, `term`, exact `count`, `reason`). An allowance that no longer matches fails the gate, so deleting the term forces deleting the entry. Allowances are the exception: leave none when the ticket that owns the category is closed.
 
 ## License and attribution
 
