@@ -206,7 +206,7 @@ describe("collision renames", () => {
 		expect(read(packageRoot, "skills/pstack-tdd/SKILL.md")).toContain("name: pstack-tdd\n");
 		expect(read(packageRoot, "skills/pstack-teach/SKILL.md")).toContain("name: pstack-teach\n");
 		expect(read(packageRoot, "skills/poteto-mode/playbooks/bug-fix.md")).toBe(
-			"See the **pstack-tdd** skill.\nTry `/pstack-tdd` or [tdd](../../pstack-tdd/SKILL.md) and /pstack-teach.\nA tddish word and /tdds stay.\n",
+			"See the **pstack-tdd** skill.\nTry `/skill:pstack-tdd` or [tdd](../../pstack-tdd/SKILL.md) and /skill:pstack-teach.\nA tddish word and /tdds stay.\n",
 		);
 	});
 

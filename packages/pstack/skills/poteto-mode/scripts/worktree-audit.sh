@@ -61,9 +61,8 @@ elif raw=$(gh pr list --author "@me" --state all --limit 1000 \
 fi
 [ -s "$prs" ] || echo "[]" > "$prs"
 
-# Transcripts dir: ~/.cursor/projects/<slugified-repo-path>/agent-transcripts.
-slug=$(printf '%s' "$main_wt" | sed 's#^/##; s#/#-#g')
-transcripts="$HOME/.cursor/projects/$slug/agent-transcripts"
+# Transcripts dir: OMP keeps one session directory per working directory under ~/.omp/agent/sessions, so scan all of them.
+transcripts="$HOME/.omp/agent/sessions"
 now=$(date +%s)
 
 echo "# base: $base"
