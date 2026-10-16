@@ -10,10 +10,11 @@
   "scripts": {
     "list": "bun pm ls --all",
     "check": "bun run scripts/check-workspace.mjs",
+    "check:sync": "bun run --workspaces --if-present check:sync",
     "typecheck": "bun run --workspaces --if-present check:types",
     "test": "bun run --workspaces --if-present test",
     "pack:check": "bun run --workspaces --if-present pack:check",
-    "verify": "bun run typecheck && bun run test && bun run check && bun run pack:check",
+    "verify": "bun run typecheck && bun run test && bun run check && bun run check:sync && bun run pack:check",
     "publish:shared-display": "bun run verify && bun publish --cwd packages/shared-display --access public",
     "publish:ponytail": "bun run verify && bun publish --cwd packages/ponytail --access public",
     "publish:pstack": "bun run verify && bun publish --cwd packages/pstack --access public",

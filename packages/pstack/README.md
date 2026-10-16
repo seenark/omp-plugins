@@ -131,7 +131,7 @@ Adaptations are code, in `src/sync/rules/`, one file per group so tickets add ru
 | `core.ts` | Excluded parts (`make-bot-ui`; `automations` and `docs/guide` are never imported), the references they leave dangling, residual terms nobody owns |
 | `dispatch.ts`, `pr.ts`, `sessions.ts` | Cursor primitives replaced by later tickets: subagent dispatch, PR workflows, session paths, goal mode, drivers, and the `/skill:<name>` form of slash commands (the skill list lives in `sessions.ts`; a test fails when `skills/` outgrows it) |
 
-A group exports any of `rules`, `exclusions`, `forks`, `renames`, `moves` and `terms`. A move (`from`, `to`, `reason`) places a vendored file at another package-relative path before rules run, so rules and links use the new path; a move whose source is missing fails the sync. Removing or moving an entry does not delete the file an earlier sync wrote: delete it by hand. Rules apply in table order (renames, then groups in `rules/index.ts` order) and each needs a `rationale`. A rule that matches text only because it comes too late (shadowed by an earlier rule) fails the sync. A fork entry (`path`, `kind`, `reason`, `since`) keeps a path from being overwritten: `patched` forks 3-way merge Upstream changes into our edits and leave conflict markers, `rewritten` forks keep ours and report any Upstream change as a conflict.
+A group exports any of `rules`, `exclusions`, `forks`, `renames`, `moves`, `terms` and `allowances`. A move (`from`, `to`, `reason`) places a vendored file at another package-relative path before rules run, so rules and links use the new path; a move whose source is missing fails the sync. Removing or moving an entry makes the file an earlier sync wrote stale: `bun run sync` deletes it, `--check` fails naming it. Rules apply in table order (renames, then groups in `rules/index.ts` order) and each needs a `rationale`. A rule that matches text only because it comes too late (shadowed by an earlier rule) fails the sync. A fork entry (`path`, `kind`, `reason`, `since`) keeps a path from being overwritten: `patched` forks 3-way merge Upstream changes into our edits and leave conflict markers, `rewritten` forks keep ours and report any Upstream change as a conflict.
 
 Fixed by the engine rather than by rules: principle skills get `hide: true` (still loadable with `/skill:principle-...`); the `icon` and `color` frontmatter of Cursor's mode UI is stripped; every skill and agent `name` is set to its directory or file name.
 
@@ -147,4 +147,11 @@ bun run sync --check                      # write nothing; exit 1 on drift or co
 bun run sync --skill-dir ~/.agents/skills # report vendored names another skill directory already owns
 ```
 
-The report lists the Cursor-specific terms that remain, by category and file. It is informational: the drift gate arrives with a later ticket.
+The report lists the Cursor-specific terms that remain, by category and file, the skills Upstream added (classify each) and the skills the sync removes.
+
+`bun run verify` runs `bun run check:sync` (`sync --check` at the Pinned Revision, fetched from Upstream; set `PSTACK_UPSTREAM` to a local `cursor/plugins` checkout to run offline). It fails, naming each path or term, on:
+
+- a vendored file that differs from the sync output and has no fork entry;
+- a file under `skills/` or `agents/` that the sync does not produce and no fork entry covers (the generated `pstack-*` agents belong to `generate:agents` and are exempt);
+- a conflict, or conflict markers left in a fork;
+- any Cursor-specific term in the shipped files. A group tolerates a known leftover with an `allowances` entry (`category`, `file`, `term`, exact `count`, `ticket`, `reason`). An allowance that no longer matches fails the gate, so deleting the term forces deleting the entry. Allowances are the exception: leave none when the ticket that owns the category is closed.

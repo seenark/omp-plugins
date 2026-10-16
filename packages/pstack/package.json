@@ -16,6 +16,7 @@
 		"check:types": "tsc -p tsconfig.json --noEmit",
 		"test": "bun test src",
 		"sync": "bun src/sync/cli.ts",
+		"check:sync": "bun src/sync/cli.ts --check",
 		"generate:agents": "bun src/generate-agents.ts",
 		"check:agents": "bun src/generate-agents.ts --check",
 		"pack:check": "bun ../../scripts/check-package-files.ts"

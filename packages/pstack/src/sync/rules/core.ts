@@ -67,4 +67,38 @@ export const core: Group = {
 			},
 		},
 	],
+	allowances: [
+		{
+			category: "guards",
+			file: "skills/poteto-mode/playbooks/multi-phase-plan.md",
+			term: "check-plan",
+			count: 1,
+			ticket: "omp-plugins-4nv.12",
+			reason: "The todo guard replaces the check-plan script. Delete these four entries in the change that lands it; the gate fails on any entry that no longer matches.",
+		},
+		{
+			category: "guards",
+			file: "skills/poteto-mode/scripts/check-plan.mjs",
+			term: "check-plan",
+			count: 1,
+			ticket: "omp-plugins-4nv.12",
+			reason: "Vendored script the todo guard replaces.",
+		},
+		{
+			category: "guards",
+			file: "skills/poteto-mode/scripts/check-plan.test.ts",
+			term: "check-plan",
+			count: 2,
+			ticket: "omp-plugins-4nv.12",
+			reason: "Test of the vendored script the todo guard replaces.",
+		},
+		{
+			category: "guards",
+			file: "skills/poteto-mode/scripts/package.json",
+			term: "check-plan",
+			count: 1,
+			ticket: "omp-plugins-4nv.12",
+			reason: "Script entry for the vendored check-plan the todo guard replaces.",
+		},
+	],
 };
