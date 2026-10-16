@@ -75,6 +75,10 @@ After compaction the model gets a short hidden reminder of the playbook and step
 
 pstack is a Shared Display producer (source `pstack`, needs `@codesook/omp-shared-display` 1.3.0 or newer). While active it publishes one segment, for example `pstack · feature · 3/7 · panel 3/4`: playbook, todo progress, panel attendance once a seat has run, and a dropout count when a seat fell back. It publishes a tombstone when the session is not active, and nothing is shown in a session that never started pstack.
 
+## Instruction Mode suspension
+
+When pstack activates, and again whenever an active session is restored (resume, `/new` into an active branch, branch or tree navigation), it emits one suspension message on `codesook/instruction-mode-suspension/v1` (`{ protocol: 1, source: "pstack", modes: ["caveman", "ponytail"] }`, helpers in `@codesook/omp-shared-display/instruction-mode`). Caveman and Ponytail react by applying a Session Override at Mode Level `off` for that Agent Session. The Root Plugin Configuration is never written, a parallel session keeps its Mode Levels, and the user's own `/caveman` and `/ponytail` commands still switch a mode back on. `suspendCaveman` and `suspendPonytail` (below) drop a mode from the message; both default to on.
+
 ## Model roles
 
 Every lane resolves its model through `pstack-*` model roles in your OMP config. The table lives in `src/roles.ts` and generates the `agents/pstack-*.md` files; run `bun run generate:agents` after editing it. `bun test` fails when the files drift from the table.

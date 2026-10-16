@@ -1,5 +1,6 @@
 import type { ExtensionAPI, ExtensionContext } from "@oh-my-pi/pi-coding-agent";
 import { connectSharedDisplay } from "@codesook/omp-shared-display/client";
+import { suspendInstructionModes, type SuspendableInstructionMode } from "@codesook/omp-shared-display/instruction-mode";
 import {
 	buildPotetoPrompt,
 	DEFAULT_POTETO_DIRECTORY,
@@ -36,8 +37,15 @@ export default function pstackExtension(pi: ExtensionAPI, options: PstackExtensi
 	let stopDropouts: (() => void) | undefined;
 	let disposed = false;
 
-	runs.subscribe(state => {
+	runs.subscribe((state, change) => {
 		if (disposed) return;
+		if (state.active && (change === "activated" || change === "restored")) {
+			const { suspendCaveman, suspendPonytail } = behavior.current();
+			const modes: SuspendableInstructionMode[] = [];
+			if (suspendCaveman) modes.push("caveman");
+			if (suspendPonytail) modes.push("ponytail");
+			suspendInstructionModes(pi.events, modes);
+		}
 		const text = segmentText(state);
 		publisher.publish(text === undefined ? null : { frames: [[text]] });
 	});
