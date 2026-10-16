@@ -76,3 +76,25 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 # END pstack sync
+
+======================================================================
+Ideas credited (no files or code copied)
+======================================================================
+
+Two community ports of pstack for other runtimes informed the design of this
+package. Both are MIT licensed. Their files, prose and code are not part of
+this package: the TypeScript sync engine, guards and extension are written
+for oh-my-pi.
+
+michael-denyer/pstack-claude (Copyright (c) 2026 Lauren Tan, Michael Denyer)
+  - the fork registry (a recorded list of intentionally changed paths with a
+    reason) and the sync tooling around it;
+  - the panel rules: at most five seats, no two seats on the same model,
+    "diversity reduced: single vendor" when the seats share a vendor;
+  - the rule that every guard ships a must-trip fixture beside its must-pass
+    fixture.
+
+hieusats/omp-pstack (Copyright (c) 2026 Lauren Tan)
+  - a pstack package for oh-my-pi laid out for native discovery: skills,
+    agents and rules at the package root, task agents dispatched by name as
+    lanes.

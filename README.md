@@ -104,6 +104,8 @@ bun packages/theme-catppuccin/bin/install.js
 /headroom [status|on|off|health|stats|token|init [config|glyphs|all]]
 /ponytail [status|off|lite|full|ultra|review]
 /caveman [status|off|caveman|ultracave|megacave]
+/poteto <task>
+/pstack [status|setup|preset <name>|doctor]
 /ultracave
 /megacave
 /codegraph [init|status|auto|off]
@@ -221,6 +223,7 @@ Package publication is dependency ordered:
 bun run publish:shared-display
 bun run publish:ponytail
 bun run publish:caveman
+bun run publish:pstack
 bun run publish:codegraph
 bun run publish:beads
 bun run publish:headroom

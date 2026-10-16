@@ -125,6 +125,18 @@ Every lane resolves its model through `pstack-*` model roles in your OMP config.
 | `pstack-security` | `@slow` | `pstack-security` (read-only) |
 | `pstack-panel-a` … `pstack-panel-e` | none: an unset seat is absent | `pstack-panel-<x>-critic` (read-only, structured verdict), `pstack-panel-<x>-builder` (write-capable, dispatch with task isolation) |
 
+What each role is, when pstack uses it and what kind of model suits it (the text `/pstack setup` shows):
+
+| Role | What | When | Recommended |
+| --- | --- | --- | --- |
+| `pstack-explore` | Read-only scouting: finds files, symbols and call paths and reports what it saw. | Playbook steps that map unfamiliar code before design or edits. | A fast, cheap model with a large context window. |
+| `pstack-build` | Implements a scoped change end to end: edits, runs, and fixes its own failures. | Feature, fix and refactor steps that write code. | A strong coding model with reliable tool use; a mid-tier model is usually enough. |
+| `pstack-mechanical` | Applies fully specified mechanical edits: renames, codemods, formatting and bulk updates. | Steps where the change is already decided and only needs doing. | The cheapest model that follows instructions exactly. |
+| `pstack-design` | Proposes and critiques design: architecture, module boundaries, types and interfaces. | Architect and design steps, before code is written. | A model with strong design and visual judgment. |
+| `pstack-judge` | Merges the panel's verdicts into one decision and breaks ties. | The end of a panel run (interrogate, arena, swarm, architect) and final reviews. | Your strongest reasoning model. |
+| `pstack-security` | Reviews a change for security flaws. | Review steps that touch authentication, input handling, secrets or dependencies. | A strong reasoning model; a different vendor from your judge adds coverage. |
+| `pstack-panel-a` … `pstack-panel-e` | Panel seat A to E: an independent reviewer whose verdict is compared with the other seats. | Panel workflows (interrogate, arena, swarm, architect, how critics) dispatch every configured seat in parallel. | A distinct model per seat, ideally from different vendors. Leave a seat unset to drop it: an unset seat is skipped, not an error. |
+
 Work-role agents list the pstack role, then the built-in role, so OMP skips an unset pstack role. OMP does not skip an unset single role: that child fails on its first prompt. pstack therefore blocks the spawn of an unset seat's agents with a reason telling the agent to skip that seat. A fallback to another model during a seat's run is stored as a `dev.codesook.pstack.dropout` session entry. A fallback that keeps the model (a thinking level, a provider route, the Fast tier) is not a dropout.
 
 ## Panel workflows
@@ -207,3 +219,7 @@ The report lists the Cursor-specific terms that remain, by category and file, th
 - a file under `skills/` or `agents/` that the sync does not produce and no fork entry covers (the generated `pstack-*` agents belong to `generate:agents` and are exempt);
 - a conflict, or conflict markers left in a fork;
 - any Cursor-specific term in the shipped files. A group tolerates a known leftover with an `allowances` entry (`category`, `file`, `term`, exact `count`, `ticket`, `reason`). An allowance that no longer matches fails the gate, so deleting the term forces deleting the entry. Allowances are the exception: leave none when the ticket that owns the category is closed.
+
+## License and attribution
+
+MIT. The vendored skills and agents are Lauren Tan's pstack, and `deslop` comes from Cursor's cursor-team-kit; both licenses are reproduced in `THIRD-PARTY-NOTICES.txt`. The sync tooling, the panel rules and the must-trip fixture rule borrow ideas from [michael-denyer/pstack-claude](https://github.com/michael-denyer/pstack-claude), and the native package layout from [hieusats/omp-pstack](https://github.com/hieusats/omp-pstack). No files or code were copied from either; `THIRD-PARTY-NOTICES.txt` lists what each contributed.

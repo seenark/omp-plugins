@@ -1,6 +1,6 @@
 # omp-plugins
 
-Features that extend OMP. This glossary covers content vendored from other projects, the token-savings figures shown in the Shared Display, and the Instruction Modes.
+Features that extend OMP. This glossary covers content vendored from other projects, the token-savings figures shown in the Shared Display, the Instruction Modes, and pstack's model roles.
 
 ## Vendoring
 
@@ -23,6 +23,10 @@ _Avoid_: patch, hack, override
 **Excluded**:
 Upstream parts deliberately not brought over, such as Upstream's own CLI, proxy or skills this setup does not use.
 _Avoid_: unsupported, removed, TODO
+
+**Fork Registry**:
+The recorded list of Vendored Content paths this repo changes by hand on purpose, each with its reason. Sync keeps registered paths and fails on any other difference from Upstream.
+_Avoid_: patch list, override list
 
 ## Token Savings
 
@@ -51,3 +55,21 @@ _Avoid_: persona, style plugin, sticky mode
 **Mode Level**:
 The setting an Instruction Mode runs at in an Agent Session, named exactly as its Upstream names it (such as `ultracave` or `lite`), where `off` means its instructions are not sent at all.
 _Avoid_: intensity, strength
+
+## pstack Models
+
+**Model Role**:
+A named entry in OMP's `modelRoles` that a pstack Lane resolves its model through, such as `pstack-build` or `pstack-panel-a`. pstack owns only the `pstack-*` roles.
+_Avoid_: model alias, agent model, lane config
+
+**Panel Seat**:
+One of up to five independent reviewer slots (`pstack-panel-a` to `pstack-panel-e`), each holding a different model. An unset seat is absent, not a failure.
+_Avoid_: reviewer slot, vote, expert
+
+**Lane**:
+A task agent that pstack dispatches by name to do one kind of work on the Model Role it is bound to; read-only Lanes cannot write.
+_Avoid_: subagent, worker, role
+
+**Dropout**:
+A Panel Seat's run that fell back to a different model than the seat's own, recorded so a panel never reports diversity it did not have.
+_Avoid_: failure, retry
