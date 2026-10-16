@@ -61,7 +61,7 @@ Against the current pin, `bun run sync --upstream /tmp/cursor-plugins` writes no
 
 ### Forks
 
-A fork entry (`path`, `kind`, `reason`, `since`) in a rule group marks a file as ours. The sync merges Upstream changes by kind:
+The fork entries (`path`, `kind`, `reason`, `since`) in the rule groups are the Fork Registry (GLOSSARY.md, ADR-0009): each marks a file as ours. The sync merges Upstream changes by kind:
 
 - `patched`: our small edit to an Upstream file. Upstream changes are 3-way merged against the old pin; overlapping edits leave `<<<<<<<` markers that you resolve by hand. Verify fails while markers remain.
 - `rewritten`: a file replaced or written by us (it may not exist in Upstream). Ours always wins. When Upstream changes it, the report names a conflict: read the Upstream diff, update our text if it matters, and continue. The conflict does not repeat once the pin moves.

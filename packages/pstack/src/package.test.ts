@@ -1,6 +1,7 @@
 import { describe, expect, it } from "bun:test";
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { MODEL_ROLES } from "./roles.ts";
 
 const root = path.resolve(import.meta.dir, "..");
 const manifest = JSON.parse(fs.readFileSync(path.join(root, "package.json"), "utf8"));
@@ -48,5 +49,23 @@ describe("discovery contract", () => {
 			expect(meta.name).toBe(agent.replace(/\.md$/, ""));
 			expect(meta.description).toBeTruthy();
 		}
+	});
+});
+
+describe("README", () => {
+	const readme = fs.readFileSync(path.join(root, "README.md"), "utf8");
+
+	it("documents every model role's what, when and recommended text", () => {
+		for (const role of MODEL_ROLES) {
+			if (role.kind === "work") expect(readme).toContain(role.what);
+			expect(readme).toContain(role.when);
+			expect(readme).toContain(role.recommended);
+		}
+	});
+
+	it("names the tracked pstack version and Pinned Revision", () => {
+		const pin = JSON.parse(fs.readFileSync(path.join(root, "upstream.json"), "utf8"));
+		expect(readme).toContain(pin.revision);
+		expect(readme).toContain(pin.version);
 	});
 });

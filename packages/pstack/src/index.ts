@@ -156,9 +156,13 @@ export default function pstackExtension(pi: ExtensionAPI, options: PstackExtensi
 	pi.on("session_stop", (event, ctx) => warnings.onSessionStop(event, ctx));
 
 	// The run state is rebuilt from custom entries, which compaction keeps; the model only needs to be told where it is.
-	pi.on("session_compact", () => {
+	// Compaction can summarize away the activation roster, and panel verdicts need each seat's model, so it is sent again.
+	pi.on("session_compact", (_event, ctx) => {
 		const state = runs.state();
-		if (state.active) pi.sendMessage({ customType: REMINDER_MESSAGE_TYPE, content: reminderText(state), display: false }, { deliverAs: "nextTurn" });
+		if (!state.active) return;
+		pi.sendMessage({ customType: REMINDER_MESSAGE_TYPE, content: reminderText(state), display: false }, { deliverAs: "nextTurn" });
+		const seats = activeSeats(ctx.models, behavior.current().maxPanelSize);
+		pi.sendMessage({ customType: ROSTER_MESSAGE_TYPE, content: rosterText(seats), display: false }, { deliverAs: "nextTurn" });
 	});
 
 	pi.registerCommand("poteto", {

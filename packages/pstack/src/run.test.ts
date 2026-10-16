@@ -500,7 +500,7 @@ describe("run state rebuild", () => {
 });
 
 describe("compaction", () => {
-	it("keeps the state and segment, and sends the model a hidden reminder of the playbook and step", async () => {
+	it("keeps the state and segment, and sends the model a hidden reminder of the playbook and step and the seat roster", async () => {
 		const h = createHarness();
 		await h.fire("session_start");
 		await h.command("poteto", "x");
@@ -508,10 +508,11 @@ describe("compaction", () => {
 		await h.todo(todo(3, 7));
 		h.sentMessages.length = 0;
 		await h.fire("session_compact", { type: "session_compact", fromExtension: false });
-		expect(h.sentMessages).toHaveLength(1);
+		expect(h.sentMessages.map(sent => sent.message.customType)).toEqual(["dev.codesook.pstack.reminder", "dev.codesook.pstack.roster"]);
 		const { message, options } = h.sentMessages[0]!;
 		expect(message.display).toBe(false);
 		expect(options).toEqual({ deliverAs: "nextTurn" });
+		for (const seat of ["pstack-panel-a", "pstack-panel-b", "pstack-panel-c"]) expect(h.sentMessages[1]!.message.content).toContain(seat);
 		expect(message.content).toContain("feature");
 		expect(message.content).toContain("3/7");
 		expect(message.content).toContain("step 4");

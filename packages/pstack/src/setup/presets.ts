@@ -22,6 +22,9 @@ const CODEX_VENDOR = "openai";
 const TOP = /opus|\bpro\b|max|ultra/i;
 const CHEAP = /haiku|mini|nano|flash|lite|small|spark/i;
 
+/** A pinned snapshot such as `claude-opus-4-20250514`: numeric id order would rank it above every newer undated release, and registries keep retired ones. */
+const isSnapshot = (choice: ModelChoice): boolean => /-\d{8}$/.test(choice.id);
+
 function tier(choice: ModelChoice): number {
 	if (TOP.test(choice.id)) return 0;
 	return CHEAP.test(choice.id) ? 2 : 1;
@@ -31,14 +34,14 @@ interface Tiers {
 	top: ModelChoice;
 	mid: ModelChoice;
 	cheap: ModelChoice;
-	/** Strongest first, newest first within a tier, one entry per model. */
+	/** Strongest first, newest first within a tier, pinned snapshots after releases, one entry per model. */
 	ranked: ModelChoice[];
 }
 
 function rank(pool: readonly ModelChoice[]): Tiers | undefined {
 	const ranked = pool
 		.filter((choice, index) => pool.findIndex(other => modelKey(other.spec) === modelKey(choice.spec)) === index)
-		.sort((a, b) => tier(a) - tier(b) || b.id.localeCompare(a.id, undefined, { numeric: true }));
+		.sort((a, b) => tier(a) - tier(b) || Number(isSnapshot(a)) - Number(isSnapshot(b)) || b.id.localeCompare(a.id, undefined, { numeric: true }));
 	const first = ranked[0];
 	if (!first) return undefined;
 	return {
