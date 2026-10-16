@@ -50,6 +50,7 @@ function createHarness(options: { hasUI?: boolean; configured?: string[]; models
 		sessionManager: { getBranch: () => [] },
 		models: options.models ?? {
 			resolve: (spec: string) => (options.configured?.includes(spec) ? { provider: "test", id: spec.slice(1) } : undefined),
+			family: (model: { provider: string }) => model.provider,
 		},
 	};
 	const home = tempDirectory();
@@ -171,6 +172,18 @@ describe("dropouts", () => {
 				data: { seat: "b", agent: "pstack-panel-b-critic", id: "0-Critic", from: "anthropic/a", to: "openai/b", reason: "rate limited" },
 			},
 		]);
+	});
+
+	it("ignores a fallback that keeps the model: a thinking level, a provider route or the Fast tier", async () => {
+		const h = createHarness();
+		await h.fire("session_start");
+		h.events.emit("task:subagent:lifecycle", lifecycle("6-Critic", "pstack-panel-a-critic"));
+		h.events.emit("task:subagent:event", fallback("6-Critic", { from: "anthropic/a:high", to: "anthropic/a:low" }));
+		h.events.emit("task:subagent:event", fallback("6-Critic", { from: "anthropic/a", to: "bedrock/a" }));
+		h.events.emit("task:subagent:event", fallback("6-Critic", { from: "fireworks/m-fast", to: "fireworks/m", role: "fireworks-fast" }));
+		expect(h.entries).toEqual([]);
+		h.events.emit("task:subagent:event", fallback("6-Critic", { from: "anthropic/a:high", to: "openai/b:high" }));
+		expect(h.entries).toHaveLength(1);
 	});
 
 	it("ignores fallbacks in runs that are not seats, other event types, and unknown runs", async () => {

@@ -58,7 +58,7 @@ async function createSession(options: Options = {}) {
 		cwd: options.cwd ?? repository,
 		agent: { kind: name === "main" ? "main" : "sub", id: "a1", name, depth: 0 },
 		sessionManager: { getBranch: () => [] },
-		models: { resolve: () => ({ provider: "test", id: "model" }) },
+		models: { resolve: () => ({ provider: "test", id: "model" }), family: () => "test" },
 	};
 	pstackExtension(pi as never, { homeDirectory: home });
 	const fire = (event: string, payload: unknown) => handlers.get(event)!(payload, ctx);

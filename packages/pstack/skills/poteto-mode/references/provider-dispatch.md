@@ -29,13 +29,13 @@ A read-only lane cannot write, and that is a hard boundary. A write lane that mu
 
 ## Panel seats
 
-A panel is the set of configured seats. Panel workflows (interrogate, arena, swarm, architect, how critics) run every configured seat in parallel.
+A panel is the set of configured seats. Panel workflows (interrogate, arena, swarm, architect, how critics) run every configured seat in parallel. A hidden roster note tells the session which seats those are, with each seat's model and vendor. `panel-verdicts.md` in this directory says how to read the roster, dispatch the critics and merge their verdicts.
 
 - There are five seats, `a` to `e`, with model roles `pstack-panel-a` to `pstack-panel-e`. A seat has no built-in fallback. A seat whose role is unset is absent: skip it, do not report an error.
 - Each seat has two agents. `pstack-panel-<seat>-critic` is read-only and returns a structured verdict: `approve`, `concerns` or `reject`, with findings that carry severity (`blocker`, `major`, `minor`, `nit`), file, line, claim and evidence. `pstack-panel-<seat>-builder` writes, and runs only with `isolated: true`.
-- At most five seats run, and the `maxPanelSize` setting caps it lower. A cap keeps the first configured seats in seat order.
+- At most five seats run, and the `maxPanelSize` setting caps it lower (default 5, which adds no cap). A cap keeps the first configured seats in seat order, and the roster is already capped.
 - Seats are meant to hold distinct models, ideally from different vendors. `/pstack setup` aims for that and `/pstack doctor` checks it. If two seats resolve to the same model, their agreement is not independent evidence, so say that.
-- If every seat that ran resolves to one vendor, the panel's verdict states `diversity reduced: single vendor`.
+- If every seat that ran resolves to one vendor, the panel's verdict states `diversity reduced: single vendor`. A one-seat panel is single-vendor.
 - With no seat configured, a panel workflow cannot run. Tell the user to run `/pstack setup`.
 
 OMP does not skip an unset single-role agent: the child fails with "No model selected" on its first prompt. pstack therefore refuses to spawn the agent of an unset seat. The refusal names the seat and tells you to skip it and continue with the seats that have models. Do not retry the spawn, do not substitute another agent, and do not treat the refusal as a failed run.
@@ -55,7 +55,7 @@ Write lanes that run in parallel, arena and swarm candidates and panel builders,
 
 - `isolated` exists only when `task.isolation.enabled` is on. It is off by default. pstack never turns it on silently: `/pstack setup` offers to enable it and asks for explicit confirmation, and `/pstack doctor` reports whether it is on.
 - If the `task` schema has no `isolated` field, do not fan out writers into the shared checkout. Tell the user isolation is off and name `/pstack setup`. Read-only lanes still run.
-- One writer per worktree or branch. Brief each isolated worker to commit and push its result, so nothing depends on its worktree surviving.
+- One writer per worktree or branch. OMP captures an isolated run's changes as a patch or a task branch. While `task.isolation.apply` is on, which is the default, OMP lands them in this checkout when the run ends. That suits one writer. Candidates that must stay apart, such as arena's, need it off, so that each candidate stays an artifact to compare and graft from. Brief a writer whose result must outlive the session to commit and push it.
 
 ## Effort
 

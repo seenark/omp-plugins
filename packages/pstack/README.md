@@ -36,7 +36,7 @@ OMP discovers `skills/`, `agents/` and `rules/` from the package root through it
 /pstack setup    Choose models for the pstack roles
 ```
 
-pstack does nothing until you start it. `/skill:poteto-mode` has the same effect as `/poteto`: the extension detects it from the `input` event (interactive and RPC modes) and from the session's user-invoked `skill-prompt` message (every mode). Activation is idempotent. On activation the session receives a hidden note listing the configured panel seats (capped by `maxPanelSize`) and the absent ones.
+pstack does nothing until you start it. `/skill:poteto-mode` has the same effect as `/poteto`: the extension detects it from the `input` event (interactive and RPC modes) and from the session's user-invoked `skill-prompt` message (every mode). Activation is idempotent. On activation the session receives a hidden note listing the configured panel seats (capped by `maxPanelSize`) with their models, and the absent ones.
 
 ## Run state
 
@@ -108,7 +108,11 @@ Every lane resolves its model through `pstack-*` model roles in your OMP config.
 | `pstack-security` | `@slow` | `pstack-security` (read-only) |
 | `pstack-panel-a` … `pstack-panel-e` | none: an unset seat is absent | `pstack-panel-<x>-critic` (read-only, structured verdict), `pstack-panel-<x>-builder` (write-capable, dispatch with task isolation) |
 
-Work-role agents list the pstack role, then the built-in role, so OMP skips an unset pstack role. OMP does not skip an unset single role: that child fails on its first prompt. pstack therefore blocks the spawn of an unset seat's agents with a reason telling the agent to skip that seat. A model fallback during a seat's run is stored as a `dev.codesook.pstack.dropout` session entry.
+Work-role agents list the pstack role, then the built-in role, so OMP skips an unset pstack role. OMP does not skip an unset single role: that child fails on its first prompt. pstack therefore blocks the spawn of an unset seat's agents with a reason telling the agent to skip that seat. A fallback to another model during a seat's run is stored as a `dev.codesook.pstack.dropout` session entry. A fallback that keeps the model (a thinking level, a provider route, the Fast tier) is not a dropout.
+
+## Panel workflows
+
+`interrogate`, `arena`, `swarm`, `architect` and the critique step of `how` run on the configured seats. The session learns its seats from a hidden roster note: on activation, and when one of these skills is started outside a run. The note lists each seat that has a model, in seat order and capped by `maxPanelSize`, with its model and vendor (the models API's family token), and says so when every seat is one vendor. Critics return the structured verdict; their findings are deduplicated with `judge_batch`, then `pstack-judge` synthesizes. The helpers for the mechanical part are in `src/verdict.ts` (`duplicateCandidates`, `mergeVerdicts`, `reviewerLines`); the skills import them from an `eval` cell, and `skills/poteto-mode/references/panel-verdicts.md` is the procedure. The merged verdict names each seat's model and carries `diversity reduced: single vendor` when the seats that answered are one vendor. Arena builders run as isolated tasks, and arena asks the user to turn `task.isolation.apply` off first, so each candidate stays a patch or task branch to graft from.
 
 ## Behavior Configuration
 
@@ -158,6 +162,7 @@ Adaptations are code, in `src/sync/rules/`, one file per group so tickets add ru
 | --- | --- |
 | `collisions.ts` | Skill renames (`tdd` to `pstack-tdd`, `teach` to `pstack-teach`); the engine moves the skill and derives the rules that rewrite references to it |
 | `core.ts` | Excluded parts (`make-bot-ui`; `automations` and `docs/guide` are never imported), the references they leave dangling, residual terms nobody owns |
+| `panel.ts` | Forks for the multi-model skills (`interrogate`, `arena`, `swarm`, `architect`, `how`) and the `panel-verdicts.md` reference, all hand-edited; their reasons live in the file |
 | `guards.ts` | Upstream's `check-plan` script (Excluded; the todo guard replaces it) and the playbook text that called it |
 | `dispatch.ts`, `pr.ts`, `sessions.ts` | Cursor primitives replaced by later tickets: subagent dispatch, PR workflows, session paths, goal mode, drivers, and the `/skill:<name>` form of slash commands (the skill list lives in `sessions.ts`; a test fails when `skills/` outgrows it) |
 
