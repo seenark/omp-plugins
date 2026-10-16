@@ -204,6 +204,27 @@ describe("Shared Display source composition", () => {
 	});
 });
 
+describe("Shared Display pstack producer", () => {
+	it("renders pstack last by default and drops its segment on a tombstone", () => {
+		const host = makeHostHarness();
+		try {
+			host.load();
+			host.start();
+			const ponytail = connectSharedDisplay(host.events, "ponytail");
+			const pstack = connectSharedDisplay(host.events, "pstack");
+			pstack.publish({ frames: [["pstack"]] });
+			ponytail.publish({ frames: [["P"]] });
+			expect(host.rows()).toEqual(["P  pstack"]);
+			pstack.publish(null);
+			expect(host.rows()).toEqual(["P"]);
+			pstack.dispose();
+			ponytail.dispose();
+		} finally {
+			host.close();
+		}
+	});
+});
+
 describe("Shared Display Ponytail producer", () => {
 	it("renders Ponytail only from a producer snapshot, ignoring native status, commands and session entries", () => {
 		const host = makeHostHarness();
@@ -233,6 +254,7 @@ describe("Shared Display configuration", () => {
 			"rtk",
 			"codegraph",
 			"beads",
+			"pstack",
 		]);
 		expect(normalizeSharedDisplayConfig({ order: ["headroom", "codegraph", "beads"] }).order).toEqual([
 			"headroom",
@@ -241,6 +263,7 @@ describe("Shared Display configuration", () => {
 			"ponytail",
 			"caveman",
 			"rtk",
+			"pstack",
 		]);
 	});
 

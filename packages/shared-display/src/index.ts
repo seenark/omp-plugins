@@ -62,7 +62,7 @@ export {
 
 const WIDGET_KEY = "codesook-shared-display";
 const DEFAULT_HORIZONTAL_SEPARATOR = "  ";
-const SOURCE_ORDER: readonly DisplaySource[] = ["ponytail", "caveman", "headroom", "rtk", "codegraph", "beads"];
+const SOURCE_ORDER: readonly DisplaySource[] = ["ponytail", "caveman", "headroom", "rtk", "codegraph", "beads", "pstack"];
 
 export type SharedDisplayLayout = "horizontal" | "vertical";
 export type SharedDisplayStyle = "plain" | "powerline";
@@ -746,7 +746,7 @@ export function sharedDisplaySettingsItems(
 			submenu: (current, done) => inputSubmenu(current, done),
 			changed: draft.order.join(",") !== DEFAULT_SHARED_DISPLAY_CONFIG.order.join(","),
 			description:
-				"Comma-separated source order: ponytail, caveman, headroom, rtk, codegraph, beads. Unknown names and duplicates are discarded. Omitted sources are appended; integration visibility controls whether they appear.",
+				"Comma-separated source order: ponytail, caveman, headroom, rtk, codegraph, beads, pstack. Unknown names and duplicates are discarded. Omitted sources are appended; integration visibility controls whether they appear.",
 		},
 		{
 			id: "widgetPlacement",
