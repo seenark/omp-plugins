@@ -19,14 +19,14 @@ Open a todolist with one entry per phase before launching anything.
 
 1. State the done predicate and the artifact or report the swarm must return.
 2. Choose the shape. Partition into slices, race N workers on identical briefs, or mix both. For a race or mixed shape, declare `first pass`, `rank all`, or `best-of` before spawning.
-4. Pick the worker model from the `swarm workers` line in `~/.cursor/rules/pstack-models.mdc`. If the rule or that line is missing, use `grok-4.7-xhigh-fast`. For `auto` or `inherit-parent`, omit `model` so the workers run on the parent model. If the Task tool rejects a slug, use the default and say so. If it rejects the default, use the closest valid slug of the same family from its error message. For a model race, name each arm's model up front. Pick each subagent's reasoning level and fast or standard speed for the job, per the Subagents section of the **poteto-mode** skill.
+4. Pick the worker lane: `pstack-build` when a worker writes or runs commands, `pstack-explore` when it only reads. Workers on one lane share one model, so race different panel seats' builders (`pstack-panel-<seat>-builder`) when a model race is the point, and name each arm's agent up front (see `../poteto-mode/references/provider-dispatch.md`). Pick each subagent's lane and `effort` for the job, per the Subagents section of the **poteto-mode** skill.
 5. Give each worker its own writable output when it writes. When workers verify or measure commits, each brief names the exact SHAs. A measurement brief also names the method (sample count, what one sample is, order). The worker records both in its result.
 
 ## Phase B: Fan out
 
-Spawn all N workers in one message with `subagent_type: generalPurpose`, `environment: "cloud"`, `run_in_background: true`, and the step 4 model, left unset for `auto` or `inherit-parent`. Use `environment: "local"` only when the worker needs access to something on the user's computer.
+Spawn all N workers in one `task` call, each with `agent` set to the step 4 lane and `isolated: true`, so each runs as a background task in its own worktree. Run a worker without isolation only when it needs state that lives in this checkout, such as uncommitted files or a service running here. If the `task` schema has no `isolated` field, isolation is off: read the Isolation section of `../poteto-mode/references/provider-dispatch.md` and do not fan out writers.
 
-When a worker must start from a non-default pushed branch, pass `cloud_base_branch`.
+When a worker must start from a non-default branch, name the branch and its SHA in the brief and have the worker check it out inside its worktree.
 
 Every brief stands alone. Include the goal, scope, exact slice or race arm, how to verify, and what to report. Reports use `PASS`, `ISSUES`, or `BLOCKED` with evidence. A worker that can prove a defect reports `ISSUES` and lists every issue it can prove, not only the first.
 

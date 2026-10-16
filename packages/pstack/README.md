@@ -120,6 +120,8 @@ A group exports any of `rules`, `exclusions`, `forks`, `renames`, `moves` and `t
 
 Fixed by the engine rather than by rules: principle skills get `hide: true` (still loadable with `/skill:principle-...`); the `icon` and `color` frontmatter of Cursor's mode UI is stripped; every skill and agent `name` is set to its directory or file name.
 
+The dispatch group records three forks, each with its reason in `rules/dispatch.ts`. `skills/poteto-mode/references/provider-dispatch.md` is rewritten: Upstream's provider runner (other vendors' CLIs) is Excluded, Upstream at this pin has no such file, and every workflow skill points at this one for the real model roles, panel seats, dropout policy and isolation. `agents/poteto-agent.md` is patched to run on `pstack-build` with `@task` as fallback and to autoload the poteto-mode skill. `skills/setup-pstack/SKILL.md` is rewritten to point at the `/pstack setup` command. A rewritten fork that Upstream never had is not a conflict; one Upstream removed still is.
+
 ## Syncing
 
 ```sh
