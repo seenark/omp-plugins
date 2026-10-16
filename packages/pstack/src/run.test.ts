@@ -70,6 +70,7 @@ function createHarness(options: { entries?: SessionEntry[]; idle?: boolean; maxP
 	let idle = options.idle ?? true;
 	const ctx = {
 		hasUI: true,
+		agent: { kind: "main", id: "main", name: "main" },
 		isIdle: () => idle,
 		ui: { notify: (message: string, level: string) => void notices.push({ level, message }) },
 		sessionManager: { getBranch: () => entries },

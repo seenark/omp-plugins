@@ -18,7 +18,7 @@ export const TEAM_KIT_LICENSE = "cursor-team-kit/LICENSE";
 export const PSTACK_MANIFEST = "pstack/plugin.json";
 
 const UPSTREAM_PATHS = [...IMPORT_MAP.map(entry => entry.from.replace(/\/$/, "")), PSTACK_LICENSE, TEAM_KIT_LICENSE, PSTACK_MANIFEST];
-const IGNORED = /(^|\/)(node_modules|\.DS_Store)(\/|$)|\.log$/;
+export const IGNORED = /(^|\/)(node_modules|\.DS_Store)(\/|$)|\.log$/;
 
 function walk(root: string, relative: string, tree: Tree): void {
 	if (IGNORED.test(relative)) return;

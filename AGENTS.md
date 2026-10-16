@@ -15,5 +15,5 @@
 - **Issues, specs, tickets, `bd` commands, session close** → `docs/agents/issue-tracker.md`. Run `bd prime` when Beads context is missing.
 - **Triage, role labels** → `docs/agents/triage-labels.md`.
 - **Exploring the codebase, domain terms, ADRs** → `docs/agents/domain.md` first.
-- **Updating Caveman, Ponytail, the Headroom server, or the RTK binary upstream** → `docs/agents/upstream-sync.md`.
+- **Updating Caveman, Ponytail, pstack, the Headroom server, or the RTK binary upstream** → `docs/agents/upstream-sync.md`.
 - **Installing or setting up these plugins for a user** → `docs/agents/setup.md`. Ask before every install, removal, or Headroom provisioning step.

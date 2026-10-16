@@ -4,9 +4,9 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { editFrontmatter } from "./frontmatter.ts";
 import { renderNotices } from "./notices.ts";
-import { IMPORT_MAP, PSTACK_LICENSE, PSTACK_MANIFEST, TEAM_KIT_LICENSE } from "./source.ts";
-import { renderTermReport, scanTerms, type TermFinding } from "./terms.ts";
-import type { Exclusion, Fork, Group, Move, Pin, Rename, Rule, TermCategory, Tree, VFile } from "./types.ts";
+import { IGNORED, IMPORT_MAP, PSTACK_LICENSE, PSTACK_MANIFEST, TEAM_KIT_LICENSE } from "./source.ts";
+import { gateTerms, renderTermReport, scanTerms, type TermFinding } from "./terms.ts";
+import type { Exclusion, Fork, Group, Move, Pin, Rename, Rule, TermAllowance, TermCategory, Tree, VFile } from "./types.ts";
 
 export const PIN_FILE = "upstream.json";
 export const NOTICES_FILE = "THIRD-PARTY-NOTICES.txt";
@@ -46,6 +46,8 @@ export interface SyncOptions {
 	groups: readonly Group[];
 	/** Directories of other discovered skills, checked for name collisions with ours. */
 	skillDirectories?: readonly string[];
+	/** Claims package files the sync does not own (generated agents), so the stale scan leaves them alone. */
+	ownedElsewhere?: (file: string) => boolean;
 	write: boolean;
 }
 
@@ -56,6 +58,10 @@ export interface SyncResult {
 	unusedRules: string[];
 	collisions: Collision[];
 	findings: TermFinding[];
+	/** Findings the verify gate rejects: every finding no allowance covers exactly. */
+	termFailures: TermFinding[];
+	/** Allowances the output no longer needs; the verify gate rejects them so they cannot outlive their ticket. */
+	expiredAllowances: TermAllowance[];
 	report: string;
 }
 
@@ -66,6 +72,7 @@ interface Config {
 	renames: Rename[];
 	moves: Move[];
 	terms: TermCategory[];
+	allowances: TermAllowance[];
 }
 
 function escapeRegExp(text: string): string {
@@ -106,8 +113,34 @@ function compile(groups: readonly Group[]): Config {
 		if (fork.reason.trim() === "" || fork.since.trim() === "") problems.push(`fork ${fork.path} needs a reason and a since`);
 		forks.set(fork.path, fork);
 	}
+	const terms = groups.flatMap(group => group.terms ?? []);
+	const allowances = groups.flatMap(group => group.allowances ?? []);
+	for (const allowance of allowances) {
+		const label = `term allowance ${allowance.category} ${allowance.file} ${allowance.term}`;
+		if (!terms.some(category => category.id === allowance.category && allowance.term in category.patterns)) problems.push(`${label} names no known term`);
+		if (allowance.ticket.trim() === "" || allowance.reason.trim() === "") problems.push(`${label} needs a ticket and a reason`);
+		if (!(allowance.count > 0)) problems.push(`${label} needs a positive count`);
+	}
 	if (problems.length > 0) throw new SyncConfigError(problems.join("\n"));
-	return { rules, exclusions, forks, renames, moves, terms: groups.flatMap(group => group.terms ?? []) };
+	return { rules, exclusions, forks, renames, moves, terms, allowances };
+}
+
+/** Package files under the directories sync fills from Upstream, relative to the package root. */
+function packageFiles(packageRoot: string): string[] {
+	const files: string[] = [];
+	const walk = (relative: string) => {
+		if (IGNORED.test(relative)) return;
+		for (const entry of fs.readdirSync(path.join(packageRoot, relative), { withFileTypes: true })) {
+			const child = `${relative}/${entry.name}`;
+			if (entry.isDirectory()) walk(child);
+			else if (!IGNORED.test(child)) files.push(child);
+		}
+	};
+	for (const { to } of IMPORT_MAP) {
+		const root = to.replace(/\/$/, "");
+		if (fs.existsSync(path.join(packageRoot, root))) walk(root);
+	}
+	return [...new Set(files)];
 }
 
 function importPath(upstreamPath: string): string | undefined {
@@ -300,7 +333,13 @@ export function runSync(options: SyncOptions): SyncResult {
 	const drift: Drift[] = [];
 	const conflicts: Conflict[] = [];
 	const stale: string[] = [];
-	for (const filePath of new Set([...theirs.files.keys(), ...base.keys(), ...config.forks.keys()])) {
+	const produced = new Set([...theirs.files.keys(), ...base.keys(), ...config.forks.keys()]);
+	for (const filePath of packageFiles(packageRoot)) {
+		if (produced.has(filePath) || options.ownedElsewhere?.(filePath)) continue;
+		stale.push(filePath);
+		drift.push({ path: filePath, kind: "stale" });
+	}
+	for (const filePath of produced) {
 		const current = readCurrent(packageRoot, filePath);
 		const fork = config.forks.get(filePath);
 		const next = fork ? resolveFork(fork, current, base.get(filePath), theirs.files.get(filePath), conflicts) : theirs.files.get(filePath);
@@ -344,11 +383,27 @@ export function runSync(options: SyncOptions): SyncResult {
 		fs.writeFileSync(noticesPath, noticesText);
 	}
 
-	const findings = scanTerms(desired, config.terms);
+	// Scan what the package ships, so a term a hand edit introduced is named even though sync would remove it.
+	const shipped: Tree = new Map();
+	for (const filePath of desired.keys()) {
+		const file = readCurrent(packageRoot, filePath);
+		if (file !== undefined) shipped.set(filePath, file);
+	}
+	const findings = scanTerms(shipped, config.terms);
 	const collisions = findCollisions(skillNames(desired), options.skillDirectories ?? []);
-	const result: SyncResult = { pin, drift, conflicts, unusedRules: theirs.unused, collisions, findings, report: "" };
+	const gate = gateTerms(findings, config.allowances);
+	const result: SyncResult = { pin, drift, conflicts, unusedRules: theirs.unused, collisions, findings, termFailures: gate.rejected, expiredAllowances: gate.expired, report: "" };
 	result.report = renderReport(result, config.terms, options.write);
 	return result;
+}
+
+/** What `--check` (and so `bun run verify`) rejects. */
+export function failsGate(result: SyncResult): boolean {
+	return result.conflicts.length + result.drift.length + result.termFailures.length + result.expiredAllowances.length > 0;
+}
+
+function skillsWithDrift(result: SyncResult, kind: Drift["kind"]): string[] {
+	return result.drift.flatMap(entry => (entry.kind === kind ? /^skills\/([^/]+)\/SKILL\.md$/.exec(entry.path)?.[1] ?? [] : []));
 }
 
 function renderReport(result: SyncResult, terms: readonly TermCategory[], written: boolean): string {
@@ -360,8 +415,18 @@ function renderReport(result: SyncResult, terms: readonly TermCategory[], writte
 		...(written
 			? [`${result.drift.length} file(s) updated.`, ""]
 			: list("Drift from sync output", result.drift.map(entry => `${entry.path} (${entry.kind})`))),
+		...list("New skills to classify", skillsWithDrift(result, "missing")),
+		...list("Skills sync removes (stop and ask the owner)", skillsWithDrift(result, "stale")),
 		...list("Skill name collisions", result.collisions.map(collision => `${collision.name} also exists in ${collision.directory}`)),
 		...list("Rules that matched nothing", result.unusedRules),
 		renderTermReport(result.findings, terms),
+		...list(
+			"Cursor-specific terms the verify gate rejects",
+			result.termFailures.map(finding => `${finding.file}: ${finding.term} x${finding.count} (${finding.category}, owner ${finding.owner})`),
+		),
+		...list(
+			"Term allowances to delete or update",
+			result.expiredAllowances.map(allowance => `${allowance.category} ${allowance.file}: ${allowance.term} x${allowance.count} no longer matches (ticket ${allowance.ticket})`),
+		),
 	].join("\n");
 }

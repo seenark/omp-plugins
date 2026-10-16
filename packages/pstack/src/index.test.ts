@@ -45,6 +45,7 @@ function createHarness(options: { hasUI?: boolean; configured?: string[]; models
 	};
 	const ctx = {
 		hasUI: options.hasUI ?? true,
+		agent: { kind: "main", id: "Main", name: "main", depth: 0 },
 		ui: { notify: (message: string, level: string) => void notices.push({ level, message }) },
 		sessionManager: { getBranch: () => [] },
 		models: options.models ?? {

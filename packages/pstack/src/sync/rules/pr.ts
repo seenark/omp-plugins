@@ -3,7 +3,6 @@ import type { Group, Rule } from "../types.ts";
 /** Ticket omp-plugins-4nv.4: PR workflows without Graphite or Cursor /loop. */
 
 const TRIAGE = "skills/poteto-mode/references/review-bot-triage.md";
-const CHECK_PLAN = "skills/poteto-mode/scripts/check-plan.{mjs,test.ts}";
 
 /** Each Upstream Bugbot mention in the triage reference, by the words around it, so the grammar survives. */
 const TRIAGE_WORDING: Record<string, string> = {
@@ -45,18 +44,11 @@ export const pr: Group = {
 	rules: [
 		{
 			id: "pr/scripts-package",
-			rationale: "watch-pr is Excluded, so its test and typecheck entries would point at a missing directory.",
+			rationale: "watch-pr and check-plan are Excluded, so their test and typecheck entries would point at missing files.",
 			files: "skills/poteto-mode/scripts/package.json",
 			pattern: /"test": "bun test orch watch-pr check-plan\.test\.ts",\n\s*"typecheck": "tsc --project watch-pr\/tsconfig\.json[^"]*"/,
-			replacement: '"test": "bun test orch check-plan.test.ts"',
+			replacement: '"test": "bun test orch"',
 		},
-		literal(
-			"check-plan-heartbeat",
-			"The program-plan template names an hourly heartbeat instead of `/loop 1h`, so the plan check looks for the marker the template now carries.",
-			"/loop 1h",
-			"hourly heartbeat",
-			CHECK_PLAN,
-		),
 		literal(
 			"opening-base-chained",
 			"Without Graphite, a stacked PR is a base-chained PR that `gh` creates against its parent's branch.",
