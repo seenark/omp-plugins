@@ -191,6 +191,12 @@ describe("presets", () => {
 		for (const role of WORK_ROLES) expect(assignment[role.id]).toBeDefined();
 	});
 
+	it("does not rank a pinned snapshot above newer releases", () => {
+		const claude = ["claude-opus-5-5", "claude-sonnet-5-5", "claude-haiku-5-5", "claude-opus-4-8", "claude-opus-4-7", "claude-opus-4-20250514"];
+		const assignment = presetAssignment("claude-only", listChoices(modelsApi(claude.map(id => model("anthropic", id)))))!;
+		expect(Object.values(assignment)).not.toContain("anthropic/claude-opus-4-20250514");
+	});
+
 	it("is unavailable when the vendor has no served model", () => {
 		expect(presetAssignment("claude-codex", listChoices(modelsApi(SERVED.slice(0, 5))))).toBeUndefined();
 		expect(presetAssignment("claude-only", listChoices(modelsApi(SERVED.slice(5))))).toBeUndefined();
