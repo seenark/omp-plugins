@@ -36,6 +36,13 @@ export interface Fork {
 	since: string;
 }
 
+/** A vendored file placed at another package-relative path. Rules see the new path. */
+export interface Move {
+	from: string;
+	to: string;
+	reason: string;
+}
+
 /** A skill renamed because its Upstream name collides with another discovered skill. */
 export interface Rename {
 	from: string;
@@ -58,6 +65,7 @@ export interface Group {
 	exclusions?: readonly Exclusion[];
 	forks?: readonly Fork[];
 	renames?: readonly Rename[];
+	moves?: readonly Move[];
 	terms?: readonly TermCategory[];
 }
 

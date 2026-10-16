@@ -3,9 +3,12 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { NOTICES_FILE, PIN_FILE, runSync, SyncConfigError, type SyncOptions } from "./engine.ts";
-import { groups as shippedGroups } from "./rules/index.ts";
+import { collisions } from "./rules/collisions.ts";
 import { loadTree } from "./source.ts";
 import type { Group } from "./types.ts";
+
+/** Fixture trees lack the files the other groups move or fork, so these tests run the collision renames alone. */
+const shippedGroups = [collisions];
 
 const temporary: string[] = [];
 afterEach(() => {
