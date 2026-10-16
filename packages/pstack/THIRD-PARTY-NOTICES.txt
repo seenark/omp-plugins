@@ -18,6 +18,7 @@ Vendored Content, adapted by src/sync (Adaptations are listed in README.md):
 Excluded from Vendored Content:
   skills/make-bot-ui/**
   skills/poteto-mode/scripts/watch-pr/**
+  skills/poteto-mode/scripts/check-plan.{mjs,test.ts}
   (every other Upstream path, including pstack/automations, pstack/docs, thermos and
   the other cursor-team-kit skills, is never imported)
 

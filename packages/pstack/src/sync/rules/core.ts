@@ -60,13 +60,6 @@ export const core: Group = {
 			},
 		},
 		{
-			id: "guards",
-			owner: "omp-plugins-4nv.12",
-			patterns: {
-				"check-plan": /check-plan/,
-			},
-		},
-		{
 			id: "cursor-other",
 			owner: "unassigned",
 			patterns: {

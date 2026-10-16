@@ -16,6 +16,7 @@ import { DROPOUT_ENTRY_TYPE, watchDropouts } from "./dropouts.ts";
 import { playbookOpenedBy, progressFromTodo } from "./observe.ts";
 import { activeSeats, guardSeatSpawn } from "./panel.ts";
 import { createRunStore } from "./run-state.ts";
+import { createWarningGuards } from "./warn-guards.ts";
 
 const COMMAND_USAGE = "Usage: /pstack [status]";
 
@@ -42,7 +43,11 @@ export default function pstackExtension(pi: ExtensionAPI, options: PstackExtensi
 		publisher.publish(text === undefined ? null : { frames: [[text]] });
 	});
 
-	const restore = (ctx: ExtensionContext): void => runs.restore(ctx.sessionManager.getBranch());
+	const warnings = createWarningGuards({ behavior, runs, skillDirectory: options.skillDirectory ?? DEFAULT_POTETO_DIRECTORY });
+	const restore = (ctx: ExtensionContext): void => {
+		warnings.reset();
+		runs.restore(ctx.sessionManager.getBranch());
+	};
 
 	/** Start the run and tell the session which panel seats exist. False when it was already active. */
 	const activate = (ctx: ExtensionContext, task: string): boolean => {
@@ -89,14 +94,17 @@ export default function pstackExtension(pi: ExtensionAPI, options: PstackExtensi
 		if (task !== undefined) activate(ctx, task);
 	});
 
-	pi.on("tool_result", event => {
+	pi.on("tool_result", (event, ctx) => {
 		const state = runs.state();
-		if (!state.active) return;
-		const playbook = playbookOpenedBy(event, state.playbook);
-		if (playbook !== undefined) runs.setPlaybook(playbook);
-		const progress = progressFromTodo(event);
-		if (progress !== undefined) runs.setProgress(progress);
+		if (state.active) {
+			const playbook = playbookOpenedBy(event, state.playbook);
+			if (playbook !== undefined) runs.setPlaybook(playbook);
+			const progress = progressFromTodo(event);
+			if (progress !== undefined) runs.setProgress(progress);
+		}
+		return warnings.onToolResult(event, ctx);
 	});
+	pi.on("session_stop", (event, ctx) => warnings.onSessionStop(event, ctx));
 
 	// The run state is rebuilt from custom entries, which compaction keeps; the model only needs to be told where it is.
 	pi.on("session_compact", () => {
