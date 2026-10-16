@@ -2,15 +2,16 @@ import type { ExtensionAPI, ExtensionContext } from "@oh-my-pi/pi-coding-agent";
 import { createBehaviorStore, type BehaviorStoreOptions } from "./behavior.ts";
 import { DROPOUT_ENTRY_TYPE, watchDropouts } from "./dropouts.ts";
 import { guardSeatSpawn } from "./panel.ts";
+import { runSetupCommand, type SetupOptions } from "./setup/index.ts";
 
-const COMMAND_USAGE = "Usage: /pstack [status]";
+const COMMAND_USAGE = "Usage: /pstack [status|setup]";
 
-function notify(pi: ExtensionAPI, ctx: ExtensionContext, level: "info" | "warning", message: string): void {
+function notify(pi: ExtensionAPI, ctx: ExtensionContext, level: "info" | "warning" | "error", message: string): void {
 	if (ctx.hasUI) ctx.ui.notify(message, level);
 	else pi.logger[level === "warning" ? "warn" : level](message);
 }
 
-export type PstackExtensionOptions = Pick<BehaviorStoreOptions, "configPath" | "homeDirectory">;
+export type PstackExtensionOptions = Pick<BehaviorStoreOptions, "configPath" | "homeDirectory"> & { setup?: SetupOptions };
 
 export default function pstackExtension(pi: ExtensionAPI, options: PstackExtensionOptions = {}): void {
 	const behavior = createBehaviorStore(pi.events, { ...options, onWarning: message => pi.logger.warn(message) });
@@ -33,6 +34,7 @@ export default function pstackExtension(pi: ExtensionAPI, options: PstackExtensi
 		handler: async (args, ctx) => {
 			const subcommand = args.trim().split(/\s+/)[0] ?? "";
 			if (subcommand === "" || subcommand === "status") notify(pi, ctx, "info", "pstack: inactive");
+			else if (subcommand === "setup") await runSetupCommand(pi, ctx, (level, message) => notify(pi, ctx, level, message), options.setup);
 			else notify(pi, ctx, "warning", `Unknown /pstack subcommand. ${COMMAND_USAGE}`);
 		},
 	});

@@ -32,9 +32,24 @@ OMP discovers `skills/`, `agents/` and `rules/` from the package root through it
 ```text
 /pstack          Report the run state
 /pstack status   Same
+/pstack setup    Choose models for the pstack roles
 ```
 
 pstack is currently always inactive: activation arrives with later work.
+
+## Setup
+
+`/pstack setup` is interactive. It lists only models your OMP registry serves, offers the presets `claude-only`, `claude-codex` and `lean` (a preset appears only when the registry has the models it needs), then shows one menu per role with what the role is, when pstack uses it and what kind of model suits it. Edit the pstack roles by hand in your OMP config instead if you prefer: setup is a convenience.
+
+On Save it:
+
+- refuses two seats on the same model (the same model through another provider or thinking suffix counts as the same) and warns `diversity reduced: single vendor` when every seat shares a vendor;
+- probes each selected model with one real turn, and writes nothing if any probe fails;
+- asks before enabling `task.isolation.enabled` when it is off, and leaves it unchanged unless you confirm;
+- writes only `pstack-*` model roles, plus an empty fallback chain for every configured seat, through OMP's in-process settings API, so `default`, `commit`, `vision`, `tiny`, `advisor` and every other role stay as they are;
+- reads the config back and restores the previous one when it differs from what was written.
+
+Running it again with the same choices changes nothing. Presets pick tiers from model-id keywords (`opus`, `sonnet`, `haiku`, `mini`, ...), because OMP exposes no capability tier: adjust a role by hand when a vendor names its models differently.
 
 ## Model roles
 
