@@ -9,6 +9,11 @@ import * as path from "node:path";
 export const GUARD_STRICTNESS_LEVELS = ["block-and-warn", "warn-only", "off"] as const;
 export type GuardStrictness = (typeof GUARD_STRICTNESS_LEVELS)[number];
 
+/** Blocking guards act only at `block-and-warn`. */
+export const blocksEnabled = (strictness: GuardStrictness): boolean => strictness === "block-and-warn";
+/** Warnings are shown at every level except `off`. */
+export const warningsEnabled = (strictness: GuardStrictness): boolean => strictness !== "off";
+
 export const MIN_PANEL_SIZE = 1;
 export const MAX_PANEL_SIZE = 5;
 

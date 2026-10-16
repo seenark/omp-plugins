@@ -10,8 +10,9 @@ import {
 	taskOfSkillInput,
 	taskOfSkillPrompt,
 } from "./activation.ts";
-import { createBehaviorStore, type BehaviorStoreOptions } from "./behavior.ts";
+import { blocksEnabled, createBehaviorStore, type BehaviorStoreOptions } from "./behavior.ts";
 import { reminderText, segmentText, statusReport } from "./display.ts";
+import { blockingFinding, spawnFinding, toolCallResult } from "./guards/blocking.ts";
 import { DROPOUT_ENTRY_TYPE, watchDropouts } from "./dropouts.ts";
 import { playbookOpenedBy, progressFromTodo } from "./observe.ts";
 import { activeSeats, guardSeatSpawn } from "./panel.ts";
@@ -76,7 +77,24 @@ export default function pstackExtension(pi: ExtensionAPI, options: PstackExtensi
 		behavior.dispose();
 		publisher.dispose();
 	});
-	pi.on("before_subagent_spawn", (event, ctx) => guardSeatSpawn(event, ctx));
+	pi.on("before_subagent_spawn", (event, ctx) => {
+		const finding = spawnFinding(ctx.agent.name);
+		if (finding && blocksEnabled(behavior.current().guardStrictness)) return { block: true, reason: finding.reason };
+		return guardSeatSpawn(event, ctx);
+	});
+
+	pi.on("tool_call", async (event, ctx) => {
+		const strictness = behavior.current().guardStrictness;
+		if (strictness === "off") return undefined;
+		const finding = await blockingFinding({
+			toolName: event.toolName,
+			input: event.input,
+			agentName: ctx.agent.name,
+			runActive: runs.state().active,
+			cwd: ctx.cwd,
+		});
+		return toolCallResult(finding, strictness);
+	});
 
 	// Interactive and RPC modes emit `input` before skill dispatch; print and ACP modes only reach the skill-prompt message.
 	pi.on("input", (event, ctx) => {
