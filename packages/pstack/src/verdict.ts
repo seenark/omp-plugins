@@ -1,5 +1,5 @@
 import { FINDING_SEVERITIES, VERDICTS, type PanelSeat } from "./roles.ts";
-import { SINGLE_VENDOR_WARNING, modelKey } from "./setup/rules.ts";
+import { SINGLE_VENDOR_WARNING, modelKey } from "./panel-rules.ts";
 
 /*
  * Merge helpers for panel workflows. The skills import this file from an `eval` cell, so it must stay free of

@@ -7,7 +7,7 @@ import { CANCEL, KEEP_CURRENT, SAVE, UNSET } from "./flow.ts";
 import { createHostSetupSettings } from "./host-settings.ts";
 import { PRESET_NAMES, presetAssignment } from "./presets.ts";
 import { probeAll, type ModelProbe } from "./probe.ts";
-import { SINGLE_VENDOR_WARNING, checkPanel, modelKey } from "./rules.ts";
+import { SINGLE_VENDOR_WARNING, checkPanel, modelKey } from "../panel-rules.ts";
 import { sameConfig, snapshot, type ConfigSnapshot, type SetupSettings } from "./settings.ts";
 
 const FAMILY: Record<string, string> = { anthropic: "anthropic", "openai-codex": "openai", openai: "openai" };

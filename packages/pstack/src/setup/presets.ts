@@ -1,6 +1,6 @@
 import { MODEL_ROLES, PANEL_SEATS, seatRoleId } from "../roles.ts";
 import type { ModelChoice } from "./catalog.ts";
-import { modelKey } from "./rules.ts";
+import { modelKey } from "../panel-rules.ts";
 
 /** Model spec per role id; undefined leaves the role unset (a work role falls back, a seat is absent). */
 export type Assignment = Record<string, string | undefined>;

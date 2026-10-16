@@ -14,13 +14,13 @@ import {
 	taskOfSkillInput,
 	taskOfSkillPrompt,
 } from "./activation.ts";
-import { blocksEnabled, createBehaviorStore, type BehaviorStoreOptions } from "./behavior.ts";
+import { blocksEnabled, createBehaviorStore, suspendsMode, type BehaviorStoreOptions } from "./behavior.ts";
 import { diagnose, doctorLevel, doctorReport } from "./doctor.ts";
 import { reminderText, segmentText, statusReport } from "./display.ts";
 import { blockingFinding, spawnFinding, toolCallResult } from "./guards/blocking.ts";
 import { DROPOUT_ENTRY_TYPE, watchDropouts } from "./dropouts.ts";
 import { playbookOpenedBy, progressFromTodo } from "./observe.ts";
-import { activeSeats, guardSeatSpawn } from "./panel.ts";
+import { activeSeats, guardSeatSpawn, type SeatStatus } from "./panel.ts";
 import { createActivationStore, reenabledInstructionModes } from "./activation-state.ts";
 import { loadSetupSettings, runPresetCommand, runSetupCommand, type SetupOptions } from "./setup/index.ts";
 import { createWarningGuards } from "./warn-guards.ts";
@@ -45,13 +45,17 @@ export default function pstackExtension(pi: ExtensionAPI, options: PstackExtensi
 	const publisher = connectSharedDisplay(pi.events, "pstack");
 	let stopDropouts: (() => void) | undefined;
 	let disposed = false;
+	const skillDirectory = options.skillDirectory ?? DEFAULT_POTETO_DIRECTORY;
+	const panelSeats = (ctx: ExtensionContext): SeatStatus[] => activeSeats(ctx.models, behavior.current().maxPanelSize);
+	/** Hidden note telling the session which panel seats can be spawned, delivered with the next turn. */
+	const sendRoster = (seats: readonly SeatStatus[]): void =>
+		pi.sendMessage({ customType: ROSTER_MESSAGE_TYPE, content: rosterText(seats), display: false }, { deliverAs: "nextTurn" });
 
 	/** Ask the Instruction Modes the user left suspendable to switch off, except those switched back on after `entries`' activation. */
 	const suspendModes = (entries: readonly unknown[] = []): void => {
-		const toggles = behavior.current();
-		const wanted = { caveman: toggles.suspendCaveman, ponytail: toggles.suspendPonytail };
 		const reenabled = reenabledInstructionModes(entries, SUSPENDABLE_INSTRUCTION_MODES);
-		suspendInstructionModes(pi.events, "pstack", SUSPENDABLE_INSTRUCTION_MODES.filter(mode => wanted[mode] && !reenabled.includes(mode)));
+		const modes = SUSPENDABLE_INSTRUCTION_MODES.filter(mode => suspendsMode(behavior.current(), mode) && !reenabled.includes(mode));
+		suspendInstructionModes(pi.events, "pstack", modes);
 	};
 
 	activation.subscribe((state, change) => {
@@ -61,7 +65,7 @@ export default function pstackExtension(pi: ExtensionAPI, options: PstackExtensi
 		publisher.publish(text === undefined ? null : { frames: [[text]] });
 	});
 
-	const warnings = createWarningGuards({ behavior, activation, skillDirectory: options.skillDirectory ?? DEFAULT_POTETO_DIRECTORY });
+	const warnings = createWarningGuards({ behavior, activation, skillDirectory });
 	const restore = (ctx: ExtensionContext): void => {
 		warnings.reset();
 		activation.restore(ctx.sessionManager.getBranch());
@@ -69,9 +73,9 @@ export default function pstackExtension(pi: ExtensionAPI, options: PstackExtensi
 
 	/** Start the Activation and tell the session which panel seats exist. False when it was already active. */
 	const activate = (ctx: ExtensionContext, task: string): boolean => {
-		const seats = activeSeats(ctx.models, behavior.current().maxPanelSize);
+		const seats = panelSeats(ctx);
 		if (!activation.activate({ task, seats: seats.map(seat => seat.seat) })) return false;
-		pi.sendMessage({ customType: ROSTER_MESSAGE_TYPE, content: rosterText(seats), display: false }, { deliverAs: "nextTurn" });
+		sendRoster(seats);
 		return true;
 	};
 
@@ -79,8 +83,7 @@ export default function pstackExtension(pi: ExtensionAPI, options: PstackExtensi
 	let panelInputSeen = false;
 	const announceSeats = (ctx: ExtensionContext): void => {
 		if (activation.state().active) return;
-		const seats = activeSeats(ctx.models, behavior.current().maxPanelSize);
-		pi.sendMessage({ customType: ROSTER_MESSAGE_TYPE, content: rosterText(seats), display: false }, { deliverAs: "nextTurn" });
+		sendRoster(panelSeats(ctx));
 	};
 
 	pi.on("session_start", (_event, ctx) => {
@@ -165,8 +168,7 @@ export default function pstackExtension(pi: ExtensionAPI, options: PstackExtensi
 		const state = activation.state();
 		if (!state.active) return;
 		pi.sendMessage({ customType: REMINDER_MESSAGE_TYPE, content: reminderText(state), display: false }, { deliverAs: "nextTurn" });
-		const seats = activeSeats(ctx.models, behavior.current().maxPanelSize);
-		pi.sendMessage({ customType: ROSTER_MESSAGE_TYPE, content: rosterText(seats), display: false }, { deliverAs: "nextTurn" });
+		sendRoster(panelSeats(ctx));
 	});
 
 	pi.registerCommand("poteto", {
@@ -175,7 +177,7 @@ export default function pstackExtension(pi: ExtensionAPI, options: PstackExtensi
 			const task = args.trim();
 			let prompt: string;
 			try {
-				prompt = await buildPotetoPrompt(options.skillDirectory ?? DEFAULT_POTETO_DIRECTORY, task);
+				prompt = await buildPotetoPrompt(skillDirectory, task);
 			} catch (error) {
 				notify(pi, ctx, "error", `Unable to read the vendored ${POTETO_SKILL} skill: ${String(error)}`);
 				return;
@@ -205,7 +207,7 @@ export default function pstackExtension(pi: ExtensionAPI, options: PstackExtensi
 						settings: await loadSetupSettings(pi, options.setup),
 						behavior: behavior.current(),
 						commands: pi.getCommands(),
-						skillsRoot: path.dirname(options.skillDirectory ?? DEFAULT_POTETO_DIRECTORY),
+						skillsRoot: path.dirname(skillDirectory),
 						displayHostAvailable: publisher.hostAvailable,
 					});
 					notify(pi, ctx, doctorLevel(findings), doctorReport(findings));

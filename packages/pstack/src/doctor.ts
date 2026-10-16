@@ -1,10 +1,11 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "@oh-my-pi/pi-coding-agent";
-import type { PstackBehavior } from "./behavior.ts";
+import { SUSPENDABLE_INSTRUCTION_MODES } from "@codesook/omp-shared-display/instruction-mode";
+import { suspendsMode, type PstackBehavior } from "./behavior.ts";
 import { resolveSeats } from "./panel.ts";
-import { MODEL_ROLES, WORK_ROLES } from "./roles.ts";
-import { checkPanel } from "./setup/rules.ts";
+import { MODEL_ROLES, WORK_ROLES, roleAlias } from "./roles.ts";
+import { checkPanel } from "./panel-rules.ts";
 import type { SetupSettings } from "./setup/settings.ts";
 import { POTETO_SKILL } from "./activation.ts";
 
@@ -55,7 +56,7 @@ function checkRoles({ models, settings }: Pick<DoctorInput, "models" | "settings
 	const findings: Finding[] = [];
 	for (const role of MODEL_ROLES) {
 		const spec = configured[role.id];
-		if (spec !== undefined && !models.resolve(`@${role.id}`)) {
+		if (spec !== undefined && !models.resolve(roleAlias(role))) {
 			findings.push({ check: "roles", severity: "error", message: `${role.id} is set to ${spec}, which the OMP registry does not serve. Run /pstack setup.` });
 		}
 	}
@@ -107,8 +108,8 @@ function checkSkills({ commands, skillsRoot }: Pick<DoctorInput, "commands" | "s
 }
 
 function checkInstructionModes({ behavior, commands }: Pick<DoctorInput, "behavior" | "commands">): Finding[] {
-	return (["caveman", "ponytail"] as const).map((mode): Finding => {
-		const suspend = mode === "caveman" ? behavior.suspendCaveman : behavior.suspendPonytail;
+	return SUSPENDABLE_INSTRUCTION_MODES.map((mode): Finding => {
+		const suspend = suspendsMode(behavior, mode);
 		const loaded = commands.some(command => command.source === "extension" && command.name === mode);
 		const message = !loaded
 			? `${mode} is not loaded, so there is nothing to suspend.`

@@ -1,6 +1,6 @@
 import type { BeforeSubagentSpawnEvent, BeforeSubagentSpawnEventResult, ExtensionContext } from "@oh-my-pi/pi-coding-agent";
 import { PANEL_ROLES, findLaneAgent, roleAlias, type PanelRole, type PanelSeat } from "./roles.ts";
-import { SINGLE_VENDOR_WARNING } from "./setup/rules.ts";
+import { SINGLE_VENDOR_WARNING } from "./panel-rules.ts";
 
 type ModelQuery = Pick<ExtensionContext["models"], "resolve" | "family">;
 

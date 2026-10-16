@@ -3,7 +3,7 @@ import { MODEL_ROLES, type ModelRole } from "../roles.ts";
 import { listChoices, type ModelChoice } from "./catalog.ts";
 import { PRESET_DESCRIPTIONS, PRESET_NAMES, presetAssignment, type Assignment } from "./presets.ts";
 import { probeAll, type ModelProbe } from "./probe.ts";
-import { checkPanel, seatModels } from "./rules.ts";
+import { checkPanel, seatModels } from "../panel-rules.ts";
 import { readAssignment, saveAssignment, type SetupSettings } from "./settings.ts";
 
 export interface SetupDeps {

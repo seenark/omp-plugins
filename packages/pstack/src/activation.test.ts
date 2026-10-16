@@ -6,7 +6,7 @@ import { isRecord } from "@codesook/omp-shared-display/config-store";
 import { SHARED_DISPLAY_CHANNEL, type FrameSequence } from "@codesook/omp-shared-display/client";
 import { INSTRUCTION_MODE_SUSPENSION_CHANNEL } from "@codesook/omp-shared-display/instruction-mode";
 import pstackExtension from "./index.ts";
-import { SINGLE_VENDOR_WARNING } from "./setup/rules.ts";
+import { SINGLE_VENDOR_WARNING } from "./panel-rules.ts";
 import { duplicateCandidates, mergeVerdicts } from "./verdict.ts";
 import { INACTIVE_ACTIVATION, RECEIPT_ENTRY_TYPE, ACTIVATION_ENTRY_TYPE, rebuildActivationState } from "./activation-state.ts";
 

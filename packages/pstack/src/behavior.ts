@@ -3,6 +3,7 @@ import {
 	isRecord,
 	readCodesookOmpConfig,
 } from "@codesook/omp-shared-display/config-store";
+import type { SuspendableInstructionMode } from "@codesook/omp-shared-display/instruction-mode";
 import * as os from "node:os";
 import * as path from "node:path";
 
@@ -31,6 +32,11 @@ export const DEFAULT_PSTACK_BEHAVIOR: Readonly<PstackBehavior> = {
 	maxPanelSize: MAX_PANEL_SIZE,
 	guardStrictness: "block-and-warn",
 };
+
+const SUSPEND_SETTING = { caveman: "suspendCaveman", ponytail: "suspendPonytail" } as const satisfies Record<SuspendableInstructionMode, keyof PstackBehavior>;
+
+/** True when the user left `mode` to be switched off while pstack is active. */
+export const suspendsMode = (behavior: PstackBehavior, mode: SuspendableInstructionMode): boolean => behavior[SUSPEND_SETTING[mode]];
 
 function isStrictness(value: unknown): value is GuardStrictness {
 	return GUARD_STRICTNESS_LEVELS.includes(value as GuardStrictness);
