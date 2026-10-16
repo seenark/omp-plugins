@@ -1,3 +1,4 @@
+import * as path from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "@oh-my-pi/pi-coding-agent";
 import { connectSharedDisplay } from "@codesook/omp-shared-display/client";
 import { suspendInstructionModes, type SuspendableInstructionMode } from "@codesook/omp-shared-display/instruction-mode";
@@ -14,16 +15,17 @@ import {
 	taskOfSkillPrompt,
 } from "./activation.ts";
 import { blocksEnabled, createBehaviorStore, type BehaviorStoreOptions } from "./behavior.ts";
+import { diagnose, doctorLevel, doctorReport } from "./doctor.ts";
 import { reminderText, segmentText, statusReport } from "./display.ts";
 import { blockingFinding, spawnFinding, toolCallResult } from "./guards/blocking.ts";
 import { DROPOUT_ENTRY_TYPE, watchDropouts } from "./dropouts.ts";
 import { playbookOpenedBy, progressFromTodo } from "./observe.ts";
 import { activeSeats, guardSeatSpawn } from "./panel.ts";
 import { createRunStore } from "./run-state.ts";
-import { runSetupCommand, type SetupOptions } from "./setup/index.ts";
+import { loadSetupSettings, runPresetCommand, runSetupCommand, type SetupOptions } from "./setup/index.ts";
 import { createWarningGuards } from "./warn-guards.ts";
 
-const COMMAND_USAGE = "Usage: /pstack [status|setup]";
+const COMMAND_USAGE = "Usage: /pstack [status|setup|preset <name>|doctor]";
 
 function notify(pi: ExtensionAPI, ctx: ExtensionContext, level: "info" | "warning" | "error", message: string): void {
 	if (ctx.hasUI) ctx.ui.notify(message, level);
@@ -183,10 +185,26 @@ export default function pstackExtension(pi: ExtensionAPI, options: PstackExtensi
 	pi.registerCommand("pstack", {
 		description: "pstack: show the run state of this Agent Session",
 		handler: async (args, ctx) => {
-			const subcommand = args.trim().split(/\s+/)[0] ?? "";
+			const [subcommand = "", ...rest] = args.trim().split(/\s+/);
+			const report = (level: "info" | "warning" | "error", message: string): void => notify(pi, ctx, level, message);
 			if (subcommand === "" || subcommand === "status") notify(pi, ctx, "info", statusReport(runs.state()));
-			else if (subcommand === "setup") await runSetupCommand(pi, ctx, (level, message) => notify(pi, ctx, level, message), options.setup);
-			else notify(pi, ctx, "warning", `Unknown /pstack subcommand. ${COMMAND_USAGE}`);
+			else if (subcommand === "setup") await runSetupCommand(pi, ctx, report, options.setup);
+			else if (subcommand === "preset") await runPresetCommand(pi, ctx, report, rest[0] ?? "", options.setup);
+			else if (subcommand === "doctor") {
+				try {
+					const findings = diagnose({
+						models: ctx.models,
+						settings: await loadSetupSettings(pi, options.setup),
+						behavior: behavior.current(),
+						commands: pi.getCommands(),
+						skillsRoot: path.dirname(options.skillDirectory ?? DEFAULT_POTETO_DIRECTORY),
+						displayHostAvailable: publisher.hostAvailable,
+					});
+					notify(pi, ctx, doctorLevel(findings), doctorReport(findings));
+				} catch (error) {
+					notify(pi, ctx, "error", `pstack doctor could not run: ${String(error)}`);
+				}
+			} else notify(pi, ctx, "warning", `Unknown /pstack subcommand. ${COMMAND_USAGE}`);
 		},
 	});
 }

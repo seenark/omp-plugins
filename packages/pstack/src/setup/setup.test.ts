@@ -104,7 +104,7 @@ function createHarness(options: { settings?: ReturnType<typeof fakeSettings>; pr
 		},
 	};
 	pstackExtension(pi as never, { homeDirectory: "/nonexistent", setup: { settings: () => fake.settings, probe: () => probe } });
-	return { ...fake, probed, selects, confirmed, notices, run: () => commands.get("pstack")!.handler("setup", ctx) };
+	return { ...fake, probed, selects, confirmed, notices, run: (args = "setup") => commands.get("pstack")!.handler(args, ctx) };
 }
 
 const pstackKeys = (config: ConfigSnapshot) => Object.keys(config.roles).filter(role => role.startsWith("pstack-"));
@@ -389,6 +389,65 @@ describe("task isolation", () => {
 		await cancelled.run();
 		expect(failed.confirmed).toEqual([]);
 		expect(cancelled.confirmed).toEqual([]);
+	});
+});
+
+describe("/pstack preset", () => {
+	it("claude-codex probes Codex before writing, adds the Codex seat and moves the judge", async () => {
+		const order: string[] = [];
+		const base = fakeSettings();
+		const original = base.settings.setModelRole;
+		base.settings.setModelRole = (role, value) => (order.push("write"), original(role, value));
+		const h = createHarness({ settings: base, probe: async spec => (order.push(`probe:${spec}`), { ok: true }), confirms: [false] });
+		await h.run("preset claude-codex");
+		expect(order.indexOf(`probe:${CODEX}`)).toBeGreaterThanOrEqual(0);
+		expect(order.indexOf(`probe:${CODEX}`)).toBeLessThan(order.indexOf("write"));
+		expect(h.state.roles["pstack-judge"]).toBe(CODEX);
+		expect(PANEL_ROLES.some(role => h.state.roles[role.id]?.startsWith("openai-codex/"))).toBe(true);
+		expect(nonPstack(h.state)).toEqual(nonPstack(USER_CONFIG));
+	});
+
+	it("an unreachable preset model writes nothing", async () => {
+		const h = createHarness({ probe: async spec => (spec === CODEX ? { ok: false, reason: "401" } : { ok: true }) });
+		await h.run("preset claude-codex");
+		expect(h.writes).toEqual([]);
+		expect(h.state).toEqual(USER_CONFIG);
+		expect(h.notices.some(notice => notice.level === "error" && notice.message.includes(CODEX))).toBe(true);
+	});
+
+	it("rejects an unknown or missing preset name without probing or writing", async () => {
+		for (const args of ["preset", "preset nope"]) {
+			const h = createHarness();
+			await h.run(args);
+			expect(levels(h)).toEqual(["warning"]);
+			expect(h.probed).toEqual([]);
+			expect(h.writes).toEqual([]);
+		}
+	});
+
+	it("reports a preset the registry cannot fill and writes nothing", async () => {
+		const h = createHarness({ served: SERVED.slice(0, 5) });
+		await h.run("preset claude-codex");
+		expect(levels(h)).toEqual(["error"]);
+		expect(h.probed).toEqual([]);
+		expect(h.writes).toEqual([]);
+	});
+
+	it("does nothing without a UI", async () => {
+		const h = createHarness({ hasUI: false });
+		await h.run("preset claude-only");
+		expect(h.probed).toEqual([]);
+		expect(h.writes).toEqual([]);
+	});
+
+	it("rerunning a preset changes nothing", async () => {
+		const h = createHarness({ confirms: [false, false] });
+		await h.run("preset lean");
+		const after = clone(h.state);
+		h.writes.length = 0;
+		await h.run("preset lean");
+		expect(h.state).toEqual(after);
+		expect(h.writes).toEqual([]);
 	});
 });
 

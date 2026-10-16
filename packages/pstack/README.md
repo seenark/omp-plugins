@@ -34,6 +34,8 @@ OMP discovers `skills/`, `agents/` and `rules/` from the package root through it
 /pstack          Show the run state
 /pstack status   Same
 /pstack setup    Choose models for the pstack roles
+/pstack preset <name>  Apply claude-only, claude-codex or lean without the menus
+/pstack doctor   Check that pstack is healthy
 ```
 
 pstack does nothing until you start it. `/skill:poteto-mode` has the same effect as `/poteto`: the extension detects it from the `input` event (interactive and RPC modes) and from the session's user-invoked `skill-prompt` message (every mode). Activation is idempotent. On activation the session receives a hidden note listing the configured panel seats (capped by `maxPanelSize`) with their models, and the absent ones.
@@ -94,6 +96,21 @@ On Save it:
 
 Running it again with the same choices changes nothing. Presets pick tiers from model-id keywords (`opus`, `sonnet`, `haiku`, `mini`, ...), because OMP exposes no capability tier: adjust a role by hand when a vendor names its models differently.
 
+## Presets and doctor
+
+`/pstack preset <name>` fills every role from the preset (`claude-only`, `claude-codex` or `lean`) and then saves it exactly as setup's Save does: seat and single-vendor rules, one probe turn per model (nothing is written when one fails), the isolation question, a write limited to `pstack-*` roles, readback and restore. `claude-codex` verifies Codex first, adds a Codex seat and moves `pstack-judge` to Codex. It does not change your other roles.
+
+`/pstack doctor` is read-only and prints one line per finding at the worst severity found:
+
+| Check | Flags |
+| --- | --- |
+| `roles` | a pstack role set to a model the registry does not serve; no panel seat with a model |
+| `panel` | two seats on one model (error); a single-vendor panel (warning) |
+| `skills` | a workflow-called skill (`poteto-mode` and every skill its playbooks and references name) that OMP does not list, or resolves to another source's copy. Native user and project skills, skillshare and `skills.customDirectories` outrank this package. Needs OMP's skill commands (`skills.enableSkillCommands`) to see the resolved owner |
+| `instruction-modes` | whether Caveman and Ponytail are loaded and whether the suspend settings switch them off while pstack is active. It reads the loaded commands: the event bus does not list subscribers, so it cannot prove a plugin listens |
+| `display-host` | no Display Host running, so the Status Segment is not shown |
+| `task-isolation` | `task.isolation.enabled` is off; panel builders and arena or swarm writers need it |
+
 ## Model roles
 
 Every lane resolves its model through `pstack-*` model roles in your OMP config. The table lives in `src/roles.ts` and generates the `agents/pstack-*.md` files; run `bun run generate:agents` after editing it. `bun test` fails when the files drift from the table.
@@ -116,7 +133,7 @@ Work-role agents list the pstack role, then the built-in role, so OMP skips an u
 
 ## Behavior Configuration
 
-`behavior.pstack` in `~/.config/codesook-omp/config.json`, updated live on the `/omp-plugins` Apply event. Each field falls back to its default on its own when missing or invalid.
+`behavior.pstack` in `~/.config/codesook-omp/config.json`. The `/omp-plugins` pstack page edits it (and points at `/pstack setup` for models); Apply updates running sessions live, and the page reads `not installed` while this package is missing. Each field falls back to its default on its own when missing or invalid.
 
 | Field | Default | Values |
 | --- | --- | --- |
