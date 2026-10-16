@@ -8,7 +8,7 @@ import { INSTRUCTION_MODE_SUSPENSION_CHANNEL } from "@codesook/omp-shared-displa
 import pstackExtension from "./index.ts";
 import { SINGLE_VENDOR_WARNING } from "./setup/rules.ts";
 import { duplicateCandidates, mergeVerdicts } from "./verdict.ts";
-import { INACTIVE_RUN, RECEIPT_ENTRY_TYPE, RUN_ENTRY_TYPE, rebuildRunState } from "./run-state.ts";
+import { INACTIVE_ACTIVATION, RECEIPT_ENTRY_TYPE, ACTIVATION_ENTRY_TYPE, rebuildActivationState } from "./activation-state.ts";
 
 type Handler = (event: unknown, ctx: unknown) => unknown;
 type Command = { handler: (args: string, ctx: unknown) => unknown };
@@ -128,7 +128,7 @@ const todo = (done: number, total: number) => [
 ];
 const PLAYBOOK = "/pkg/skills/poteto-mode/playbooks/feature.md";
 
-const activatedEntries = (entries: SessionEntry[]) => entries.filter(entry => entry.customType === RUN_ENTRY_TYPE && (entry.data as { kind: string }).kind === "activated");
+const activatedEntries = (entries: SessionEntry[]) => entries.filter(entry => entry.customType === ACTIVATION_ENTRY_TYPE && (entry.data as { kind: string }).kind === "activated");
 
 describe("activation", () => {
 	it("/poteto <task> starts poteto-mode on the task and reports pstack active", async () => {
@@ -492,15 +492,15 @@ describe("run state rebuild", () => {
 		const custom = (customType: string, data: unknown): SessionEntry => ({ type: "custom", customType, data });
 		const receipt = { seat: "a", agent: "pstack-panel-a-critic", id: "0", status: "completed" };
 		const dropout = { seat: "a", agent: "pstack-panel-a-critic", id: "0", from: "x/a", to: "y/b" };
-		const activated = custom(RUN_ENTRY_TYPE, { kind: "activated", seats: ["a", "b"] });
-		expect(rebuildRunState([custom(RECEIPT_ENTRY_TYPE, receipt), custom("dev.codesook.pstack.dropout", dropout)])).toBe(INACTIVE_RUN);
-		const state = rebuildRunState([
+		const activated = custom(ACTIVATION_ENTRY_TYPE, { kind: "activated", seats: ["a", "b"] });
+		expect(rebuildActivationState([custom(RECEIPT_ENTRY_TYPE, receipt), custom("dev.codesook.pstack.dropout", dropout)])).toBe(INACTIVE_ACTIVATION);
+		const state = rebuildActivationState([
 			custom(RECEIPT_ENTRY_TYPE, receipt),
 			activated,
-			custom(RUN_ENTRY_TYPE, { kind: "progress", done: 5, total: 2 }),
-			custom(RUN_ENTRY_TYPE, { kind: "activated", seats: ["a", "b", "c"] }),
-			custom(RUN_ENTRY_TYPE, { kind: "playbook", playbook: "" }),
-			custom(RUN_ENTRY_TYPE, "junk"),
+			custom(ACTIVATION_ENTRY_TYPE, { kind: "progress", done: 5, total: 2 }),
+			custom(ACTIVATION_ENTRY_TYPE, { kind: "activated", seats: ["a", "b", "c"] }),
+			custom(ACTIVATION_ENTRY_TYPE, { kind: "playbook", playbook: "" }),
+			custom(ACTIVATION_ENTRY_TYPE, "junk"),
 			custom(RECEIPT_ENTRY_TYPE, { ...receipt, seat: "z" }),
 			custom(RECEIPT_ENTRY_TYPE, receipt),
 			{ type: "message", customType: RECEIPT_ENTRY_TYPE, data: receipt } as never,

@@ -40,7 +40,7 @@ When no `pstack-*` model roles are set and it matters, ask whether the user want
 
 Installing changes nothing until the user starts a run with `/poteto <task>` or `/skill:poteto-mode`. Offer to word their first prompt with them, per [`references/prompting.md`](references/prompting.md).
 
-If cost is the worry, say where the tokens go and how to spend fewer. pstack spends extra tokens on subagents and review panels. Rerun `/pstack setup` and pick cheaper models for the roles. Leave a panel seat unset to drop it: each configured seat is one subagent per panel run, and `maxPanelSize` caps the panel. Save `/skill:poteto-mode` for work that needs rigor.
+If cost is the worry, say where the tokens go and how to spend fewer. pstack spends extra tokens on subagents and review panels. Rerun `/pstack setup` and pick cheaper models for the roles. Leave a panel seat unset to drop it: each configured seat is one lane per panel review, and `maxPanelSize` caps the panel. Save `/skill:poteto-mode` for work that needs rigor.
 
 pstack is built for OMP. Its skills use the Agent Skills format, so other tools can read them. But the workflow skills, including `/skill:poteto-mode`, `/skill:how`, `/skill:why`, and `/skill:pstack-teach`, spawn OMP `task` subagents on `pstack-*` model roles, so those parts may not work elsewhere.
 
@@ -126,7 +126,7 @@ Principles are one-rule skills that `/skill:poteto-mode` reads and cites in its 
 |---|---|
 | The mode stopped applying after a few turns | Start each task with `/poteto <task>`. |
 | A question got treated as the next step of the last task | Say "new task", or say the turn doesn't need the mode. |
-| A new model choice had no effect | The roles apply to subagents spawned after `/pstack setup` finishes. `/pstack doctor` shows which roles are set. |
+| A new model choice had no effect | The roles apply to lanes spawned after `/pstack setup` finishes. `/pstack doctor` shows which roles are set. |
 | Runs cost more than expected | See the cost paragraph under Get set up. |
 | A skill didn't load on its own | Skills marked `disable-model-invocation` do not load from the user's words. They load when the user types them or when `/skill:poteto-mode` runs them, and it doesn't run every skill. |
 | Parallel agents overwrote each other | Give each agent its own worktree, or run them as isolated background tasks, which each get their own worktree. |

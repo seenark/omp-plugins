@@ -18,14 +18,20 @@ describe("instruction mode suspension", () => {
 		const seen: string[] = [];
 		onInstructionModeSuspension(events, "caveman", () => seen.push("caveman"));
 		onInstructionModeSuspension(events, "ponytail", () => seen.push("ponytail"));
-		suspendInstructionModes(events, ["ponytail"]);
+		suspendInstructionModes(events, "pstack", ["ponytail"]);
 		expect(seen).toEqual(["ponytail"]);
 	});
 
 	it("emits nothing for an empty list", () => {
 		const emitted: unknown[] = [];
-		suspendInstructionModes({ emit: (_channel, data) => void emitted.push(data) }, []);
+		suspendInstructionModes({ emit: (_channel, data) => void emitted.push(data) }, "pstack", []);
 		expect(emitted).toEqual([]);
+	});
+
+	it("carries the source of the plugin that asked", () => {
+		const emitted: unknown[] = [];
+		suspendInstructionModes({ emit: (_channel, data) => void emitted.push(data) }, "workflow-x", ["caveman"]);
+		expect(emitted).toEqual([{ protocol: 1, source: "workflow-x", modes: ["caveman"] }]);
 	});
 
 	it("ignores unknown protocol versions and malformed payloads", () => {
@@ -40,7 +46,7 @@ describe("instruction mode suspension", () => {
 		let calls = 0;
 		const stop = onInstructionModeSuspension(events, "caveman", () => void calls++);
 		stop();
-		suspendInstructionModes(events, ["caveman"]);
+		suspendInstructionModes(events, "pstack", ["caveman"]);
 		expect(calls).toBe(0);
 		expect(INSTRUCTION_MODE_SUSPENSION_CHANNEL).toContain("/v1");
 	});

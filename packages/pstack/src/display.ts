@@ -1,7 +1,7 @@
-import { panelAttendance, type RunState } from "./run-state.ts";
+import { panelAttendance, type ActivationState } from "./activation-state.ts";
 
 /** Status Segment text, e.g. `pstack · feature · 3/7 · panel 3/4`. Undefined while pstack is inactive, which tombstones the segment. */
-export function segmentText(state: RunState): string | undefined {
+export function segmentText(state: ActivationState): string | undefined {
 	if (!state.active) return undefined;
 	const parts = ["pstack"];
 	if (state.playbook) parts.push(state.playbook);
@@ -15,7 +15,7 @@ export function segmentText(state: RunState): string | undefined {
 }
 
 /** `/pstack status` output. */
-export function statusReport(state: RunState): string {
+export function statusReport(state: ActivationState): string {
 	if (!state.active) return "pstack: inactive";
 	const lines = ["pstack: active"];
 	if (state.task) lines.push(`Task: ${state.task}`);
@@ -35,11 +35,11 @@ export function statusReport(state: RunState): string {
 	return lines.join("\n");
 }
 
-/** Hidden note sent to the model after compaction so it keeps its place in the run. */
-export function reminderText(state: RunState): string {
+/** Hidden note sent to the model after compaction so it keeps its place in the Activation. */
+export function reminderText(state: ActivationState): string {
 	const where = [
 		state.playbook ? `playbook ${state.playbook}` : "no playbook chosen yet",
 		state.progress ? `step ${state.progress.done}/${state.progress.total}${state.progress.current ? `: ${state.progress.current}` : ""}` : undefined,
 	].filter(Boolean);
-	return `pstack is still active after compaction (${where.join(", ")}). Continue the run from there; the todo list holds the playbook steps.`;
+	return `pstack is still active after compaction (${where.join(", ")}). Continue from there; the todo list holds the playbook steps.`;
 }

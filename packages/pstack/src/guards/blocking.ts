@@ -25,8 +25,8 @@ export interface GuardCall {
 	input: unknown;
 	/** Lowercased agent definition name from `ctx.agent.name`. */
 	agentName: string;
-	/** pstack is active in this session (run state). */
-	runActive: boolean;
+	/** pstack is active in this session (Activation). */
+	activated: boolean;
 	/** Working directory of the session. */
 	cwd: string;
 }
@@ -93,7 +93,7 @@ function laneSpawnFinding(call: Pick<GuardCall, "agentName">): GuardFinding | un
 
 async function inPlaceEditFinding(call: GuardCall, probe: RepositoryProbe): Promise<GuardFinding | undefined> {
 	if (call.toolName !== "bash") return undefined;
-	if (!call.runActive && findLaneAgent(call.agentName) === undefined) return undefined;
+	if (!call.activated && findLaneAgent(call.agentName) === undefined) return undefined;
 	const command = stringField(call.input, "command");
 	if (command === undefined) return undefined;
 	const cwd = path.resolve(call.cwd, stringField(call.input, "cwd") ?? ".");

@@ -25,7 +25,7 @@ Label every candidate by its seat and the model on the roster (Candidate A, `ant
 
 ## Phase C: Cross-judge
 
-After all Phase B candidates complete, spawn one `pstack-judge` subagent as the cross-judge. It is read-only. It sees the rubric and the candidates by path label (the patch path or branch of each), scores each criterion, and recommends a base with rationale. It runs in parallel with your reading in Phase D. Don't spawn it while candidates are still writing.
+After all Phase B candidates complete, spawn one `pstack-judge` lane as the cross-judge. It is read-only. It sees the rubric and the candidates by path label (the patch path or branch of each), scores each criterion, and recommends a base with rationale. It runs in parallel with your reading in Phase D. Don't spawn it while candidates are still writing.
 
 ## Phase D: Pick a base
 

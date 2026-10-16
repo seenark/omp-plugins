@@ -11,7 +11,7 @@ export const DEFAULT_POTETO_DIRECTORY = path.join(import.meta.dirname, "..", "sk
 export const ROSTER_MESSAGE_TYPE = "dev.codesook.pstack.roster";
 export const REMINDER_MESSAGE_TYPE = "dev.codesook.pstack.reminder";
 
-/** Skills that dispatch the panel seats. Invoked outside a pstack run they still need the seat roster. */
+/** Skills that dispatch the panel seats. Invoked outside an Activation they still need the seat roster. */
 export const PANEL_SKILLS = ["interrogate", "arena", "swarm", "architect", "how"] as const;
 
 const SKILL_COMMAND = new RegExp(`^\\s*/skill:${POTETO_SKILL}(?=\\s|$)`);

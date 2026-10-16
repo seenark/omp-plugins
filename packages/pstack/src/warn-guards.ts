@@ -9,7 +9,7 @@ import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import { warningsEnabled, type BehaviorStore } from "./behavior.ts";
 import { findLaneAgent } from "./roles.ts";
-import type { RunReader } from "./run-state.ts";
+import type { ActivationReader } from "./activation-state.ts";
 import {
 	checkpointWarning,
 	checkpointWritten,
@@ -36,11 +36,11 @@ export interface WarningGuards {
 const PLAYBOOK_NAME = /^[a-z0-9][a-z0-9-]*$/;
 
 /**
- * Non-blocking style signals. They speak only in sessions where the run is active, or from a pstack lane,
+ * Non-blocking style signals. They speak only in sessions where pstack is activated, or from a pstack lane,
  * and never at strictness `off`. Strictness is read live from the Behavior Configuration.
  */
-export function createWarningGuards(options: { behavior: BehaviorStore; runs: RunReader; skillDirectory: string }): WarningGuards {
-	const { behavior, runs, skillDirectory } = options;
+export function createWarningGuards(options: { behavior: BehaviorStore; activation: ActivationReader; skillDirectory: string }): WarningGuards {
+	const { behavior, activation, skillDirectory } = options;
 	let checkpointWarned = false;
 
 	const readPlaybook = async (name: string): Promise<string | undefined> =>
@@ -49,7 +49,7 @@ export function createWarningGuards(options: { behavior: BehaviorStore; runs: Ru
 	return {
 		async onToolResult(event, ctx) {
 			if (event.isError || !warningsEnabled(behavior.current().guardStrictness)) return undefined;
-			const { active, playbook } = runs.state();
+			const { active, playbook } = activation.state();
 			const lane = findLaneAgent(ctx.agent?.name ?? "") !== undefined;
 			if (!active && !lane) return undefined;
 
@@ -67,7 +67,7 @@ export function createWarningGuards(options: { behavior: BehaviorStore; runs: Ru
 		},
 
 		async onSessionStop(event, ctx) {
-			const { active, playbook } = runs.state();
+			const { active, playbook } = activation.state();
 			// `stop_hook_active` marks the turn this hook asked for: one nudge per stop keeps clear of OMP's cap of 8 continuations.
 			if (!active || event.stop_hook_active || !warningsEnabled(behavior.current().guardStrictness)) return undefined;
 

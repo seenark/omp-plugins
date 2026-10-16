@@ -64,7 +64,7 @@ describe("Caveman suspension by pstack", () => {
 		const h = createHarness(home);
 		await h.fire("session_start");
 		expect(await h.injected()).toBe(true);
-		suspendInstructionModes(h.events, ["caveman"]);
+		suspendInstructionModes(h.events, "pstack", ["caveman"]);
 		expect(await h.injected()).toBe(false);
 		expect(fs.readFileSync(getCodesookOmpConfigPath(home), "utf8")).toBe(configBefore);
 		await h.command("ultracave");
@@ -77,7 +77,7 @@ describe("Caveman suspension by pstack", () => {
 		const parallel = createHarness(home);
 		await suspended.fire("session_start");
 		await parallel.fire("session_start");
-		suspendInstructionModes(suspended.events, ["caveman"]);
+		suspendInstructionModes(suspended.events, "pstack", ["caveman"]);
 		expect(await suspended.injected()).toBe(false);
 		expect(await parallel.injected()).toBe(true);
 	});
@@ -86,7 +86,7 @@ describe("Caveman suspension by pstack", () => {
 		const home = makeHome();
 		const first = createHarness(home);
 		await first.fire("session_start");
-		suspendInstructionModes(first.events, ["caveman"]);
+		suspendInstructionModes(first.events, "pstack", ["caveman"]);
 		const resumed = createHarness(home, [...first.entries]);
 		await resumed.fire("session_start");
 		expect(await resumed.injected()).toBe(false);
@@ -94,7 +94,7 @@ describe("Caveman suspension by pstack", () => {
 
 	it("applies a suspension that arrives before the session starts", async () => {
 		const h = createHarness(makeHome());
-		suspendInstructionModes(h.events, ["caveman"]);
+		suspendInstructionModes(h.events, "pstack", ["caveman"]);
 		await h.fire("session_start");
 		expect(await h.injected()).toBe(false);
 	});
@@ -102,7 +102,7 @@ describe("Caveman suspension by pstack", () => {
 	it("ignores a suspension that does not name Caveman", async () => {
 		const h = createHarness(makeHome());
 		await h.fire("session_start");
-		suspendInstructionModes(h.events, ["ponytail"]);
+		suspendInstructionModes(h.events, "pstack", ["ponytail"]);
 		h.events.emit("codesook/instruction-mode-suspension/v1", { protocol: 2, source: "pstack", modes: ["caveman"] });
 		expect(await h.injected()).toBe(true);
 	});

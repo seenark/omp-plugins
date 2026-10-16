@@ -83,7 +83,7 @@ const rules: Rule[] = [
 		reason: "Refactoring delegates mechanical edits, which is the `pstack-mechanical` lane.",
 		files: `${PLAYBOOKS}refactoring.md`,
 		pattern: "a subagent using your configured refactoring model (default `grok-4.7-xhigh-fast`)",
-		replacement: "a `pstack-mechanical` subagent",
+		replacement: "a `pstack-mechanical` lane",
 	},
 	{
 		id: "dispatch/playbook-explore-agent",
@@ -305,7 +305,7 @@ Each critic is read-only and returns a structured verdict with findings. Report 
 		reason: "The cross-judge is the `pstack-judge` lane, which is read-only, instead of a model picked from a pool.",
 		files: "skills/arena/SKILL.md",
 		pattern: span("After all Phase B candidates complete, choose one model", "Spawn one readonly judge subagent on that model."),
-		replacement: "After all Phase B candidates complete, spawn one `pstack-judge` subagent as the cross-judge. It is read-only.",
+		replacement: "After all Phase B candidates complete, spawn one `pstack-judge` lane as the cross-judge. It is read-only.",
 	},
 	{
 		id: "dispatch/architect-runners",
@@ -508,7 +508,7 @@ Each critic is read-only and returns a structured verdict with findings. Report 
 		files: "skills/poteto-help/SKILL.md",
 		pattern: span("Rerun `/setup-pstack` and pick a smaller budget", "one for each entry."),
 		replacement:
-			"Rerun `/setup-pstack` and pick cheaper models for the roles. Leave a panel seat unset to drop it: each configured seat is one subagent per panel run, and `maxPanelSize` caps the panel.",
+			"Rerun `/setup-pstack` and pick cheaper models for the roles. Leave a panel seat unset to drop it: each configured seat is one lane per panel review, and `maxPanelSize` caps the panel.",
 	},
 	{
 		id: "dispatch/help-built-for",
@@ -556,10 +556,10 @@ Each critic is read-only and returns a structured verdict with findings. Report 
 	},
 	{
 		id: "dispatch/help-new-model",
-		reason: "Model roles apply to the next subagent spawn, and `/pstack doctor` shows which are set.",
+		reason: "Model roles apply to the next lane spawn, and `/pstack doctor` shows which are set.",
 		files: "skills/poteto-help/SKILL.md",
 		pattern: "The rule from `/setup-pstack` applies to new chats. Start one.",
-		replacement: "The roles apply to subagents spawned after `/setup-pstack` finishes. `/pstack doctor` shows which roles are set.",
+		replacement: "The roles apply to lanes spawned after `/setup-pstack` finishes. `/pstack doctor` shows which roles are set.",
 	},
 	{
 		id: "dispatch/help-skill-not-loading",

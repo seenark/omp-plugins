@@ -3,11 +3,11 @@ import { instructionModeEntryType, type SuspendableInstructionMode } from "@code
 import { DROPOUT_ENTRY_TYPE, type Dropout, type SeatSettled } from "./dropouts.ts";
 import { PANEL_SEATS, type PanelSeat } from "./roles.ts";
 
-/** Reverse-domain custom session entry types under which the run state is persisted. */
-export const RUN_ENTRY_TYPE = "dev.codesook.pstack.run";
+/** Reverse-domain custom session entry types under which the activation state is persisted. */
+export const ACTIVATION_ENTRY_TYPE = "dev.codesook.pstack.activation";
 export const RECEIPT_ENTRY_TYPE = "dev.codesook.pstack.receipt";
 
-export interface RunProgress {
+export interface ActivationProgress {
 	done: number;
 	total: number;
 	/** Content of the todo item in progress. */
@@ -18,17 +18,17 @@ export interface RunProgress {
 export type PanelReceipt = SeatSettled;
 
 /**
- * What the session knows about the current pstack run. Rebuilt from the session branch's custom entries,
- * so it survives compaction, resume and branch switches. `.10`–`.14` read it through {@link RunReader}.
+ * What the session knows about the current pstack Activation. Rebuilt from the session branch's custom entries,
+ * so it survives compaction, resume and branch switches. Guards, warnings, suspension and doctor read it through {@link ActivationReader}.
  */
-export interface RunState {
+export interface ActivationState {
 	/** True from the moment the user starts pstack until the session ends. */
 	active: boolean;
 	task?: string;
 	/** Kebab-case playbook title, e.g. `feature`; set when the model opens a playbook file. */
 	playbook?: string;
 	/** Progress through the session's todo list. */
-	progress?: RunProgress;
+	progress?: ActivationProgress;
 	/** Panel seats that had a model when pstack started. */
 	seats: readonly PanelSeat[];
 	receipts: readonly PanelReceipt[];
@@ -36,31 +36,31 @@ export interface RunState {
 	dropouts: readonly Dropout[];
 }
 
-export const INACTIVE_RUN: RunState = { active: false, seats: [], receipts: [], dropouts: [] };
+export const INACTIVE_ACTIVATION: ActivationState = { active: false, seats: [], receipts: [], dropouts: [] };
 
-/** Payload of a `RUN_ENTRY_TYPE` entry. */
-export type RunEntry =
+/** Payload of a `ACTIVATION_ENTRY_TYPE` entry. */
+export type ActivationEntry =
 	| { kind: "activated"; task?: string; seats: PanelSeat[] }
 	| { kind: "playbook"; playbook: string }
 	| { kind: "progress"; done: number; total: number; current?: string };
 
-export type RunChange = "activated" | "restored" | "updated";
-export type RunListener = (state: RunState, change: RunChange) => void;
+export type ActivationChange = "activated" | "restored" | "updated";
+export type ActivationListener = (state: ActivationState, change: ActivationChange) => void;
 
-/** The read side of the run state: what guards, suspension and doctor consume. */
-export interface RunReader {
-	state(): RunState;
+/** The read side of the activation state: what guards, suspension and doctor consume. */
+export interface ActivationReader {
+	state(): ActivationState;
 	/** Called after every change, including a rebuild from the session branch. Returns the unsubscribe function. */
-	subscribe(listener: RunListener): () => void;
+	subscribe(listener: ActivationListener): () => void;
 }
 
-export interface RunStore extends RunReader {
+export interface ActivationStore extends ActivationReader {
 	/** Rebuild from the session branch. Notifies with `restored`. */
 	restore(entries: readonly unknown[]): void;
-	/** Start the run. False, with nothing recorded, when it is already active. */
+	/** Start the Activation. False, with nothing recorded, when it is already active. */
 	activate(input: { task?: string; seats: readonly PanelSeat[] }): boolean;
 	setPlaybook(playbook: string): void;
-	setProgress(progress: RunProgress): void;
+	setProgress(progress: ActivationProgress): void;
 	/** Count a finished seat run. Ignored while inactive. */
 	recordReceipt(receipt: PanelReceipt): void;
 	/** Count a dropout already persisted by the dropout watcher. Ignored while inactive. */
@@ -70,7 +70,7 @@ export interface RunStore extends RunReader {
 const isSeat = (value: unknown): value is PanelSeat => PANEL_SEATS.includes(value as PanelSeat);
 const isCount = (value: unknown): value is number => Number.isInteger(value) && (value as number) >= 0;
 
-function parseRunEntry(data: unknown): RunEntry | undefined {
+function parseActivationEntry(data: unknown): ActivationEntry | undefined {
 	if (!isRecord(data)) return undefined;
 	if (data.kind === "activated" && Array.isArray(data.seats) && data.seats.every(isSeat)) {
 		return { kind: "activated", ...(typeof data.task === "string" ? { task: data.task } : {}), seats: data.seats };
@@ -97,7 +97,7 @@ function parseDropout(data: unknown): Dropout | undefined {
 	return { seat: data.seat, agent, id, from, to, ...(typeof reason === "string" ? { reason } : {}) };
 }
 
-function sameProgress(a: RunProgress | undefined, b: RunProgress): boolean {
+function sameProgress(a: ActivationProgress | undefined, b: ActivationProgress): boolean {
 	return a !== undefined && a.done === b.done && a.total === b.total && a.current === b.current;
 }
 
@@ -105,16 +105,16 @@ function sameProgress(a: RunProgress | undefined, b: RunProgress): boolean {
  * Apply one session entry. Returns `state` itself when the entry changes nothing, so live updates and the
  * rebuild share one rule set: entries that do not belong to a run (before activation, malformed) are ignored.
  */
-export function applyEntry(state: RunState, customType: string, data: unknown): RunState {
-	if (customType === RUN_ENTRY_TYPE) {
-		const entry = parseRunEntry(data);
+export function applyEntry(state: ActivationState, customType: string, data: unknown): ActivationState {
+	if (customType === ACTIVATION_ENTRY_TYPE) {
+		const entry = parseActivationEntry(data);
 		if (!entry) return state;
 		if (entry.kind === "activated") {
-			return state.active ? state : { ...INACTIVE_RUN, active: true, ...(entry.task === undefined ? {} : { task: entry.task }), seats: entry.seats };
+			return state.active ? state : { ...INACTIVE_ACTIVATION, active: true, ...(entry.task === undefined ? {} : { task: entry.task }), seats: entry.seats };
 		}
 		if (!state.active) return state;
 		if (entry.kind === "playbook") return state.playbook === entry.playbook ? state : { ...state, playbook: entry.playbook };
-		const progress: RunProgress = { done: entry.done, total: entry.total, ...(entry.current === undefined ? {} : { current: entry.current }) };
+		const progress: ActivationProgress = { done: entry.done, total: entry.total, ...(entry.current === undefined ? {} : { current: entry.current }) };
 		return sameProgress(state.progress, progress) ? state : { ...state, progress };
 	}
 	if (!state.active) return state;
@@ -129,9 +129,9 @@ export function applyEntry(state: RunState, customType: string, data: unknown): 
 	return state;
 }
 
-/** Fold a session branch (`ctx.sessionManager.getBranch()`) into the run state it recorded. */
-export function rebuildRunState(entries: readonly unknown[]): RunState {
-	let state = INACTIVE_RUN;
+/** Fold a session branch (`ctx.sessionManager.getBranch()`) into the activation state it recorded. */
+export function rebuildActivationState(entries: readonly unknown[]): ActivationState {
+	let state = INACTIVE_ACTIVATION;
 	for (const entry of entries) {
 		if (isRecord(entry) && entry.type === "custom" && typeof entry.customType === "string") {
 			state = applyEntry(state, entry.customType, entry.data);
@@ -140,14 +140,14 @@ export function rebuildRunState(entries: readonly unknown[]): RunState {
 	return state;
 }
 
-/** Modes whose latest Session Override after the run's activation entry is not `off`: the user switched them back on. */
+/** Modes whose latest Session Override after the activation entry is not `off`: the user switched them back on. */
 export function reenabledInstructionModes(entries: readonly unknown[], modes: readonly SuspendableInstructionMode[]): SuspendableInstructionMode[] {
 	let activated = false;
 	const latest = new Map<SuspendableInstructionMode, unknown>();
 	for (const entry of entries) {
 		if (!isRecord(entry) || entry.type !== "custom" || typeof entry.customType !== "string") continue;
 		if (!activated) {
-			activated = entry.customType === RUN_ENTRY_TYPE && parseRunEntry(entry.data)?.kind === "activated";
+			activated = entry.customType === ACTIVATION_ENTRY_TYPE && parseActivationEntry(entry.data)?.kind === "activated";
 			continue;
 		}
 		const mode = modes.find(candidate => instructionModeEntryType(candidate) === entry.customType);
@@ -157,22 +157,22 @@ export function reenabledInstructionModes(entries: readonly unknown[], modes: re
 }
 
 /** Seats that sat on the panel (at least one completed run) out of the seats that had a model at activation. */
-export function panelAttendance(state: RunState): { attended: number; seats: number } {
+export function panelAttendance(state: ActivationState): { attended: number; seats: number } {
 	const completed = new Set(state.receipts.filter(receipt => receipt.status === "completed").map(receipt => receipt.seat));
 	return { attended: state.seats.filter(seat => completed.has(seat)).length, seats: state.seats.length };
 }
 
-export function createRunStore(appendEntry: (customType: string, data: unknown) => void): RunStore {
-	let state: RunState = INACTIVE_RUN;
-	const listeners = new Set<RunListener>();
+export function createActivationStore(appendEntry: (customType: string, data: unknown) => void): ActivationStore {
+	let state: ActivationState = INACTIVE_ACTIVATION;
+	const listeners = new Set<ActivationListener>();
 
-	const commit = (next: RunState, change: RunChange): boolean => {
+	const commit = (next: ActivationState, change: ActivationChange): boolean => {
 		if (next === state) return false;
 		state = next;
 		for (const listener of [...listeners]) listener(state, change);
 		return true;
 	};
-	const record = (customType: string, data: unknown, change: RunChange): boolean => {
+	const record = (customType: string, data: unknown, change: ActivationChange): boolean => {
 		const next = applyEntry(state, customType, data);
 		if (next === state) return false;
 		appendEntry(customType, data);
@@ -186,13 +186,13 @@ export function createRunStore(appendEntry: (customType: string, data: unknown) 
 			return () => void listeners.delete(listener);
 		},
 		restore(entries) {
-			state = rebuildRunState(entries);
+			state = rebuildActivationState(entries);
 			for (const listener of [...listeners]) listener(state, "restored");
 		},
 		activate: ({ task, seats }) =>
-			record(RUN_ENTRY_TYPE, { kind: "activated", ...(task ? { task } : {}), seats: [...seats] } satisfies RunEntry, "activated"),
-		setPlaybook: playbook => void record(RUN_ENTRY_TYPE, { kind: "playbook", playbook } satisfies RunEntry, "updated"),
-		setProgress: progress => void record(RUN_ENTRY_TYPE, { kind: "progress", ...progress } satisfies RunEntry, "updated"),
+			record(ACTIVATION_ENTRY_TYPE, { kind: "activated", ...(task ? { task } : {}), seats: [...seats] } satisfies ActivationEntry, "activated"),
+		setPlaybook: playbook => void record(ACTIVATION_ENTRY_TYPE, { kind: "playbook", playbook } satisfies ActivationEntry, "updated"),
+		setProgress: progress => void record(ACTIVATION_ENTRY_TYPE, { kind: "progress", ...progress } satisfies ActivationEntry, "updated"),
 		recordReceipt: receipt => void record(RECEIPT_ENTRY_TYPE, receipt, "updated"),
 		noteDropout: dropout => void commit(applyEntry(state, DROPOUT_ENTRY_TYPE, dropout), "updated"),
 	};
