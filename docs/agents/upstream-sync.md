@@ -13,6 +13,7 @@ Pick the branch:
 | --- | --- | --- |
 | `packages/caveman` | `https://github.com/JuliusBrussee/caveman` | `packages/caveman/THIRD-PARTY-NOTICES.txt` |
 | `packages/ponytail` | `https://github.com/DietrichGebert/ponytail` | `packages/ponytail/THIRD-PARTY-NOTICES.txt` |
+| `packages/pstack` | `https://github.com/cursor/plugins` (`pstack/`) | `packages/pstack/THIRD-PARTY-NOTICES.txt` |
 
 The notices file is the single source of truth for the Pinned Revision and the vendored file list. The package README lists Adaptations and Excluded parts.
 

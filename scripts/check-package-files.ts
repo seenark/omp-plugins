@@ -6,6 +6,7 @@ type JsonObject = Record<string, unknown>;
 const ANSI_ESCAPE = /\u001B\[[0-?]*[ -/]*[@-~]/g;
 const PACKED_LINE = /^\s*packed\s+\S+\s+(.+?)\s*$/i;
 const TEST_FILE = /(?:^|[._-])(?:test|spec)(?:[._-]|$)/i;
+const PUBLISHED_DIRECTORIES = ["skills/", "agents/", "rules/", "assets/"];
 const TEST_DIRECTORY: Record<string, true> = {
   test: true,
   tests: true,
@@ -119,7 +120,7 @@ async function requiredMembers(packageRoot: string, manifest: JsonObject): Promi
     if (relativePath === "README.md" || relativePath === "THIRD-PARTY-NOTICES.txt") {
       required.add(relativePath);
     }
-    if (relativePath.startsWith("skills/") || relativePath.startsWith("assets/")) {
+    if (PUBLISHED_DIRECTORIES.some((directory) => relativePath.startsWith(directory))) {
       required.add(relativePath);
     }
   }
