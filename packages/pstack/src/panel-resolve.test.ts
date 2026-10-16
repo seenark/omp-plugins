@@ -26,7 +26,7 @@ if (!os.homedir().startsWith(home)) throw new Error("HOME is not isolated: " + o
 const { agents } = await discoverAgents(home, home, { explicit: ["\${packageRoot}"], mode: "explicit-only", configured: [], configuredLevel: "user" });
 const available = [{ provider: "p", id: "m", name: "m", api: "x", reasoning: false, input: ["text"], contextWindow: 1, maxTokens: 1 }];
 const ctx = { models: createExtensionModelQuery({ getAvailable: () => available }, Settings.isolated({ modelRoles: JSON.parse(modelRoles) }), () => undefined) };
-const spawns = Object.fromEntries(["a", "b"].map(seat => [seat, guardSeatSpawn({ agent: "pstack-panel-" + seat + "-critic" }, ctx)?.block === true]));
+const spawns = Object.fromEntries(["a", "b"].map(seat => [seat, guardSeatSpawn({ agent: "pstack-panel-" + seat + "-critic" }, ctx, 5)?.block === true]));
 const found = Object.fromEntries(agents.filter(agent => agent.name.startsWith("pstack-")).map(agent => [agent.name, { model: agent.model, tools: agent.tools }]));
 process.stdout.write(JSON.stringify({ found, spawns }));
 `;

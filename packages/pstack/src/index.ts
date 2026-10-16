@@ -112,7 +112,7 @@ export default function pstackExtension(pi: ExtensionAPI, options: PstackExtensi
 	pi.on("before_subagent_spawn", (event, ctx) => {
 		const finding = spawnFinding(ctx.agent.name);
 		if (finding && blocksEnabled(behavior.current().guardStrictness)) return { block: true, reason: finding.reason };
-		return guardSeatSpawn(event, ctx);
+		return guardSeatSpawn(event, ctx, behavior.current().maxPanelSize);
 	});
 
 	pi.on("tool_call", async (event, ctx) => {

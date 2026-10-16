@@ -336,6 +336,20 @@ describe("interrogate dispatch shape", () => {
 		await capped.fire("session_start");
 		await capped.fire("input", { type: "input", text: "/skill:interrogate", source: "interactive" });
 		expect(rosterSeats(capped)).toEqual(["a", "b"]);
+		for (const seat of ["a", "b"]) expect(await capped.fire("before_subagent_spawn", spawn(`pstack-panel-${seat}-critic`))).toBeUndefined();
+		for (const seat of ["c", "d"]) {
+			for (const kind of ["critic", "builder"]) expect(await capped.fire("before_subagent_spawn", spawn(`pstack-panel-${seat}-${kind}`))).toMatchObject({ block: true });
+		}
+	});
+
+	it("enforces the maximum panel size at the live value, so a cap changed mid-session applies at once", async () => {
+		const models = { "@pstack-panel-a": "x/a", "@pstack-panel-b": "y/b", "@pstack-panel-c": "z/c" };
+		const h = createHarness({ maxPanelSize: 3, seatModels: models });
+		await h.fire("session_start");
+		expect(await h.fire("before_subagent_spawn", spawn("pstack-panel-c-critic"))).toBeUndefined();
+		h.events.emit("codesook/omp-plugin-config/v1", { config: { version: 1, display: {}, behavior: { pstack: { maxPanelSize: 2 } } } });
+		expect(await h.fire("before_subagent_spawn", spawn("pstack-panel-c-critic"))).toMatchObject({ block: true });
+		expect(await h.fire("before_subagent_spawn", spawn("pstack-panel-b-critic"))).toBeUndefined();
 	});
 });
 
