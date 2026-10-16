@@ -129,7 +129,7 @@ describe("moves", () => {
 	const move = (from: string, to: string): Group => ({ name: "m", moves: [{ from, to, reason: "r" }] });
 
 	it("places a file at its new path, where rules see it", () => {
-		const group: Group = { ...move("skills/a/old.md", "skills/a/new.md"), rules: [{ id: "m/r", rationale: "r", files: "skills/a/new.md", pattern: "old", replacement: "new" }] };
+		const group: Group = { ...move("skills/a/old.md", "skills/a/new.md"), rules: [{ id: "m/r", reason: "r", files: "skills/a/new.md", pattern: "old", replacement: "new" }] };
 		const { packageRoot, result } = sync(files, [group]);
 		expect(fs.existsSync(path.join(packageRoot, "skills/a/old.md"))).toBe(false);
 		expect(fs.readFileSync(path.join(packageRoot, "skills/a/new.md"), "utf8")).toBe("new name\n");

@@ -13,11 +13,6 @@ export const NOTICES_FILE = "THIRD-PARTY-NOTICES.txt";
 const DEFAULT_RULE_FILES = "**/*.md";
 const CONFLICT_MARKER = /^<{7} /m;
 
-/** Cursor mode UI keys on poteto-mode (icon, color); OMP has no sticky modes. */
-const STICKY_MODE_KEYS = ["icon", "color"];
-/** Principle skills are hidden from the prompt list; `/skill:principle-...` still loads them. */
-const HIDDEN_SKILL_PREFIX = "principle-";
-
 export class SyncConfigError extends Error {}
 
 export interface Drift {
@@ -60,7 +55,7 @@ export interface SyncResult {
 	findings: TermFinding[];
 	/** Findings the verify gate rejects: every finding no allowance covers exactly. */
 	termFailures: TermFinding[];
-	/** Allowances the output no longer needs; the verify gate rejects them so they cannot outlive their ticket. */
+	/** Allowances the output no longer needs; the verify gate rejects them so they cannot outlive the term. */
 	expiredAllowances: TermAllowance[];
 	report: string;
 }
@@ -83,9 +78,9 @@ function escapeRegExp(text: string): string {
 function renameRules({ from, to, reason }: Rename): Rule[] {
 	const name = escapeRegExp(from);
 	return [
-		{ id: `rename/${from}/slash-command`, rationale: reason, pattern: new RegExp(`(?<![\\w/.:-])/${name}(?![\\w-])`), replacement: `/${to}` },
-		{ id: `rename/${from}/path`, rationale: reason, pattern: new RegExp(`(?<=\\.\\./|skills/)${name}(?=/)`), replacement: to },
-		{ id: `rename/${from}/mention`, rationale: reason, pattern: new RegExp(`(\\*\\*|\`)${name}\\1`), replacement: `$1${to}$1` },
+		{ id: `rename/${from}/slash-command`, reason: reason, pattern: new RegExp(`(?<![\\w/.:-])/${name}(?![\\w-])`), replacement: `/${to}` },
+		{ id: `rename/${from}/path`, reason: reason, pattern: new RegExp(`(?<=\\.\\./|skills/)${name}(?=/)`), replacement: to },
+		{ id: `rename/${from}/mention`, reason: reason, pattern: new RegExp(`(\\*\\*|\`)${name}\\1`), replacement: `$1${to}$1` },
 	];
 }
 
@@ -100,10 +95,10 @@ function compile(groups: readonly Group[]): Config {
 	for (const rule of rules) {
 		if (ids.has(rule.id)) problems.push(`duplicate rule id ${rule.id}`);
 		ids.add(rule.id);
-		if (rule.rationale.trim() === "") problems.push(`rule ${rule.id} has no rationale`);
+		if (rule.reason.trim() === "") problems.push(`rule ${rule.id} has no reason`);
 		if (rule.pattern === "") problems.push(`rule ${rule.id} has an empty pattern`);
 	}
-	for (const exclusion of exclusions) if (exclusion.rationale.trim() === "") problems.push(`exclusion ${exclusion.path} has no rationale`);
+	for (const exclusion of exclusions) if (exclusion.reason.trim() === "") problems.push(`exclusion ${exclusion.path} has no reason`);
 	for (const rename of renames) if (rename.reason.trim() === "") problems.push(`rename ${rename.from} has no reason`);
 	for (const move of moves) if (move.reason.trim() === "") problems.push(`move ${move.from} has no reason`);
 
@@ -118,7 +113,7 @@ function compile(groups: readonly Group[]): Config {
 	for (const allowance of allowances) {
 		const label = `term allowance ${allowance.category} ${allowance.file} ${allowance.term}`;
 		if (!terms.some(category => category.id === allowance.category && allowance.term in category.patterns)) problems.push(`${label} names no known term`);
-		if (allowance.ticket.trim() === "" || allowance.reason.trim() === "") problems.push(`${label} needs a ticket and a reason`);
+		if (allowance.reason.trim() === "") problems.push(`${label} needs a reason`);
 		if (!(allowance.count > 0)) problems.push(`${label} needs a positive count`);
 	}
 	if (problems.length > 0) throw new SyncConfigError(problems.join("\n"));
@@ -179,7 +174,7 @@ interface BuildResult {
 	unused: string[];
 }
 
-/** Imports, excludes, renames, normalises frontmatter, then applies the substitution table, in that order. */
+/** Imports, excludes, renames, sets each skill and agent `name` to its path, then applies the substitution table, in that order. */
 function build(upstream: Tree, config: Config): BuildResult {
 	const excluded = config.exclusions.map(exclusion => new Bun.Glob(exclusion.path));
 	let files: Tree = new Map();
@@ -211,11 +206,7 @@ function build(upstream: Tree, config: Config): BuildResult {
 		const name = skill ?? agent;
 		if (name === undefined || !isText(file)) continue;
 		const text = file.data.toString("utf8");
-		const edited = editFrontmatter(text, {
-			name,
-			remove: skill === undefined ? [] : STICKY_MODE_KEYS,
-			add: skill?.startsWith(HIDDEN_SKILL_PREFIX) ? { hide: "true" } : {},
-		});
+		const edited = editFrontmatter(text, { name });
 		if (edited !== text) files.set(filePath, withText(file, edited));
 	}
 
@@ -422,11 +413,11 @@ function renderReport(result: SyncResult, terms: readonly TermCategory[], writte
 		renderTermReport(result.findings, terms),
 		...list(
 			"Cursor-specific terms the verify gate rejects",
-			result.termFailures.map(finding => `${finding.file}: ${finding.term} x${finding.count} (${finding.category}, owner ${finding.owner})`),
+			result.termFailures.map(finding => `${finding.file}: ${finding.term} x${finding.count} (${finding.category})`),
 		),
 		...list(
 			"Term allowances to delete or update",
-			result.expiredAllowances.map(allowance => `${allowance.category} ${allowance.file}: ${allowance.term} x${allowance.count} no longer matches (ticket ${allowance.ticket})`),
+			result.expiredAllowances.map(allowance => `${allowance.category} ${allowance.file}: ${allowance.term} x${allowance.count} no longer matches`),
 		),
 	].join("\n");
 }

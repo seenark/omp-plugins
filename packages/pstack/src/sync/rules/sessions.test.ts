@@ -5,7 +5,7 @@ import * as path from "node:path";
 import { runSync } from "../engine.ts";
 import { loadTree } from "../source.ts";
 import type { Group, Rule } from "../types.ts";
-import { SKILL_COMMANDS, sessions } from "./sessions.ts";
+import { sessions } from "./sessions.ts";
 
 const temporary: string[] = [];
 afterEach(() => {
@@ -131,11 +131,5 @@ describe("sessions group", () => {
 		const text = "See skills/how/SKILL.md, ../how/SKILL.md, https://example.test/why, /tmp/swarm-1/, ~/how and /loop.\n";
 		const { read } = syncFiles({ "skills/a/SKILL.md": withFrontmatter("skills/a/SKILL.md", text) }, sessions);
 		expect(read("skills/a/SKILL.md")).toContain(text.trim());
-	});
-
-	it("names every skill pstack ships", () => {
-		const skillsDirectory = path.join(import.meta.dir, "../../../skills");
-		const shipped = fs.readdirSync(skillsDirectory).filter(name => !name.startsWith("principle-"));
-		expect([...SKILL_COMMANDS].sort()).toEqual(shipped.sort());
 	});
 });

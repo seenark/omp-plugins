@@ -5,6 +5,7 @@ import * as path from "node:path";
 import { failsGate, NOTICES_FILE, PIN_FILE, runSync, SyncConfigError, type SyncOptions } from "./engine.ts";
 import { collisions } from "./rules/collisions.ts";
 import { dispatch } from "./rules/dispatch.ts";
+import { frontmatter } from "./rules/frontmatter.ts";
 import { sessions } from "./rules/sessions.ts";
 import { loadTree } from "./source.ts";
 import { scanTerms } from "./terms.ts";
@@ -79,7 +80,7 @@ describe("import and exclusion", () => {
 		"cursor-team-kit/skills/deslop/SKILL.md": skill("deslop"),
 		"cursor-team-kit/skills/fix-ci/SKILL.md": skill("fix-ci"),
 	});
-	const exclude: Group = { name: "x", exclusions: [{ path: "skills/make-bot-ui/**", rationale: "not wanted" }] };
+	const exclude: Group = { name: "x", exclusions: [{ path: "skills/make-bot-ui/**", reason: "not wanted" }] };
 
 	it("vendors skills, agents and deslop, and no other Upstream path", () => {
 		const { packageRoot } = sync(upstream, [exclude]);
@@ -108,8 +109,8 @@ describe("substitution table", () => {
 		const group: Group = {
 			name: "g",
 			rules: [
-				{ id: "g/task", rationale: "r", pattern: "Task", replacement: "task" },
-				{ id: "g/count", rationale: "r", pattern: /(\w+) here/, replacement: "$1 (here)" },
+				{ id: "g/task", reason: "r", pattern: "Task", replacement: "task" },
+				{ id: "g/count", reason: "r", pattern: /(\w+) here/, replacement: "$1 (here)" },
 			],
 		};
 		const { packageRoot } = sync(upstream, [group]);
@@ -118,7 +119,7 @@ describe("substitution table", () => {
 	});
 
 	it("honours an explicit file scope", () => {
-		const group: Group = { name: "g", rules: [{ id: "g/ts", rationale: "r", files: "**/*.ts", pattern: "Task", replacement: "task" }] };
+		const group: Group = { name: "g", rules: [{ id: "g/ts", reason: "r", files: "**/*.ts", pattern: "Task", replacement: "task" }] };
 		const { packageRoot } = sync(upstream, [group]);
 		expect(read(packageRoot, "skills/a/scripts/run.ts")).toBe("// task stays in code\n");
 		expect(read(packageRoot, "skills/a/SKILL.md")).toContain("use Task here");
@@ -128,8 +129,8 @@ describe("substitution table", () => {
 		const group: Group = {
 			name: "g",
 			rules: [
-				{ id: "g/broad", rationale: "r", pattern: "Task", replacement: "task" },
-				{ id: "g/narrow", rationale: "r", pattern: "Task here", replacement: "never" },
+				{ id: "g/broad", reason: "r", pattern: "Task", replacement: "task" },
+				{ id: "g/narrow", reason: "r", pattern: "Task here", replacement: "never" },
 			],
 		};
 		const packageRoot = scratch();
@@ -141,9 +142,9 @@ describe("substitution table", () => {
 		const group: Group = {
 			name: "g",
 			rules: [
-				{ id: "g/first", rationale: "r", pattern: "Task", replacement: "Job" },
-				{ id: "g/chained", rationale: "r", pattern: "Job here", replacement: "job (here)" },
-				{ id: "g/stale", rationale: "r", pattern: "does not occur", replacement: "x" },
+				{ id: "g/first", reason: "r", pattern: "Task", replacement: "Job" },
+				{ id: "g/chained", reason: "r", pattern: "Job here", replacement: "job (here)" },
+				{ id: "g/stale", reason: "r", pattern: "does not occur", replacement: "x" },
 			],
 		};
 		const { packageRoot, result } = sync(upstream, [group]);
@@ -151,9 +152,9 @@ describe("substitution table", () => {
 		expect(result.unusedRules).toEqual(["g/stale"]);
 	});
 
-	it("rejects a rule without a rationale or with a duplicate id", () => {
-		const bare: Group = { name: "g", rules: [{ id: "g/x", rationale: " ", pattern: "Task", replacement: "t" }] };
-		const twin: Group = { name: "g", rules: [{ id: "g/x", rationale: "r", pattern: "a", replacement: "b" }, { id: "g/x", rationale: "r", pattern: "c", replacement: "d" }] };
+	it("rejects a rule without a reason or with a duplicate id", () => {
+		const bare: Group = { name: "g", rules: [{ id: "g/x", reason: " ", pattern: "Task", replacement: "t" }] };
+		const twin: Group = { name: "g", rules: [{ id: "g/x", reason: "r", pattern: "a", replacement: "b" }, { id: "g/x", reason: "r", pattern: "c", replacement: "d" }] };
 		expect(() => sync(upstream, [bare])).toThrow(SyncConfigError);
 		expect(() => sync(upstream, [twin])).toThrow(/duplicate rule id/);
 	});
@@ -168,7 +169,7 @@ describe("substitution table", () => {
 		fs.writeFileSync(path.join(root, "pstack/skills/a/SKILL.md"), skill("a"));
 		fs.writeFileSync(path.join(root, "pstack/skills/a/image.bin"), Buffer.from([0, 84, 97, 115, 107, 255]));
 		fs.writeFileSync(path.join(root, "pstack/skills/a/run.sh"), "#!/bin/sh\n", { mode: 0o755 });
-		const group: Group = { name: "g", rules: [{ id: "g/all", rationale: "r", files: "**/*", pattern: "Task", replacement: "task" }] };
+		const group: Group = { name: "g", rules: [{ id: "g/all", reason: "r", files: "**/*", pattern: "Task", replacement: "task" }] };
 		const { packageRoot } = sync(loadTree(root), [group]);
 		expect(fs.readFileSync(path.join(packageRoot, "skills/a/image.bin"))).toEqual(Buffer.from([0, 84, 97, 115, 107, 255]));
 		expect(fs.statSync(path.join(packageRoot, "skills/a/run.sh")).mode & 0o111).not.toBe(0);
@@ -185,13 +186,13 @@ describe("frontmatter and visibility", () => {
 	});
 
 	it("hides principle skills and no others", () => {
-		const { packageRoot } = sync(upstream, [none]);
+		const { packageRoot } = sync(upstream, [frontmatter]);
 		expect(read(packageRoot, "skills/principle-x/SKILL.md")).toContain("\nhide: true\n");
 		expect(read(packageRoot, "skills/standalone/SKILL.md")).not.toContain("hide:");
 	});
 
 	it("strips sticky-mode keys from skills and names every skill after its directory", () => {
-		const { packageRoot } = sync(upstream, [none]);
+		const { packageRoot } = sync(upstream, [frontmatter]);
 		const poteto = read(packageRoot, "skills/poteto-mode/SKILL.md");
 		expect(poteto).toContain("name: poteto-mode\n");
 		expect(poteto).not.toMatch(/^(icon|color):/m);
@@ -237,7 +238,7 @@ describe("re-running sync", () => {
 		"pstack/skills/principle-p/SKILL.md": skill("principle-p"),
 		"pstack/skills/tdd/SKILL.md": skill("tdd"),
 	});
-	const group: Group = { name: "g", rules: [{ id: "g/t", rationale: "r", pattern: "Task", replacement: "task" }] };
+	const group: Group = { name: "g", rules: [{ id: "g/t", reason: "r", pattern: "Task", replacement: "task" }] };
 
 	it("produces no diff when Upstream is unchanged", () => {
 		const first = sync(upstream, [...shippedGroups, group]);
@@ -393,7 +394,7 @@ describe("stale generated files", () => {
 		"pstack/skills/watch/SKILL.md": skill("watch"),
 		"pstack/skills/watch/scripts/run.sh": "run\n",
 	});
-	const excluded: Group = { name: "x", exclusions: [{ path: "skills/watch/**", rationale: "Excluded after the first sync." }] };
+	const excluded: Group = { name: "x", exclusions: [{ path: "skills/watch/**", reason: "Excluded after the first sync." }] };
 
 	it("check mode names a file an earlier sync wrote that the current rules no longer produce, and leaves it", () => {
 		const { packageRoot } = sync(upstream, [none]);
@@ -444,8 +445,8 @@ describe("stale generated files", () => {
 
 describe("verify gate", () => {
 	const upstream = upstreamTree({ "pstack/skills/a/SKILL.md": skill("a", "Use subagent_type here.\n") });
-	const terms = [{ id: "dispatch", owner: "T1", patterns: { subagent_type: /subagent_type/ } }];
-	const allowance = { category: "dispatch", file: "skills/a/SKILL.md", term: "subagent_type", count: 1, ticket: "T1", reason: "removed by T1" };
+	const terms = [{ id: "dispatch", patterns: { subagent_type: /subagent_type/ } }];
+	const allowance = { category: "dispatch", file: "skills/a/SKILL.md", term: "subagent_type", count: 1, reason: "removed later" };
 
 	/** Writes once, then checks, as `bun run verify` does against a synced package. */
 	const checked = (groups: Group[], tree = upstream) => {
@@ -455,22 +456,22 @@ describe("verify gate", () => {
 
 	it("must trip: a Cursor term with no allowance fails the gate and the report names the term and file", () => {
 		const result = checked([{ name: "t", terms }]);
-		expect(result.termFailures).toEqual([{ category: "dispatch", owner: "T1", file: "skills/a/SKILL.md", term: "subagent_type", count: 1 }]);
+		expect(result.termFailures).toEqual([{ category: "dispatch", file: "skills/a/SKILL.md", term: "subagent_type", count: 1 }]);
 		expect(failsGate(result)).toBe(true);
 		expect(result.report).toContain("skills/a/SKILL.md: subagent_type x1");
 	});
 
 	it("must trip: a term typed into a vendored file by hand is named with its file", () => {
-		const clean: Group = { name: "t", terms, rules: [{ id: "t/fix", rationale: "r", pattern: "subagent_type", replacement: "agent" }] };
+		const clean: Group = { name: "t", terms, rules: [{ id: "t/fix", reason: "r", pattern: "subagent_type", replacement: "agent" }] };
 		const { packageRoot } = sync(upstream, [clean]);
 		fs.writeFileSync(path.join(packageRoot, "skills/a/SKILL.md"), skill("a", "typed subagent_type by hand\n"));
 		const { result } = sync(upstream, [clean], { packageRoot, write: false });
-		expect(result.termFailures).toEqual([{ category: "dispatch", owner: "T1", file: "skills/a/SKILL.md", term: "subagent_type", count: 1 }]);
+		expect(result.termFailures).toEqual([{ category: "dispatch", file: "skills/a/SKILL.md", term: "subagent_type", count: 1 }]);
 		expect(failsGate(result)).toBe(true);
 	});
 
 	it("must pass: a clean package and an exact allowance both pass", () => {
-		expect(failsGate(checked([{ name: "t", terms, rules: [{ id: "t/fix", rationale: "r", pattern: "subagent_type", replacement: "agent" }] }]))).toBe(false);
+		expect(failsGate(checked([{ name: "t", terms, rules: [{ id: "t/fix", reason: "r", pattern: "subagent_type", replacement: "agent" }] }]))).toBe(false);
 		expect(failsGate(checked([{ name: "t", terms, allowances: [allowance] }]))).toBe(false);
 	});
 
@@ -482,7 +483,7 @@ describe("verify gate", () => {
 	});
 
 	it("must trip: an allowance whose term is gone expires and fails the gate", () => {
-		const fixed: Group = { name: "t", terms, allowances: [allowance], rules: [{ id: "t/fix", rationale: "r", pattern: "subagent_type", replacement: "agent" }] };
+		const fixed: Group = { name: "t", terms, allowances: [allowance], rules: [{ id: "t/fix", reason: "r", pattern: "subagent_type", replacement: "agent" }] };
 		const result = checked([fixed]);
 		expect(result.termFailures).toEqual([]);
 		expect(result.expiredAllowances).toEqual([allowance]);
@@ -490,8 +491,8 @@ describe("verify gate", () => {
 		expect(result.report).toContain("skills/a/SKILL.md: subagent_type x1 no longer matches");
 	});
 
-	it("rejects an allowance without a ticket, with a bad count, or for an unknown term", () => {
-		for (const bad of [{ ...allowance, ticket: "" }, { ...allowance, count: 0 }, { ...allowance, term: "nope" }]) {
+	it("rejects an allowance without a reason, with a bad count, or for an unknown term", () => {
+		for (const bad of [{ ...allowance, reason: "" }, { ...allowance, count: 0 }, { ...allowance, term: "nope" }]) {
 			expect(() => sync(upstream, [{ name: "t", terms, allowances: [bad] }])).toThrow(SyncConfigError);
 		}
 	});
@@ -511,18 +512,18 @@ describe("Cursor term report", () => {
 	const group: Group = {
 		name: "t",
 		terms: [
-			{ id: "dispatch", owner: "T1", patterns: { subagent_type: /subagent_type/, AskQuestion: /AskQuestion/ } },
-			{ id: "pr", owner: "T2", patterns: { gt: /\bgt\b/ } },
-			{ id: "empty", owner: "T3", patterns: { nope: /nope/ } },
+			{ id: "dispatch", patterns: { subagent_type: /subagent_type/, AskQuestion: /AskQuestion/ } },
+			{ id: "pr", patterns: { gt: /\bgt\b/ } },
+			{ id: "empty", patterns: { nope: /nope/ } },
 		],
 	};
 
 	it("lists remaining terms by category, term and file, and lists only files that match", () => {
 		const { result } = sync(upstream, [group]);
 		expect(result.findings).toEqual([
-			{ category: "dispatch", owner: "T1", file: "skills/a/SKILL.md", term: "subagent_type", count: 1 },
-			{ category: "dispatch", owner: "T1", file: "skills/a/SKILL.md", term: "AskQuestion", count: 1 },
-			{ category: "pr", owner: "T2", file: "skills/a/SKILL.md", term: "gt", count: 1 },
+			{ category: "dispatch", file: "skills/a/SKILL.md", term: "subagent_type", count: 1 },
+			{ category: "dispatch", file: "skills/a/SKILL.md", term: "AskQuestion", count: 1 },
+			{ category: "pr", file: "skills/a/SKILL.md", term: "gt", count: 1 },
 		]);
 		expect(result.report).toContain("skills/a/SKILL.md");
 		expect(result.report).not.toContain("skills/b/SKILL.md");
@@ -533,7 +534,7 @@ describe("Cursor term report", () => {
 	});
 
 	it("stops reporting a term once a rule removes it", () => {
-		const fix: Group = { ...group, rules: [{ id: "t/fix", rationale: "r", pattern: "subagent_type", replacement: "agent" }] };
+		const fix: Group = { ...group, rules: [{ id: "t/fix", reason: "r", pattern: "subagent_type", replacement: "agent" }] };
 		expect(sync(upstream, [fix]).result.findings.map(finding => finding.term)).toEqual(["AskQuestion", "gt"]);
 	});
 });
