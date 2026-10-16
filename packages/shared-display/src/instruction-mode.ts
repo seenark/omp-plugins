@@ -1,12 +1,15 @@
-/** EventBus channel on which a workflow plugin (pstack) asks Instruction Modes to switch off for the Agent Session. */
+/** EventBus channel on which a workflow plugin (such as pstack) asks Instruction Modes to switch off for the Agent Session. */
 export const INSTRUCTION_MODE_SUSPENSION_CHANNEL = "codesook/instruction-mode-suspension/v1";
 
 export const SUSPENDABLE_INSTRUCTION_MODES = ["caveman", "ponytail"] as const;
 export type SuspendableInstructionMode = (typeof SUSPENDABLE_INSTRUCTION_MODES)[number];
 
+/** Session entry type under which an Instruction Mode records its Session Override (`data: { mode }`). */
+export const instructionModeEntryType = (mode: SuspendableInstructionMode): string => `${mode}-mode`;
+
 export interface InstructionModeSuspension {
 	readonly protocol: 1;
-	readonly source: "pstack";
+	readonly source: string;
 	readonly modes: readonly SuspendableInstructionMode[];
 }
 
@@ -15,10 +18,10 @@ export interface InstructionModeEvents {
 	on(channel: string, handler: (data: unknown) => void): () => void;
 }
 
-/** Ask the named Instruction Modes to apply a Session Override at Mode Level off. Nothing is emitted for an empty list. */
-export function suspendInstructionModes(events: Pick<InstructionModeEvents, "emit">, modes: readonly SuspendableInstructionMode[]): void {
+/** Ask the named Instruction Modes to apply a Session Override at Mode Level off. `source` names the asking workflow plugin. Nothing is emitted for an empty list. */
+export function suspendInstructionModes(events: Pick<InstructionModeEvents, "emit">, source: string, modes: readonly SuspendableInstructionMode[]): void {
 	if (modes.length === 0) return;
-	events.emit(INSTRUCTION_MODE_SUSPENSION_CHANNEL, { protocol: 1, source: "pstack", modes: [...modes] } satisfies InstructionModeSuspension);
+	events.emit(INSTRUCTION_MODE_SUSPENSION_CHANNEL, { protocol: 1, source, modes: [...modes] } satisfies InstructionModeSuspension);
 }
 
 /** True when `data` is a version 1 suspension message that names `mode`. Anything else is ignored. */

@@ -386,7 +386,7 @@ test("pstack settings default, persist beside unknown keys, and block invalid va
 test("pstack presence is only the standalone package, enabled or not", () => {
 	expect(parsePluginList({ npm: [{ name: "@codesook/omp-pstack", enabled: true }] }).projectFeatures.pstack).toBe(true);
 	expect(parsePluginList({ npm: [{ name: "@codesook/omp-pstack", enabled: false }] }).projectFeatures.pstack).toBe(false);
-	expect(parsePluginList({ npm: [{ name: "omp-plugins", enabledFeatures: ["pstack"] }] }).projectFeatures.pstack).toBe(true);
+	expect(parsePluginList({ npm: [{ name: "omp-plugins", enabledFeatures: ["pstack"] }] }).projectFeatures.pstack).toBe(false);
 	expect(parsePluginList({ npm: [] }).projectFeatures.pstack).toBe(false);
 });
 

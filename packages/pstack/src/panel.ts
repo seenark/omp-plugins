@@ -1,6 +1,6 @@
 import type { BeforeSubagentSpawnEvent, BeforeSubagentSpawnEventResult, ExtensionContext } from "@oh-my-pi/pi-coding-agent";
-import { PANEL_ROLES, findLaneAgent, type PanelRole, type PanelSeat } from "./roles.ts";
-import { SINGLE_VENDOR_WARNING } from "./setup/rules.ts";
+import { PANEL_ROLES, findLaneAgent, roleAlias, type PanelRole, type PanelSeat } from "./roles.ts";
+import { SINGLE_VENDOR_WARNING } from "./panel-rules.ts";
 
 type ModelQuery = Pick<ExtensionContext["models"], "resolve" | "family">;
 
@@ -16,7 +16,7 @@ export interface SeatStatus {
 /** Resolve each seat role through the models API. An unset role resolves to nothing. */
 export function resolveSeats(models: ModelQuery): SeatStatus[] {
 	return PANEL_ROLES.map(role => {
-		const model = models.resolve(`@${role.id}`);
+		const model = models.resolve(roleAlias(role));
 		return { seat: role.seat, role, model: model ? `${model.provider}/${model.id}` : undefined, vendor: model ? models.family(model) : undefined };
 	});
 }
@@ -40,13 +40,22 @@ export function seatOfAgent(agent: string | undefined): PanelRole | undefined {
 
 /**
  * OMP fails a child whose single role alias is unset ("No model selected") instead of skipping it,
- * so pstack refuses the spawn up front. `before_subagent_spawn` fails open: it is not the only guard.
+ * so pstack refuses the spawn up front. A configured seat beyond `maxPanelSize` is refused too: the cap
+ * is otherwise only a line in the roster. `before_subagent_spawn` fails open: it is not the only guard.
  */
-export function guardSeatSpawn(event: BeforeSubagentSpawnEvent, ctx: ExtensionContext): BeforeSubagentSpawnEventResult | undefined {
+export function guardSeatSpawn(event: BeforeSubagentSpawnEvent, ctx: ExtensionContext, maxPanelSize: number): BeforeSubagentSpawnEventResult | undefined {
 	const role = seatOfAgent(event.agent);
-	if (!role || ctx.models.resolve(`@${role.id}`)) return undefined;
+	if (!role) return undefined;
+	const configured = PANEL_ROLES.filter(candidate => ctx.models.resolve(roleAlias(candidate)));
+	if (!configured.includes(role)) {
+		return {
+			block: true,
+			reason: `Panel seat ${role.seat.toUpperCase()} has no model: the model role ${role.id} is unset. Skip this seat and continue with the seats that have models. Do not retry it or substitute another agent.`,
+		};
+	}
+	if (configured.indexOf(role) < maxPanelSize) return undefined;
 	return {
 		block: true,
-		reason: `Panel seat ${role.seat.toUpperCase()} has no model: the model role ${role.id} is unset. Skip this seat and continue with the seats that have models. Do not retry it or substitute another agent.`,
+		reason: `Panel seat ${role.seat.toUpperCase()} is beyond the maximum panel size of ${maxPanelSize}. Skip this seat and continue with the seats on the roster. Do not retry it or substitute another agent.`,
 	};
 }

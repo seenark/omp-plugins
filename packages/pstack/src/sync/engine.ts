@@ -4,19 +4,16 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { editFrontmatter } from "./frontmatter.ts";
 import { renderNotices } from "./notices.ts";
-import { IGNORED, IMPORT_MAP, PSTACK_LICENSE, PSTACK_MANIFEST, TEAM_KIT_LICENSE } from "./source.ts";
+import { IGNORED, IMPORT_MAP, PSTACK_LICENSE, PSTACK_MANIFEST, TEAM_KIT_LICENSE, skillNames } from "./source.ts";
 import { gateTerms, renderTermReport, scanTerms, type TermFinding } from "./terms.ts";
 import type { Exclusion, Fork, Group, Move, Pin, Rename, Rule, TermAllowance, TermCategory, Tree, VFile } from "./types.ts";
+
+type ResolvedRule = Omit<Rule, "pattern"> & { pattern: string | RegExp };
 
 export const PIN_FILE = "upstream.json";
 export const NOTICES_FILE = "THIRD-PARTY-NOTICES.txt";
 const DEFAULT_RULE_FILES = "**/*.md";
 const CONFLICT_MARKER = /^<{7} /m;
-
-/** Cursor mode UI keys on poteto-mode (icon, color); OMP has no sticky modes. */
-const STICKY_MODE_KEYS = ["icon", "color"];
-/** Principle skills are hidden from the prompt list; `/skill:principle-...` still loads them. */
-const HIDDEN_SKILL_PREFIX = "principle-";
 
 export class SyncConfigError extends Error {}
 
@@ -60,7 +57,7 @@ export interface SyncResult {
 	findings: TermFinding[];
 	/** Findings the verify gate rejects: every finding no allowance covers exactly. */
 	termFailures: TermFinding[];
-	/** Allowances the output no longer needs; the verify gate rejects them so they cannot outlive their ticket. */
+	/** Allowances the output no longer needs; the verify gate rejects them so they cannot outlive the term. */
 	expiredAllowances: TermAllowance[];
 	report: string;
 }
@@ -83,9 +80,9 @@ function escapeRegExp(text: string): string {
 function renameRules({ from, to, reason }: Rename): Rule[] {
 	const name = escapeRegExp(from);
 	return [
-		{ id: `rename/${from}/slash-command`, rationale: reason, pattern: new RegExp(`(?<![\\w/.:-])/${name}(?![\\w-])`), replacement: `/${to}` },
-		{ id: `rename/${from}/path`, rationale: reason, pattern: new RegExp(`(?<=\\.\\./|skills/)${name}(?=/)`), replacement: to },
-		{ id: `rename/${from}/mention`, rationale: reason, pattern: new RegExp(`(\\*\\*|\`)${name}\\1`), replacement: `$1${to}$1` },
+		{ id: `rename/${from}/slash-command`, reason: reason, pattern: new RegExp(`(?<![\\w/.:-])/${name}(?![\\w-])`), replacement: `/${to}` },
+		{ id: `rename/${from}/path`, reason: reason, pattern: new RegExp(`(?<=\\.\\./|skills/)${name}(?=/)`), replacement: to },
+		{ id: `rename/${from}/mention`, reason: reason, pattern: new RegExp(`(\\*\\*|\`)${name}\\1`), replacement: `$1${to}$1` },
 	];
 }
 
@@ -100,10 +97,10 @@ function compile(groups: readonly Group[]): Config {
 	for (const rule of rules) {
 		if (ids.has(rule.id)) problems.push(`duplicate rule id ${rule.id}`);
 		ids.add(rule.id);
-		if (rule.rationale.trim() === "") problems.push(`rule ${rule.id} has no rationale`);
+		if (rule.reason.trim() === "") problems.push(`rule ${rule.id} has no reason`);
 		if (rule.pattern === "") problems.push(`rule ${rule.id} has an empty pattern`);
 	}
-	for (const exclusion of exclusions) if (exclusion.rationale.trim() === "") problems.push(`exclusion ${exclusion.path} has no rationale`);
+	for (const exclusion of exclusions) if (exclusion.reason.trim() === "") problems.push(`exclusion ${exclusion.path} has no reason`);
 	for (const rename of renames) if (rename.reason.trim() === "") problems.push(`rename ${rename.from} has no reason`);
 	for (const move of moves) if (move.reason.trim() === "") problems.push(`move ${move.from} has no reason`);
 
@@ -118,7 +115,7 @@ function compile(groups: readonly Group[]): Config {
 	for (const allowance of allowances) {
 		const label = `term allowance ${allowance.category} ${allowance.file} ${allowance.term}`;
 		if (!terms.some(category => category.id === allowance.category && allowance.term in category.patterns)) problems.push(`${label} names no known term`);
-		if (allowance.ticket.trim() === "" || allowance.reason.trim() === "") problems.push(`${label} needs a ticket and a reason`);
+		if (allowance.reason.trim() === "") problems.push(`${label} needs a reason`);
 		if (!(allowance.count > 0)) problems.push(`${label} needs a positive count`);
 	}
 	if (problems.length > 0) throw new SyncConfigError(problems.join("\n"));
@@ -160,12 +157,12 @@ function globally(pattern: RegExp): RegExp {
 	return new RegExp(pattern.source, pattern.flags.includes("g") ? pattern.flags : `${pattern.flags}g`);
 }
 
-function countMatches(rule: Rule, text: string): number {
+function countMatches(rule: ResolvedRule, text: string): number {
 	if (typeof rule.pattern === "string") return text.split(rule.pattern).length - 1;
 	return text.match(globally(rule.pattern))?.length ?? 0;
 }
 
-function substitute(rule: Rule, text: string): string {
+function substitute(rule: ResolvedRule, text: string): string {
 	if (typeof rule.pattern === "string") {
 		const replacement = rule.replacement;
 		return typeof replacement === "string" ? text.split(rule.pattern).join(replacement) : text.replaceAll(rule.pattern, replacement);
@@ -179,7 +176,7 @@ interface BuildResult {
 	unused: string[];
 }
 
-/** Imports, excludes, renames, normalises frontmatter, then applies the substitution table, in that order. */
+/** Imports, excludes, renames, sets each skill and agent `name` to its path, then applies the substitution table, in that order. */
 function build(upstream: Tree, config: Config): BuildResult {
 	const excluded = config.exclusions.map(exclusion => new Bun.Glob(exclusion.path));
 	let files: Tree = new Map();
@@ -211,22 +208,20 @@ function build(upstream: Tree, config: Config): BuildResult {
 		const name = skill ?? agent;
 		if (name === undefined || !isText(file)) continue;
 		const text = file.data.toString("utf8");
-		const edited = editFrontmatter(text, {
-			name,
-			remove: skill === undefined ? [] : STICKY_MODE_KEYS,
-			add: skill?.startsWith(HIDDEN_SKILL_PREFIX) ? { hide: "true" } : {},
-		});
+		const edited = editFrontmatter(text, { name });
 		if (edited !== text) files.set(filePath, withText(file, edited));
 	}
 
-	const globs = config.rules.map(rule => new Bun.Glob(rule.files ?? DEFAULT_RULE_FILES));
-	const original = config.rules.map(() => 0);
-	const atTurn = config.rules.map(() => 0);
+	const skills = skillNames(files.keys());
+	const rules = config.rules.map(rule => ({ ...rule, pattern: typeof rule.pattern === "function" ? rule.pattern(skills) : rule.pattern }));
+	const globs = rules.map(rule => new Bun.Glob(rule.files ?? DEFAULT_RULE_FILES));
+	const original = rules.map(() => 0);
+	const atTurn = rules.map(() => 0);
 	for (const [filePath, file] of files) {
 		if (!isText(file)) continue;
 		const before = file.data.toString("utf8");
 		let text = before;
-		config.rules.forEach((rule, index) => {
+		rules.forEach((rule, index) => {
 			if (!globs[index]!.match(filePath)) return;
 			original[index]! += countMatches(rule, before);
 			const matches = countMatches(rule, text);
@@ -238,8 +233,8 @@ function build(upstream: Tree, config: Config): BuildResult {
 
 	return {
 		files,
-		shadowed: config.rules.filter((_, index) => original[index]! > 0 && atTurn[index] === 0).map(rule => rule.id),
-		unused: config.rules.filter((_, index) => original[index] === 0 && atTurn[index] === 0).map(rule => rule.id),
+		shadowed: rules.filter((_, index) => original[index]! > 0 && atTurn[index] === 0).map(rule => rule.id),
+		unused: rules.filter((_, index) => original[index] === 0 && atTurn[index] === 0).map(rule => rule.id),
 	};
 }
 
@@ -289,10 +284,6 @@ function resolveFork(fork: Fork, ours: VFile | undefined, base: VFile | undefine
 	const merged = merge(ours.data, base.data, theirs.data);
 	if (merged.conflicts > 0) conflicts.push({ path: fork.path, reason: `${merged.conflicts} merge conflict(s); resolve the markers` });
 	return { data: merged.data, executable: ours.executable };
-}
-
-function skillNames(files: Tree): string[] {
-	return [...files.keys()].flatMap(file => /^skills\/([^/]+)\/SKILL\.md$/.exec(file)?.[1] ?? []);
 }
 
 function findCollisions(names: readonly string[], directories: readonly string[]): Collision[] {
@@ -390,7 +381,7 @@ export function runSync(options: SyncOptions): SyncResult {
 		if (file !== undefined) shipped.set(filePath, file);
 	}
 	const findings = scanTerms(shipped, config.terms);
-	const collisions = findCollisions(skillNames(desired), options.skillDirectories ?? []);
+	const collisions = findCollisions(skillNames(desired.keys()), options.skillDirectories ?? []);
 	const gate = gateTerms(findings, config.allowances);
 	const result: SyncResult = { pin, drift, conflicts, unusedRules: theirs.unused, collisions, findings, termFailures: gate.rejected, expiredAllowances: gate.expired, report: "" };
 	result.report = renderReport(result, config.terms, options.write);
@@ -422,11 +413,11 @@ function renderReport(result: SyncResult, terms: readonly TermCategory[], writte
 		renderTermReport(result.findings, terms),
 		...list(
 			"Cursor-specific terms the verify gate rejects",
-			result.termFailures.map(finding => `${finding.file}: ${finding.term} x${finding.count} (${finding.category}, owner ${finding.owner})`),
+			result.termFailures.map(finding => `${finding.file}: ${finding.term} x${finding.count} (${finding.category})`),
 		),
 		...list(
 			"Term allowances to delete or update",
-			result.expiredAllowances.map(allowance => `${allowance.category} ${allowance.file}: ${allowance.term} x${allowance.count} no longer matches (ticket ${allowance.ticket})`),
+			result.expiredAllowances.map(allowance => `${allowance.category} ${allowance.file}: ${allowance.term} x${allowance.count} no longer matches`),
 		),
 	].join("\n");
 }

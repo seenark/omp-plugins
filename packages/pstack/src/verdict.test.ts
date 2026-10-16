@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { SINGLE_VENDOR_WARNING } from "./setup/rules.ts";
+import { SINGLE_VENDOR_WARNING } from "./panel-rules.ts";
 import { duplicateCandidates, mergeVerdicts, parseVerdict, reviewerLines, type SeatRun } from "./verdict.ts";
 
 const finding = (overrides: object = {}) => ({ severity: "major", file: "src/a.ts", line: 10, claim: "claim", evidence: "evidence", ...overrides });

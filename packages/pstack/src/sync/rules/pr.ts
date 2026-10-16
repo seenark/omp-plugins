@@ -1,6 +1,6 @@
 import type { Group, Rule } from "../types.ts";
 
-/** Ticket omp-plugins-4nv.4: PR workflows without Graphite or Cursor /loop. */
+/** PR workflows without Graphite or Cursor /loop. */
 
 const TRIAGE = "skills/poteto-mode/references/review-bot-triage.md";
 
@@ -22,8 +22,8 @@ const TRIAGE_WORDING: Record<string, string> = {
 
 const HEARTBEAT = "an async `bash` job running `sleep 3600` that wakes you when it ends";
 
-function literal(id: string, rationale: string, pattern: string, replacement: string, files?: string): Rule {
-	return { id: `pr/${id}`, rationale, pattern, replacement, ...(files === undefined ? {} : { files }) };
+function literal(id: string, reason: string, pattern: string, replacement: string, files?: string): Rule {
+	return { id: `pr/${id}`, reason, pattern, replacement, ...(files === undefined ? {} : { files }) };
 }
 
 export const pr: Group = {
@@ -31,7 +31,7 @@ export const pr: Group = {
 	exclusions: [
 		{
 			path: "skills/poteto-mode/scripts/watch-pr/**",
-			rationale: "The OMP GitHub tool's run watch and `gh` replace the watcher, so the playbooks no longer call a bundled script.",
+			reason: "The OMP GitHub tool's run watch and `gh` replace the watcher, so the playbooks no longer call a bundled script.",
 		},
 	],
 	moves: [
@@ -44,7 +44,7 @@ export const pr: Group = {
 	rules: [
 		{
 			id: "pr/scripts-package",
-			rationale: "watch-pr and check-plan are Excluded, so their test and typecheck entries would point at missing files.",
+			reason: "watch-pr and check-plan are Excluded, so their test and typecheck entries would point at missing files.",
 			files: "skills/poteto-mode/scripts/package.json",
 			pattern: /"test": "bun test orch watch-pr check-plan\.test\.ts",\n\s*"typecheck": "tsc --project watch-pr\/tsconfig\.json[^"]*"/,
 			replacement: '"test": "bun test orch"',
@@ -58,7 +58,7 @@ export const pr: Group = {
 		),
 		{
 			id: "pr/drop-graphite-requirement",
-			rationale: "Graphite is Excluded; `gh` is the forge, so the playbooks stop mentioning the tool they refuse to require.",
+			reason: "Graphite is Excluded; `gh` is the forge, so the playbooks stop mentioning the tool they refuse to require.",
 			pattern: / Never require (?:Graphite \(`gt`\)|`gt`)\./g,
 			replacement: "",
 		},
@@ -78,7 +78,7 @@ export const pr: Group = {
 		),
 		{
 			id: "pr/shipping-watch-run",
-			rationale: "The queued watcher script is replaced by the babysit playbook's watch, so shipping re-reads the PR whenever a watch returns.",
+			reason: "The queued watcher script is replaced by the babysit playbook's watch, so shipping re-reads the PR whenever a watch returns.",
 			files: "skills/poteto-mode/playbooks/shipping.md",
 			pattern: /On GitHub, watch the run with the queued watcher from `playbooks\/babysit\.md` \(`scripts\/watch-pr\/watch-pr [^`]*`\) under `\/loop` until it reports `COMPLETE` at the ceiling\./,
 			replacement:
@@ -113,7 +113,7 @@ export const pr: Group = {
 		),
 		{
 			id: "pr/babysit-status-and-stop",
-			rationale:
+			reason:
 				"The watch-pr script is replaced by `gh`, the OMP GitHub tool's run watch and async bash plus wait, so status, waiting and the GitHub stop condition (formerly watcher verdicts) are restated in those terms.",
 			files: "skills/poteto-mode/playbooks/babysit.md",
 			pattern: /^6\. \*\*Trust the active forge's verdict[\s\S]*?rearm with the corrected snapshot\.$/m,
@@ -154,7 +154,7 @@ export const pr: Group = {
 		),
 		{
 			id: "pr/triage-reference-wording",
-			rationale: "The triage reference is kept as the rubric for any review bot; each Bugbot mention is reworded for a generic bot.",
+			reason: "The triage reference is kept as the rubric for any review bot; each Bugbot mention is reworded for a generic bot.",
 			files: TRIAGE,
 			pattern: new RegExp(Object.keys(TRIAGE_WORDING).map(phrase => phrase.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|"), "g"),
 			replacement: phrase => TRIAGE_WORDING[phrase]!,
@@ -221,7 +221,6 @@ export const pr: Group = {
 	terms: [
 		{
 			id: "pr",
-			owner: "omp-plugins-4nv.4",
 			patterns: {
 				Graphite: /Graphite/,
 				gt: /`gt`/,

@@ -81,7 +81,7 @@ export const WORK_ROLES: readonly WorkRole[] = [
 		access: "read-only",
 		lane: "Read-only pstack lane that merges panel verdicts into one decision.",
 		what: "Merges the panel's verdicts into one decision and breaks ties.",
-		when: "The end of a panel run (interrogate, arena, swarm, architect) and final reviews.",
+		when: "The end of a panel review (interrogate, arena, swarm, architect) and final reviews.",
 		recommended: "Your strongest reasoning model.",
 	},
 	{
@@ -96,9 +96,11 @@ export const WORK_ROLES: readonly WorkRole[] = [
 	},
 ];
 
+export const seatRoleId = (seat: PanelSeat): string => `pstack-panel-${seat}`;
+
 export const PANEL_ROLES: readonly PanelRole[] = PANEL_SEATS.map(seat => ({
 	kind: "panel",
-	id: `pstack-panel-${seat}`,
+	id: seatRoleId(seat),
 	seat,
 	fallback: null,
 	what: `Panel seat ${seat.toUpperCase()}: an independent reviewer whose verdict is compared with the other seats.`,

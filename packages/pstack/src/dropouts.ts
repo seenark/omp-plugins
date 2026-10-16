@@ -1,7 +1,7 @@
 import { isRecord } from "@codesook/omp-shared-display/config-store";
 import { seatOfAgent } from "./panel.ts";
 import type { PanelSeat } from "./roles.ts";
-import { modelKey } from "./setup/rules.ts";
+import { modelKey } from "./panel-rules.ts";
 
 /** Reverse-domain custom session entry type under which dropouts are persisted. */
 export const DROPOUT_ENTRY_TYPE = "dev.codesook.pstack.dropout";

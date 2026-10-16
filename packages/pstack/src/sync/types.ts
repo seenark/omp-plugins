@@ -6,23 +6,26 @@ export interface VFile {
 
 export type Tree = Map<string, VFile>;
 
+/** Builds a regex from the skill names the current sync run produces (after exclusions and renames). */
+export type SkillPattern = (skills: readonly string[]) => RegExp;
+
 /** One literal or regex substitution over the text of matching files, applied in table order. */
 export interface Rule {
 	/** Unique across all groups, by convention `<group>/<name>`. */
 	id: string;
 	/** Why the Adaptation exists. Required: an Adaptation without a reason is drift. */
-	rationale: string;
+	reason: string;
 	/** Glob over package-relative paths. Defaults to every Markdown file. */
 	files?: string;
-	/** A string matches literally. A regex is applied globally. */
-	pattern: string | RegExp;
+	/** A string matches literally. A regex is applied globally. A function builds the regex from the names of the skills this sync run produces. */
+	pattern: string | RegExp | SkillPattern;
 	replacement: string | ((substring: string, ...args: any[]) => string);
 }
 
 /** A package-relative glob that is never vendored. */
 export interface Exclusion {
 	path: string;
-	rationale: string;
+	reason: string;
 }
 
 /** A path that intentionally diverges from the sync output. */
@@ -53,13 +56,11 @@ export interface Rename {
 /** Cursor-specific terms scanned for in the output. Patterns are keyed by a human label. */
 export interface TermCategory {
 	id: string;
-	/** Beads ticket (or `unassigned`) that removes these terms. */
-	owner: string;
-	patterns: Record<string, RegExp>;
+	patterns: Record<string, RegExp | SkillPattern>;
 }
 
 /**
- * A Cursor-specific term the verify gate tolerates until the ticket that removes it lands. Exact: the file must
+ * A Cursor-specific term the verify gate tolerates until a later change removes it. Exact: the file must
  * hold exactly `count` matches. A matching entry the output no longer needs fails the gate, so the entry expires
  * by being deleted in the same change that removes the term.
  */
@@ -68,12 +69,10 @@ export interface TermAllowance {
 	file: string;
 	term: string;
 	count: number;
-	/** Beads ticket that removes the term. */
-	ticket: string;
 	reason: string;
 }
 
-/** One Adaptation group. Each group lives in its own file so tickets add rules without merge conflicts. */
+/** One Adaptation group. Each group lives in its own file, so the rules for one Cursor primitive stay together. */
 export interface Group {
 	name: string;
 	rules?: readonly Rule[];

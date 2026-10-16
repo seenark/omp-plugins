@@ -31,7 +31,7 @@ OMP discovers `skills/`, `agents/` and `rules/` from the package root through it
 
 ```text
 /poteto <task>   Start poteto-mode on the task and mark pstack active for this Agent Session
-/pstack          Show the run state
+/pstack          Show the Activation state
 /pstack status   Same
 /pstack setup    Choose models for the pstack roles
 /pstack preset <name>  Apply claude-only, claude-codex or lean without the menus
@@ -40,12 +40,12 @@ OMP discovers `skills/`, `agents/` and `rules/` from the package root through it
 
 pstack does nothing until you start it. `/skill:poteto-mode` has the same effect as `/poteto`: the extension detects it from the `input` event (interactive and RPC modes) and from the session's user-invoked `skill-prompt` message (every mode). Activation is idempotent. On activation the session receives a hidden note listing the configured panel seats (capped by `maxPanelSize`) with their models, and the absent ones.
 
-## Run state
+## Activation state
 
-The run state is the contract that suspension, guards, warnings and doctor read. It lives in `src/run-state.ts`.
+The activation state is the contract that suspension, guards, warnings and doctor read. It lives in `src/activation-state.ts`.
 
 ```ts
-interface RunState {
+interface ActivationState {
 	active: boolean;
 	task?: string;
 	playbook?: string; // kebab-case title, e.g. "feature"
@@ -54,21 +54,21 @@ interface RunState {
 	receipts: readonly PanelReceipt[]; // finished seat runs; only "completed" counts as attendance
 	dropouts: readonly Dropout[]; // seat runs that fell back to another model
 }
-interface RunReader {
-	state(): RunState;
-	subscribe(listener: (state: RunState, change: "activated" | "restored" | "updated") => void): () => void;
+interface ActivationReader {
+	state(): ActivationState;
+	subscribe(listener: (state: ActivationState, change: "activated" | "restored" | "updated") => void): () => void;
 }
 ```
 
-Consumers take a `RunReader`. `panelAttendance(state)` gives attended seats out of configured seats. A listener sees `restored` after every rebuild, so a consumer that must act on an active session at resume (re-emitting the Instruction Mode suspension) reacts to `restored` as well as `activated`.
+Consumers take an `ActivationReader`. `panelAttendance(state)` gives attended seats out of configured seats. A listener sees `restored` after every rebuild (resume, `/new`, branch or tree navigation). Suspension does not act on `restored`: it acts on `activated`, and once at `session_start` when the restored state is active.
 
-State is stored as custom session entries and rebuilt by folding the session branch (`rebuildRunState`) on `session_start`, `session_switch`, `session_branch` and `session_tree`. Compaction keeps custom entries, so it does not touch the state. Live updates and the rebuild share one reducer, `applyEntry`, so they cannot drift. Entries before activation and malformed entries are ignored.
+State is stored as custom session entries and rebuilt by folding the session branch (`rebuildActivationState`) on `session_start`, `session_switch`, `session_branch` and `session_tree`. Compaction keeps custom entries, so it does not touch the state. Live updates and the rebuild share one reducer, `applyEntry`, so they cannot drift. Entries before activation and malformed entries are ignored.
 
 | Entry type | Data | Written when |
 | --- | --- | --- |
-| `dev.codesook.pstack.run` | `{ kind: "activated", task?, seats }` | pstack starts |
-| `dev.codesook.pstack.run` | `{ kind: "playbook", playbook }` | the model reads `poteto-mode/playbooks/<title>.md` (`opening-a-pr`, which every playbook ends with, never replaces the playbook) |
-| `dev.codesook.pstack.run` | `{ kind: "progress", done, total, current? }` | a successful `todo` call; abandoned items count as done |
+| `dev.codesook.pstack.activation` | `{ kind: "activated", task?, seats }` | pstack starts |
+| `dev.codesook.pstack.activation` | `{ kind: "playbook", playbook }` | the model reads `poteto-mode/playbooks/<title>.md` (`opening-a-pr`, which every playbook ends with, never replaces the playbook) |
+| `dev.codesook.pstack.activation` | `{ kind: "progress", done, total, current? }` | a successful `todo` call; abandoned items count as done |
 | `dev.codesook.pstack.receipt` | `{ seat, agent, id, status }` | a panel seat's run ends while pstack is active |
 | `dev.codesook.pstack.dropout` | see Model roles | a seat's run falls back to another model, active or not |
 
@@ -80,7 +80,7 @@ pstack is a Shared Display producer (source `pstack`, needs `@codesook/omp-share
 
 ## Instruction Mode suspension
 
-When pstack activates, and again whenever an active session is restored (resume, `/new` into an active branch, branch or tree navigation), it emits one suspension message on `codesook/instruction-mode-suspension/v1` (`{ protocol: 1, source: "pstack", modes: ["caveman", "ponytail"] }`, helpers in `@codesook/omp-shared-display/instruction-mode`). Caveman and Ponytail react by applying a Session Override at Mode Level `off` for that Agent Session. The Root Plugin Configuration is never written, a parallel session keeps its Mode Levels, and the user's own `/caveman` and `/ponytail` commands still switch a mode back on. `suspendCaveman` and `suspendPonytail` (below) drop a mode from the message; both default to on.
+When pstack activates, and again when a session is resumed at startup with pstack active, it emits one suspension message on `codesook/instruction-mode-suspension/v1` (`{ protocol: 1, source: "pstack", modes: ["caveman", "ponytail"] }`, helpers in `@codesook/omp-shared-display/instruction-mode`). Caveman and Ponytail react by applying a Session Override at Mode Level `off` for that Agent Session. The Root Plugin Configuration is never written, a parallel session keeps its Mode Levels, and the user's own `/caveman` and `/ponytail` commands still switch a mode back on. Navigating within a session (`/tree`, branch) never suspends again, and a resume skips a mode the user switched back on after activation. `suspendCaveman` and `suspendPonytail` (below) drop a mode from the message; both default to on.
 
 ## Setup
 
@@ -98,7 +98,7 @@ Running it again with the same choices changes nothing. Presets pick tiers from 
 
 ## Presets and doctor
 
-`/pstack preset <name>` fills every role from the preset (`claude-only`, `claude-codex` or `lean`) and then saves it exactly as setup's Save does: seat and single-vendor rules, one probe turn per model (nothing is written when one fails), the isolation question, a write limited to `pstack-*` roles, readback and restore. `claude-codex` verifies Codex first, adds a Codex seat and moves `pstack-judge` to Codex. It does not change your other roles.
+`/pstack preset <name>` applies a preset (`claude-only`, `claude-codex` or `lean`) and then saves it exactly as setup's Save does: seat and single-vendor rules, one probe turn per model (nothing is written when one fails), the isolation question, a write limited to `pstack-*` roles and, if you agree, `task.isolation.enabled`, readback and restore. The presets fill only the seats they need: `claude-only` fills the work roles and seats A to C with the top, mid and cheap Claude models, `lean` fills seats A and B, and unfilled seats stay unset. `claude-codex` is `claude-only` plus one Codex seat (seat D) with `pstack-judge` on Codex. When you already have `pstack-*` roles, `claude-codex` is a delta: it verifies Codex first, adds one Codex seat in your first free seat (none when a seat already runs Codex), moves `pstack-judge` to Codex and keeps every other role. `claude-only` and `lean` replace the `pstack-*` roles with their own set.
 
 `/pstack doctor` is read-only and prints one line per finding at the worst severity found:
 
@@ -133,7 +133,7 @@ What each role is, when pstack uses it and what kind of model suits it (the text
 | `pstack-build` | Implements a scoped change end to end: edits, runs, and fixes its own failures. | Feature, fix and refactor steps that write code. | A strong coding model with reliable tool use; a mid-tier model is usually enough. |
 | `pstack-mechanical` | Applies fully specified mechanical edits: renames, codemods, formatting and bulk updates. | Steps where the change is already decided and only needs doing. | The cheapest model that follows instructions exactly. |
 | `pstack-design` | Proposes and critiques design: architecture, module boundaries, types and interfaces. | Architect and design steps, before code is written. | A model with strong design and visual judgment. |
-| `pstack-judge` | Merges the panel's verdicts into one decision and breaks ties. | The end of a panel run (interrogate, arena, swarm, architect) and final reviews. | Your strongest reasoning model. |
+| `pstack-judge` | Merges the panel's verdicts into one decision and breaks ties. | The end of a panel review (interrogate, arena, swarm, architect) and final reviews. | Your strongest reasoning model. |
 | `pstack-security` | Reviews a change for security flaws. | Review steps that touch authentication, input handling, secrets or dependencies. | A strong reasoning model; a different vendor from your judge adds coverage. |
 | `pstack-panel-a` … `pstack-panel-e` | Panel seat A to E: an independent reviewer whose verdict is compared with the other seats. | Panel workflows (interrogate, arena, swarm, architect, how critics) dispatch every configured seat in parallel. | A distinct model per seat, ideally from different vendors. Leave a seat unset to drop it: an unset seat is skipped, not an error. |
 
@@ -185,7 +185,7 @@ A stop continuation fires once per stop: it never answers a `stop_hook_active` t
 
 ## Adaptations
 
-Adaptations are code, in `src/sync/rules/`, one file per group so tickets add rules without touching each other:
+Adaptations are code, in `src/sync/rules/`, one file per group:
 
 | File | Owns |
 | --- | --- |
@@ -193,11 +193,12 @@ Adaptations are code, in `src/sync/rules/`, one file per group so tickets add ru
 | `core.ts` | Excluded parts (`make-bot-ui`; `automations` and `docs/guide` are never imported), the references they leave dangling, residual terms nobody owns |
 | `panel.ts` | Forks for the multi-model skills (`interrogate`, `arena`, `swarm`, `architect`, `how`) and the `panel-verdicts.md` reference, all hand-edited; their reasons live in the file |
 | `guards.ts` | Upstream's `check-plan` script (Excluded; the todo guard replaces it) and the playbook text that called it |
-| `dispatch.ts`, `pr.ts`, `sessions.ts` | Cursor primitives replaced by later tickets: subagent dispatch, PR workflows, session paths, goal mode, drivers, and the `/skill:<name>` form of slash commands (the skill list lives in `sessions.ts`; a test fails when `skills/` outgrows it) |
+| `frontmatter.ts` | Skill frontmatter: principle skills get `hide: true`, Cursor's `icon` and `color` keys are stripped |
+| `dispatch.ts`, `pr.ts`, `sessions.ts` | Cursor primitives replaced by OMP ones: lane dispatch, PR workflows, session paths, goal mode, drivers, and the `/skill:<name>` form of slash commands (the skill set is the one the current sync run produces, so a skill Upstream adds is rewritten in the same run) |
 
-A group exports any of `rules`, `exclusions`, `forks`, `renames`, `moves`, `terms` and `allowances`. A move (`from`, `to`, `reason`) places a vendored file at another package-relative path before rules run, so rules and links use the new path; a move whose source is missing fails the sync. Removing or moving an entry makes the file an earlier sync wrote stale: `bun run sync` deletes it, `--check` fails naming it. Rules apply in table order (renames, then groups in `rules/index.ts` order) and each needs a `rationale`. A rule that matches text only because it comes too late (shadowed by an earlier rule) fails the sync. A fork entry (`path`, `kind`, `reason`, `since`) keeps a path from being overwritten: `patched` forks 3-way merge Upstream changes into our edits and leave conflict markers, `rewritten` forks keep ours and report any Upstream change as a conflict.
+A group exports any of `rules`, `exclusions`, `forks`, `renames`, `moves`, `terms` and `allowances`. A move (`from`, `to`, `reason`) places a vendored file at another package-relative path before rules run, so rules and links use the new path; a move whose source is missing fails the sync. Removing or moving an entry makes the file an earlier sync wrote stale: `bun run sync` deletes it, `--check` fails naming it. Rules apply in table order (renames, then groups in `rules/index.ts` order) and each needs a `reason`. A rule that matches text only because it comes too late (shadowed by an earlier rule) fails the sync. A fork entry (`path`, `kind`, `reason`, `since`) keeps a path from being overwritten: `patched` forks 3-way merge Upstream changes into our edits and leave conflict markers, `rewritten` forks keep ours and report any Upstream change as a conflict.
 
-Fixed by the engine rather than by rules: principle skills get `hide: true` (still loadable with `/skill:principle-...`); the `icon` and `color` frontmatter of Cursor's mode UI is stripped; every skill and agent `name` is set to its directory or file name.
+The engine only sets every skill and agent `name` to its directory or file name. The other frontmatter Adaptations are rules in `rules/frontmatter.ts`: principle skills get `hide: true` (still loadable with `/skill:principle-...`), and the `icon` and `color` keys of Cursor's mode UI are stripped from skills.
 
 The dispatch group records three forks, each with its reason in `rules/dispatch.ts`. `skills/poteto-mode/references/provider-dispatch.md` is rewritten: Upstream's provider runner (other vendors' CLIs) is Excluded, Upstream at this pin has no such file, and every workflow skill points at this one for the real model roles, panel seats, dropout policy and isolation. `agents/poteto-agent.md` is patched to run on `pstack-build` with `@task` as fallback and to autoload the poteto-mode skill. `skills/setup-pstack/SKILL.md` is rewritten to point at the `/pstack setup` command. A rewritten fork that Upstream never had is not a conflict; one Upstream removed still is.
 
@@ -218,7 +219,7 @@ The report lists the Cursor-specific terms that remain, by category and file, th
 - a vendored file that differs from the sync output and has no fork entry;
 - a file under `skills/` or `agents/` that the sync does not produce and no fork entry covers (the generated `pstack-*` agents belong to `generate:agents` and are exempt);
 - a conflict, or conflict markers left in a fork;
-- any Cursor-specific term in the shipped files. A group tolerates a known leftover with an `allowances` entry (`category`, `file`, `term`, exact `count`, `ticket`, `reason`). An allowance that no longer matches fails the gate, so deleting the term forces deleting the entry. Allowances are the exception: leave none when the ticket that owns the category is closed.
+- any Cursor-specific term in the shipped files. A group tolerates a known leftover with an `allowances` entry (`category`, `file`, `term`, exact `count`, `reason`). An allowance that no longer matches fails the gate, so deleting the term forces deleting the entry. Allowances are the exception: leave none when the ticket that owns the category is closed.
 
 ## License and attribution
 

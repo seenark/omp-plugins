@@ -1,6 +1,6 @@
 # omp-plugins
 
-Features that extend OMP. This glossary covers content vendored from other projects, the token-savings figures shown in the Shared Display, the Instruction Modes, and pstack's model roles.
+Features that extend OMP. This glossary covers content vendored from other projects, the token-savings figures shown in the Shared Display, the Instruction Modes, and pstack's model roles and Activation.
 
 ## Vendoring
 
@@ -56,7 +56,7 @@ _Avoid_: persona, style plugin, sticky mode
 The setting an Instruction Mode runs at in an Agent Session, named exactly as its Upstream names it (such as `ultracave` or `lite`), where `off` means its instructions are not sent at all.
 _Avoid_: intensity, strength
 
-## pstack Models
+## pstack
 
 **Model Role**:
 A named entry in OMP's `modelRoles` that a pstack Lane resolves its model through, such as `pstack-build` or `pstack-panel-a`. pstack owns only the `pstack-*` roles.
@@ -70,6 +70,10 @@ _Avoid_: reviewer slot, vote, expert
 A task agent that pstack dispatches by name to do one kind of work on the Model Role it is bound to; read-only Lanes cannot write.
 _Avoid_: subagent, worker, role
 
+**Activation**:
+The state of an Agent Session once the user starts pstack's poteto-mode (`/poteto` or `/skill:poteto-mode`). pstack's guards, Status Segment, warnings and Instruction Mode suspension apply while it is active. It is rebuilt from the session's own entries, so it survives compaction and resume.
+_Avoid_: run, pstack mode, workflow run
+
 **Dropout**:
-A Panel Seat's run that fell back to a different model than the seat's own, recorded so a panel never reports diversity it did not have.
+A Panel Seat's Agent Session that fell back to a different model than the seat's own, recorded so a panel never reports diversity it did not have.
 _Avoid_: failure, retry

@@ -1,7 +1,7 @@
 import type { Group } from "../types.ts";
 
 /**
- * Ticket omp-plugins-4nv.13: the multi-model skills run on the configured panel seats. The edits are
+ * The multi-model skills run on the configured panel seats. The edits are
  * hand-written against the output of the dispatch rules, so each one is a patched fork: an Upstream change
  * near an edit surfaces as a merge conflict instead of silently dropping it.
  */

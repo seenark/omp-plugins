@@ -137,6 +137,15 @@ const STANDALONE_FEATURE_PACKAGES: Record<ProjectFeature, string> = {
 	pstack: "@codesook/omp-pstack",
 };
 
+/** Features the omp-plugins umbrella does not carry: they exist only as their own package, so a missing one is "not installed" and an umbrella feature list never enables it. */
+const STANDALONE_ONLY_FEATURES: readonly ProjectFeature[] = ["pstack"];
+const isStandaloneOnly = (feature: ProjectFeature): boolean => STANDALONE_ONLY_FEATURES.includes(feature);
+const absentLabel = (feature: ProjectFeature): "not installed" | "not enabled" => (isStandaloneOnly(feature) ? "not installed" : "not enabled");
+const sectionAbsentLabel = (sectionId: string): "not installed" | "not loaded" => {
+	const feature = PROJECT_FEATURES.find(candidate => `section:${candidate}` === sectionId);
+	return feature !== undefined && isStandaloneOnly(feature) ? "not installed" : "not loaded";
+};
+
 const PSTACK_GUARD_STRICTNESS = ["block-and-warn", "warn-only", "off"] as const;
 const PSTACK_PANEL_SIZE = { min: 1, max: 5 } as const;
 
@@ -320,7 +329,7 @@ export function parsePluginList(raw: unknown): PluginPresence {
 	if (!ompEntry || ompEntry.enabled === false) {
 		for (const feature of PROJECT_FEATURES) projectFeatures[feature] = false;
 	} else if (Array.isArray(ompEntry.enabledFeatures)) {
-		for (const feature of PROJECT_FEATURES) projectFeatures[feature] = ompEntry.enabledFeatures.includes(feature);
+		for (const feature of PROJECT_FEATURES.filter(candidate => !isStandaloneOnly(candidate))) projectFeatures[feature] = ompEntry.enabledFeatures.includes(feature);
 	}
 	for (const feature of PROJECT_FEATURES) {
 		const standalone = npm.find(entry => entry.name === STANDALONE_FEATURE_PACKAGES[feature]);
@@ -360,8 +369,8 @@ function featureEnabled(presence: PluginPresence, feature: ProjectFeature): bool
 /** pstack ships only as its own package, so a missing one is not installed rather than not enabled. */
 function featureWarning(presence: PluginPresence, feature: ProjectFeature): string | undefined {
 	if (featureEnabled(presence, feature)) return undefined;
-	return feature === "pstack"
-		? "pstack is not installed; install @codesook/omp-pstack. Settings apply when the extension loads (usually next start)."
+	return isStandaloneOnly(feature)
+		? `${feature} is not installed; install ${STANDALONE_FEATURE_PACKAGES[feature]}. Settings apply when the extension loads (usually next start).`
 		: "Feature is not enabled in omp-plugins; setting applies when extension loads (usually next start).";
 }
 
@@ -1094,7 +1103,7 @@ function settingsItems(
 		...PROJECT_FEATURES.map(feature => ({
 			id: `presence.${feature}`,
 			label: feature,
-			currentValue: featureEnabled(presence, feature) ? "enabled (next start)" : feature === "pstack" ? "not installed" : "not enabled",
+			currentValue: featureEnabled(presence, feature) ? "enabled (next start)" : absentLabel(feature),
 			warning: featureWarning(presence, feature),
 			description: "OMP lifecycle state is informational; this surface does not unload or load extensions.",
 		})),
@@ -1129,8 +1138,8 @@ function settingsItems(
 		textItem("caveman.template", "Display template", caveman.display.template, "Tokens: {activity}, {glyph}, {mode}.", cavemanWarning),
 		textItem("caveman.glyphDirectory", "Glyph directory", caveman.display.glyphDirectory, "External Caveman glyph directory; frame contents stay in files.", cavemanWarning),
 		{ id: "section:pstack", label: "pstack", currentValue: "", heading: true },
-		boolItem("pstack.suspendCaveman", "Suspend Caveman", behavior.pstack.suspendCaveman, "Switch Caveman off for the rest of an Agent Session once pstack starts a run.", pstackWarning),
-		boolItem("pstack.suspendPonytail", "Suspend Ponytail", behavior.pstack.suspendPonytail, "Switch Ponytail off for the rest of an Agent Session once pstack starts a run.", pstackWarning),
+		boolItem("pstack.suspendCaveman", "Suspend Caveman", behavior.pstack.suspendCaveman, "Switch Caveman off for the rest of an Agent Session once pstack is activated.", pstackWarning),
+		boolItem("pstack.suspendPonytail", "Suspend Ponytail", behavior.pstack.suspendPonytail, "Switch Ponytail off for the rest of an Agent Session once pstack is activated.", pstackWarning),
 		numberItem("pstack.maxPanelSize", "Maximum panel size", behavior.pstack.maxPanelSize, `Cap on panel seats a review uses, ${PSTACK_PANEL_SIZE.min}-${PSTACK_PANEL_SIZE.max}; unset seats are never counted.`, pstackWarning),
 		selectItem("pstack.guardStrictness", "Guard strictness", behavior.pstack.guardStrictness, PSTACK_GUARD_STRICTNESS, "block-and-warn stops damaging commands and warns on style; warn-only never blocks; off silences every guard.", pstackWarning),
 		{ id: "pstack.setup", label: "Model roles", currentValue: "/pstack setup", description: "Choose the models for pstack's roles and panel seats with /pstack setup in an Agent Session. Not edited here.", warning: pstackWarning },
@@ -1291,7 +1300,7 @@ function statusText(snapshot: StatusSnapshot): string {
 		"Codesook OMP Plugin",
 		`Root config: ${CODESOOK_OMP_CONFIG_PATH}${root?.exists ? (root.valid ? " (valid)" : " (invalid)") : " (not created)"}`,
 		`omp-plugins: ${presence.ompPlugins ? `installed${presence.ompPluginsEnabled ? ", enabled" : ", disabled"}` : "not installed"}`,
-		...PROJECT_FEATURES.map(feature => `  ${feature}: ${featureEnabled(presence, feature) ? "enabled for next start" : feature === "pstack" ? "not installed" : "not enabled"}`),
+		...PROJECT_FEATURES.map(feature => `  ${feature}: ${featureEnabled(presence, feature) ? "enabled for next start" : absentLabel(feature)}`),
 		"",
 		"Lifecycle toggles are informational; this extension does not unload or load plugins.",
 	];
@@ -1461,7 +1470,7 @@ export async function openSettings(pi: ExtensionAPI, ctx: ExtensionContext, conf
 					return {
 						id: section.id,
 						label: section.label,
-						detail: [changed > 0 ? `${changed} changed` : "", unloaded ? (section.id === "section:pstack" ? "not installed" : "not loaded") : ""].filter(Boolean).join(" · "),
+						detail: [changed > 0 ? `${changed} changed` : "", unloaded ? sectionAbsentLabel(section.id) : ""].filter(Boolean).join(" · "),
 					};
 				}),
 				...SETTINGS_ACTIONS.map(action => ({

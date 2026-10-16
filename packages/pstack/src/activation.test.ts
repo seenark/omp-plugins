@@ -6,9 +6,9 @@ import { isRecord } from "@codesook/omp-shared-display/config-store";
 import { SHARED_DISPLAY_CHANNEL, type FrameSequence } from "@codesook/omp-shared-display/client";
 import { INSTRUCTION_MODE_SUSPENSION_CHANNEL } from "@codesook/omp-shared-display/instruction-mode";
 import pstackExtension from "./index.ts";
-import { SINGLE_VENDOR_WARNING } from "./setup/rules.ts";
+import { SINGLE_VENDOR_WARNING } from "./panel-rules.ts";
 import { duplicateCandidates, mergeVerdicts } from "./verdict.ts";
-import { INACTIVE_RUN, RECEIPT_ENTRY_TYPE, RUN_ENTRY_TYPE, rebuildRunState } from "./run-state.ts";
+import { INACTIVE_ACTIVATION, RECEIPT_ENTRY_TYPE, ACTIVATION_ENTRY_TYPE, rebuildActivationState } from "./activation-state.ts";
 
 type Handler = (event: unknown, ctx: unknown) => unknown;
 type Command = { handler: (args: string, ctx: unknown) => unknown };
@@ -128,7 +128,7 @@ const todo = (done: number, total: number) => [
 ];
 const PLAYBOOK = "/pkg/skills/poteto-mode/playbooks/feature.md";
 
-const activatedEntries = (entries: SessionEntry[]) => entries.filter(entry => entry.customType === RUN_ENTRY_TYPE && (entry.data as { kind: string }).kind === "activated");
+const activatedEntries = (entries: SessionEntry[]) => entries.filter(entry => entry.customType === ACTIVATION_ENTRY_TYPE && (entry.data as { kind: string }).kind === "activated");
 
 describe("activation", () => {
 	it("/poteto <task> starts poteto-mode on the task and reports pstack active", async () => {
@@ -336,6 +336,20 @@ describe("interrogate dispatch shape", () => {
 		await capped.fire("session_start");
 		await capped.fire("input", { type: "input", text: "/skill:interrogate", source: "interactive" });
 		expect(rosterSeats(capped)).toEqual(["a", "b"]);
+		for (const seat of ["a", "b"]) expect(await capped.fire("before_subagent_spawn", spawn(`pstack-panel-${seat}-critic`))).toBeUndefined();
+		for (const seat of ["c", "d"]) {
+			for (const kind of ["critic", "builder"]) expect(await capped.fire("before_subagent_spawn", spawn(`pstack-panel-${seat}-${kind}`))).toMatchObject({ block: true });
+		}
+	});
+
+	it("enforces the maximum panel size at the live value, so a cap changed mid-session applies at once", async () => {
+		const models = { "@pstack-panel-a": "x/a", "@pstack-panel-b": "y/b", "@pstack-panel-c": "z/c" };
+		const h = createHarness({ maxPanelSize: 3, seatModels: models });
+		await h.fire("session_start");
+		expect(await h.fire("before_subagent_spawn", spawn("pstack-panel-c-critic"))).toBeUndefined();
+		h.events.emit("codesook/omp-plugin-config/v1", { config: { version: 1, display: {}, behavior: { pstack: { maxPanelSize: 2 } } } });
+		expect(await h.fire("before_subagent_spawn", spawn("pstack-panel-c-critic"))).toMatchObject({ block: true });
+		expect(await h.fire("before_subagent_spawn", spawn("pstack-panel-b-critic"))).toBeUndefined();
 	});
 });
 
@@ -478,15 +492,15 @@ describe("run state rebuild", () => {
 		const custom = (customType: string, data: unknown): SessionEntry => ({ type: "custom", customType, data });
 		const receipt = { seat: "a", agent: "pstack-panel-a-critic", id: "0", status: "completed" };
 		const dropout = { seat: "a", agent: "pstack-panel-a-critic", id: "0", from: "x/a", to: "y/b" };
-		const activated = custom(RUN_ENTRY_TYPE, { kind: "activated", seats: ["a", "b"] });
-		expect(rebuildRunState([custom(RECEIPT_ENTRY_TYPE, receipt), custom("dev.codesook.pstack.dropout", dropout)])).toBe(INACTIVE_RUN);
-		const state = rebuildRunState([
+		const activated = custom(ACTIVATION_ENTRY_TYPE, { kind: "activated", seats: ["a", "b"] });
+		expect(rebuildActivationState([custom(RECEIPT_ENTRY_TYPE, receipt), custom("dev.codesook.pstack.dropout", dropout)])).toBe(INACTIVE_ACTIVATION);
+		const state = rebuildActivationState([
 			custom(RECEIPT_ENTRY_TYPE, receipt),
 			activated,
-			custom(RUN_ENTRY_TYPE, { kind: "progress", done: 5, total: 2 }),
-			custom(RUN_ENTRY_TYPE, { kind: "activated", seats: ["a", "b", "c"] }),
-			custom(RUN_ENTRY_TYPE, { kind: "playbook", playbook: "" }),
-			custom(RUN_ENTRY_TYPE, "junk"),
+			custom(ACTIVATION_ENTRY_TYPE, { kind: "progress", done: 5, total: 2 }),
+			custom(ACTIVATION_ENTRY_TYPE, { kind: "activated", seats: ["a", "b", "c"] }),
+			custom(ACTIVATION_ENTRY_TYPE, { kind: "playbook", playbook: "" }),
+			custom(ACTIVATION_ENTRY_TYPE, "junk"),
 			custom(RECEIPT_ENTRY_TYPE, { ...receipt, seat: "z" }),
 			custom(RECEIPT_ENTRY_TYPE, receipt),
 			{ type: "message", customType: RECEIPT_ENTRY_TYPE, data: receipt } as never,
@@ -536,18 +550,50 @@ describe("Instruction Mode suspension", () => {
 		expect(h.suspensions).toHaveLength(1);
 	});
 
-	it("re-emits when an active session is resumed or navigated, and stays silent for an inactive one", async () => {
+	it("does not suspend again when the session is navigated, so a mode the user switched back on stays on", async () => {
+		const h = createHarness();
+		await h.fire("session_start");
+		await h.command("poteto", "x");
+		h.suspensions.length = 0;
+		for (const event of ["session_switch", "session_branch", "session_tree"]) await h.fire(event);
+		expect(h.suspensions).toEqual([]);
+	});
+
+	it("suspends again when an active session is resumed at startup, and stays silent for an inactive one", async () => {
 		const first = createHarness();
 		await first.fire("session_start");
 		await first.command("poteto", "x");
-		for (const event of ["session_start", "session_switch", "session_branch", "session_tree"]) {
-			const resumed = createHarness({ entries: first.entries });
-			await resumed.fire(event);
-			expect(resumed.suspensions).toHaveLength(1);
-		}
+		const resumed = createHarness({ entries: first.entries });
+		await resumed.fire("session_start");
+		expect(resumed.suspensions).toEqual([{ protocol: 1, source: "pstack", modes: ["caveman", "ponytail"] }]);
 		const inactive = createHarness();
 		await inactive.fire("session_start");
 		expect(inactive.suspensions).toEqual([]);
+	});
+
+	it("does not override a mode the user switched back on after activation when the session is resumed", async () => {
+		const first = createHarness();
+		await first.fire("session_start");
+		await first.command("poteto", "x");
+		const modeEntry = (mode: string, value: string): SessionEntry => ({ type: "custom", customType: `${mode}-mode`, data: { mode: value } });
+		first.entries.push(modeEntry("caveman", "off"), modeEntry("ponytail", "off"), modeEntry("caveman", "full"));
+		const oneBack = createHarness({ entries: first.entries });
+		await oneBack.fire("session_start");
+		expect(oneBack.suspensions).toEqual([{ protocol: 1, source: "pstack", modes: ["ponytail"] }]);
+		first.entries.push(modeEntry("ponytail", "lite"));
+		const bothBack = createHarness({ entries: first.entries });
+		await bothBack.fire("session_start");
+		expect(bothBack.suspensions).toEqual([]);
+	});
+
+	it("still suspends a mode the user switched on before activation", async () => {
+		const entries: SessionEntry[] = [{ type: "custom", customType: "caveman-mode", data: { mode: "full" } }];
+		const first = createHarness({ entries });
+		await first.fire("session_start");
+		await first.command("poteto", "x");
+		const resumed = createHarness({ entries: first.entries });
+		await resumed.fire("session_start");
+		expect(resumed.suspensions).toEqual([{ protocol: 1, source: "pstack", modes: ["caveman", "ponytail"] }]);
 	});
 
 	it("leaves a mode alone when its suspend toggle is off", async () => {

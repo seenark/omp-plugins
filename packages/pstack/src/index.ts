@@ -1,7 +1,7 @@
 import * as path from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "@oh-my-pi/pi-coding-agent";
 import { connectSharedDisplay } from "@codesook/omp-shared-display/client";
-import { suspendInstructionModes, type SuspendableInstructionMode } from "@codesook/omp-shared-display/instruction-mode";
+import { SUSPENDABLE_INSTRUCTION_MODES, suspendInstructionModes } from "@codesook/omp-shared-display/instruction-mode";
 import {
 	buildPotetoPrompt,
 	DEFAULT_POTETO_DIRECTORY,
@@ -14,14 +14,14 @@ import {
 	taskOfSkillInput,
 	taskOfSkillPrompt,
 } from "./activation.ts";
-import { blocksEnabled, createBehaviorStore, type BehaviorStoreOptions } from "./behavior.ts";
+import { blocksEnabled, createBehaviorStore, suspendsMode, type BehaviorStoreOptions } from "./behavior.ts";
 import { diagnose, doctorLevel, doctorReport } from "./doctor.ts";
 import { reminderText, segmentText, statusReport } from "./display.ts";
 import { blockingFinding, spawnFinding, toolCallResult } from "./guards/blocking.ts";
 import { DROPOUT_ENTRY_TYPE, watchDropouts } from "./dropouts.ts";
 import { playbookOpenedBy, progressFromTodo } from "./observe.ts";
-import { activeSeats, guardSeatSpawn } from "./panel.ts";
-import { createRunStore } from "./run-state.ts";
+import { activeSeats, guardSeatSpawn, type SeatStatus } from "./panel.ts";
+import { createActivationStore, reenabledInstructionModes } from "./activation-state.ts";
 import { loadSetupSettings, runPresetCommand, runSetupCommand, type SetupOptions } from "./setup/index.ts";
 import { createWarningGuards } from "./warn-guards.ts";
 
@@ -41,44 +41,49 @@ export interface PstackExtensionOptions extends Pick<BehaviorStoreOptions, "conf
 
 export default function pstackExtension(pi: ExtensionAPI, options: PstackExtensionOptions = {}): void {
 	const behavior = createBehaviorStore(pi.events, { ...options, onWarning: message => pi.logger.warn(message) });
-	const runs = createRunStore((customType, data) => pi.appendEntry(customType, data));
+	const activation = createActivationStore((customType, data) => pi.appendEntry(customType, data));
 	const publisher = connectSharedDisplay(pi.events, "pstack");
 	let stopDropouts: (() => void) | undefined;
 	let disposed = false;
+	const skillDirectory = options.skillDirectory ?? DEFAULT_POTETO_DIRECTORY;
+	const panelSeats = (ctx: ExtensionContext): SeatStatus[] => activeSeats(ctx.models, behavior.current().maxPanelSize);
+	/** Hidden note telling the session which panel seats can be spawned, delivered with the next turn. */
+	const sendRoster = (seats: readonly SeatStatus[]): void =>
+		pi.sendMessage({ customType: ROSTER_MESSAGE_TYPE, content: rosterText(seats), display: false }, { deliverAs: "nextTurn" });
 
-	runs.subscribe((state, change) => {
+	/** Ask the Instruction Modes the user left suspendable to switch off, except those switched back on after `entries`' activation. */
+	const suspendModes = (entries: readonly unknown[] = []): void => {
+		const reenabled = reenabledInstructionModes(entries, SUSPENDABLE_INSTRUCTION_MODES);
+		const modes = SUSPENDABLE_INSTRUCTION_MODES.filter(mode => suspendsMode(behavior.current(), mode) && !reenabled.includes(mode));
+		suspendInstructionModes(pi.events, "pstack", modes);
+	};
+
+	activation.subscribe((state, change) => {
 		if (disposed) return;
-		if (state.active && (change === "activated" || change === "restored")) {
-			const { suspendCaveman, suspendPonytail } = behavior.current();
-			const modes: SuspendableInstructionMode[] = [];
-			if (suspendCaveman) modes.push("caveman");
-			if (suspendPonytail) modes.push("ponytail");
-			suspendInstructionModes(pi.events, modes);
-		}
+		if (state.active && change === "activated") suspendModes();
 		const text = segmentText(state);
 		publisher.publish(text === undefined ? null : { frames: [[text]] });
 	});
 
-	const warnings = createWarningGuards({ behavior, runs, skillDirectory: options.skillDirectory ?? DEFAULT_POTETO_DIRECTORY });
+	const warnings = createWarningGuards({ behavior, activation, skillDirectory });
 	const restore = (ctx: ExtensionContext): void => {
 		warnings.reset();
-		runs.restore(ctx.sessionManager.getBranch());
+		activation.restore(ctx.sessionManager.getBranch());
 	};
 
-	/** Start the run and tell the session which panel seats exist. False when it was already active. */
+	/** Start the Activation and tell the session which panel seats exist. False when it was already active. */
 	const activate = (ctx: ExtensionContext, task: string): boolean => {
-		const seats = activeSeats(ctx.models, behavior.current().maxPanelSize);
-		if (!runs.activate({ task, seats: seats.map(seat => seat.seat) })) return false;
-		pi.sendMessage({ customType: ROSTER_MESSAGE_TYPE, content: rosterText(seats), display: false }, { deliverAs: "nextTurn" });
+		const seats = panelSeats(ctx);
+		if (!activation.activate({ task, seats: seats.map(seat => seat.seat) })) return false;
+		sendRoster(seats);
 		return true;
 	};
 
-	/** A panel skill started outside a run has no activation roster, so tell the session its seats now. */
+	/** A panel skill started outside an Activation has no roster, so tell the session its seats now. */
 	let panelInputSeen = false;
 	const announceSeats = (ctx: ExtensionContext): void => {
-		if (runs.state().active) return;
-		const seats = activeSeats(ctx.models, behavior.current().maxPanelSize);
-		pi.sendMessage({ customType: ROSTER_MESSAGE_TYPE, content: rosterText(seats), display: false }, { deliverAs: "nextTurn" });
+		if (activation.state().active) return;
+		sendRoster(panelSeats(ctx));
 	};
 
 	pi.on("session_start", (_event, ctx) => {
@@ -88,11 +93,13 @@ export default function pstackExtension(pi: ExtensionAPI, options: PstackExtensi
 			pi.events,
 			dropout => {
 				pi.appendEntry(DROPOUT_ENTRY_TYPE, dropout);
-				runs.noteDropout(dropout);
+				activation.noteDropout(dropout);
 			},
-			receipt => runs.recordReceipt(receipt),
+			receipt => activation.recordReceipt(receipt),
 		);
 		restore(ctx);
+		// Only a session resumed at startup is suspended again: navigating within a session must not undo the user's own /caveman or /ponytail.
+		if (activation.state().active) suspendModes(ctx.sessionManager.getBranch());
 	});
 	// session_switch (/new, resume) and session_branch replace the branch; session_tree moves within one.
 	pi.on("session_switch", (_event, ctx) => restore(ctx));
@@ -108,7 +115,7 @@ export default function pstackExtension(pi: ExtensionAPI, options: PstackExtensi
 	pi.on("before_subagent_spawn", (event, ctx) => {
 		const finding = spawnFinding(ctx.agent.name);
 		if (finding && blocksEnabled(behavior.current().guardStrictness)) return { block: true, reason: finding.reason };
-		return guardSeatSpawn(event, ctx);
+		return guardSeatSpawn(event, ctx, behavior.current().maxPanelSize);
 	});
 
 	pi.on("tool_call", async (event, ctx) => {
@@ -118,7 +125,7 @@ export default function pstackExtension(pi: ExtensionAPI, options: PstackExtensi
 			toolName: event.toolName,
 			input: event.input,
 			agentName: ctx.agent.name,
-			runActive: runs.state().active,
+			activated: activation.state().active,
 			cwd: ctx.cwd,
 		});
 		return toolCallResult(finding, strictness);
@@ -144,25 +151,24 @@ export default function pstackExtension(pi: ExtensionAPI, options: PstackExtensi
 	});
 
 	pi.on("tool_result", (event, ctx) => {
-		const state = runs.state();
+		const state = activation.state();
 		if (state.active) {
 			const playbook = playbookOpenedBy(event, state.playbook);
-			if (playbook !== undefined) runs.setPlaybook(playbook);
+			if (playbook !== undefined) activation.setPlaybook(playbook);
 			const progress = progressFromTodo(event);
-			if (progress !== undefined) runs.setProgress(progress);
+			if (progress !== undefined) activation.setProgress(progress);
 		}
 		return warnings.onToolResult(event, ctx);
 	});
 	pi.on("session_stop", (event, ctx) => warnings.onSessionStop(event, ctx));
 
-	// The run state is rebuilt from custom entries, which compaction keeps; the model only needs to be told where it is.
+	// The activation state is rebuilt from custom entries, which compaction keeps; the model only needs to be told where it is.
 	// Compaction can summarize away the activation roster, and panel verdicts need each seat's model, so it is sent again.
 	pi.on("session_compact", (_event, ctx) => {
-		const state = runs.state();
+		const state = activation.state();
 		if (!state.active) return;
 		pi.sendMessage({ customType: REMINDER_MESSAGE_TYPE, content: reminderText(state), display: false }, { deliverAs: "nextTurn" });
-		const seats = activeSeats(ctx.models, behavior.current().maxPanelSize);
-		pi.sendMessage({ customType: ROSTER_MESSAGE_TYPE, content: rosterText(seats), display: false }, { deliverAs: "nextTurn" });
+		sendRoster(panelSeats(ctx));
 	});
 
 	pi.registerCommand("poteto", {
@@ -171,7 +177,7 @@ export default function pstackExtension(pi: ExtensionAPI, options: PstackExtensi
 			const task = args.trim();
 			let prompt: string;
 			try {
-				prompt = await buildPotetoPrompt(options.skillDirectory ?? DEFAULT_POTETO_DIRECTORY, task);
+				prompt = await buildPotetoPrompt(skillDirectory, task);
 			} catch (error) {
 				notify(pi, ctx, "error", `Unable to read the vendored ${POTETO_SKILL} skill: ${String(error)}`);
 				return;
@@ -187,11 +193,11 @@ export default function pstackExtension(pi: ExtensionAPI, options: PstackExtensi
 	});
 
 	pi.registerCommand("pstack", {
-		description: "pstack: show the run state of this Agent Session",
+		description: "pstack: show the Activation state of this Agent Session",
 		handler: async (args, ctx) => {
 			const [subcommand = "", ...rest] = args.trim().split(/\s+/);
 			const report = (level: "info" | "warning" | "error", message: string): void => notify(pi, ctx, level, message);
-			if (subcommand === "" || subcommand === "status") notify(pi, ctx, "info", statusReport(runs.state()));
+			if (subcommand === "" || subcommand === "status") notify(pi, ctx, "info", statusReport(activation.state()));
 			else if (subcommand === "setup") await runSetupCommand(pi, ctx, report, options.setup);
 			else if (subcommand === "preset") await runPresetCommand(pi, ctx, report, rest[0] ?? "", options.setup);
 			else if (subcommand === "doctor") {
@@ -201,7 +207,7 @@ export default function pstackExtension(pi: ExtensionAPI, options: PstackExtensi
 						settings: await loadSetupSettings(pi, options.setup),
 						behavior: behavior.current(),
 						commands: pi.getCommands(),
-						skillsRoot: path.dirname(options.skillDirectory ?? DEFAULT_POTETO_DIRECTORY),
+						skillsRoot: path.dirname(skillDirectory),
 						displayHostAvailable: publisher.hostAvailable,
 					});
 					notify(pi, ctx, doctorLevel(findings), doctorReport(findings));

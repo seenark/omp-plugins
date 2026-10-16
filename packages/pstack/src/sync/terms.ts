@@ -1,8 +1,8 @@
+import { skillNames } from "./source.ts";
 import type { TermAllowance, TermCategory, Tree } from "./types.ts";
 
 export interface TermFinding {
 	category: string;
-	owner: string;
 	file: string;
 	term: string;
 	count: number;
@@ -15,13 +15,15 @@ function globally(pattern: RegExp): RegExp {
 /** Counts matches per category, term and file over the text files of `files`. Sync itself never fails on findings; `gateTerms` is what the verify gate applies. */
 export function scanTerms(files: Tree, categories: readonly TermCategory[]): TermFinding[] {
 	const findings: TermFinding[] = [];
+	const skills = skillNames(files.keys());
 	for (const [file, { data }] of [...files].sort(([a], [b]) => a.localeCompare(b))) {
 		if (data.includes(0)) continue;
 		const text = data.toString("utf8");
 		for (const category of categories) {
 			for (const [term, pattern] of Object.entries(category.patterns)) {
-				const count = text.match(globally(pattern))?.length ?? 0;
-				if (count > 0) findings.push({ category: category.id, owner: category.owner, file, term, count });
+				const resolved = typeof pattern === "function" ? pattern(skills) : pattern;
+				const count = text.match(globally(resolved))?.length ?? 0;
+				if (count > 0) findings.push({ category: category.id, file, term, count });
 			}
 		}
 	}
@@ -46,22 +48,21 @@ export function gateTerms(findings: readonly TermFinding[], allowances: readonly
 
 export interface CategoryTotal {
 	category: string;
-	owner: string;
 	files: number;
 	matches: number;
 }
 
 export function totalsByCategory(findings: readonly TermFinding[], categories: readonly TermCategory[]): CategoryTotal[] {
-	return categories.map(({ id, owner }) => {
+	return categories.map(({ id }) => {
 		const own = findings.filter(finding => finding.category === id);
-		return { category: id, owner, files: new Set(own.map(finding => finding.file)).size, matches: own.reduce((sum, finding) => sum + finding.count, 0) };
+		return { category: id, files: new Set(own.map(finding => finding.file)).size, matches: own.reduce((sum, finding) => sum + finding.count, 0) };
 	});
 }
 
 export function renderTermReport(findings: readonly TermFinding[], categories: readonly TermCategory[]): string {
 	const lines = ["## Remaining Cursor-specific terms", "", "Categories overlap: a line is counted under every category it matches.", ""];
 	for (const total of totalsByCategory(findings, categories)) {
-		lines.push(`### ${total.category} (owner: ${total.owner}): ${total.matches} matches in ${total.files} files`);
+		lines.push(`### ${total.category}: ${total.matches} matches in ${total.files} files`);
 		const byFile = new Map<string, string[]>();
 		for (const finding of findings.filter(entry => entry.category === total.category)) {
 			byFile.set(finding.file, [...(byFile.get(finding.file) ?? []), `${finding.term} x${finding.count}`]);

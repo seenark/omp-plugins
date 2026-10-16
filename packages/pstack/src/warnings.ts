@@ -2,7 +2,7 @@ import { isRecord } from "@codesook/omp-shared-display/config-store";
 
 /**
  * Non-blocking style checks. Each returns what it found and never decides whether to speak:
- * `index.ts` applies guard strictness and run activity, then delivers the text as tool-result context
+ * `index.ts` applies guard strictness and activation, then delivers the text as tool-result context
  * or a session_stop continuation.
  */
 

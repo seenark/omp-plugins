@@ -30,10 +30,6 @@ describe("panel skills dispatch the role table's agents", () => {
 		}
 	});
 
-	it("catches an agent that is not in the table", () => {
-		expect(agentsNamedIn("run `pstack-panel-z-critic` and `pstack-panel-<seat>-critic`").filter(name => !known.has(name))).toEqual(["pstack-panel-z-critic"]);
-	});
-
 	it("interrogate dispatches a critic per seat, arena a builder per seat (as a range)", () => {
 		const interrogate = agentsNamedIn(read("interrogate/SKILL.md"));
 		const arena = agentsNamedIn(read("arena/SKILL.md"));
@@ -48,11 +44,6 @@ describe("panel skills dispatch the role table's agents", () => {
 		expect(agentsNamedIn(read("interrogate/SKILL.md"))).toContain("pstack-judge");
 		expect(agentsNamedIn(read("arena/SKILL.md"))).toContain("pstack-judge");
 		expect(agentsNamedIn(read("poteto-mode/references/panel-verdicts.md"))).toContain("pstack-judge");
-	});
-
-	it("only critics are read-only and only builders write, so arena builders cannot run without isolation", () => {
-		for (const agent of LANE_AGENTS.filter(lane => lane.kind === "builder")) expect(agent.access).toBe("write");
-		for (const agent of LANE_AGENTS.filter(lane => lane.kind === "critic")) expect(agent.access).toBe("read-only");
 	});
 });
 

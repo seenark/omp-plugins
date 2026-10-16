@@ -1,8 +1,8 @@
 import { isRecord } from "@codesook/omp-shared-display/config-store";
-import type { RunProgress } from "./run-state.ts";
+import type { ActivationProgress } from "./activation-state.ts";
 
 const PLAYBOOK_PATH = /(?:^|\/)poteto-mode\/playbooks\/([a-z0-9][a-z0-9-]*)\.md(?:[:#?].*)?$/;
-/** Every other playbook ends by running this one, so reading it does not change which playbook the run is in. */
+/** Every other playbook ends by running this one, so reading it does not change which playbook the Activation is in. */
 const CLOSING_PLAYBOOK = "opening-a-pr";
 const MAX_CURRENT_LENGTH = 120;
 
@@ -15,7 +15,7 @@ export function playbookOpenedBy(event: { toolName: string; input: unknown; isEr
 }
 
 /** Progress through the todo list that a successful `todo` call left behind. Abandoned items count as done. */
-export function progressFromTodo(event: { toolName: string; details: unknown; isError: boolean }): RunProgress | undefined {
+export function progressFromTodo(event: { toolName: string; details: unknown; isError: boolean }): ActivationProgress | undefined {
 	if (event.toolName !== "todo" || event.isError || !isRecord(event.details) || !Array.isArray(event.details.phases)) return undefined;
 	let done = 0;
 	let total = 0;

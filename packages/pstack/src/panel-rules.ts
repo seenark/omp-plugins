@@ -1,4 +1,4 @@
-import { PANEL_SEATS, type PanelSeat } from "../roles.ts";
+import { PANEL_SEATS, seatRoleId, type PanelSeat } from "./roles.ts";
 
 const THINKING_SUFFIX = /:(off|minimal|low|medium|high|xhigh|max)$/i;
 
@@ -41,5 +41,5 @@ export function checkPanel(seats: readonly SeatModel[], vendorOf: (spec: string)
 }
 
 export function seatModels(assignment: Readonly<Record<string, string | undefined>>): SeatModel[] {
-	return PANEL_SEATS.map(seat => ({ seat, model: assignment[`pstack-panel-${seat}`] }));
+	return PANEL_SEATS.map(seat => ({ seat, model: assignment[seatRoleId(seat)] }));
 }

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test";
 import { activeSeats, diversityNote, resolveSeats } from "./panel.ts";
-import { SINGLE_VENDOR_WARNING } from "./setup/rules.ts";
+import { SINGLE_VENDOR_WARNING } from "./panel-rules.ts";
 
 const models = (configured: string[]) => ({
 	resolve: (spec: string) => (configured.includes(spec) ? ({ provider: "p", id: spec.slice(1) } as never) : undefined),

@@ -7,7 +7,7 @@ import { CANCEL, KEEP_CURRENT, SAVE, UNSET } from "./flow.ts";
 import { createHostSetupSettings } from "./host-settings.ts";
 import { PRESET_NAMES, presetAssignment } from "./presets.ts";
 import { probeAll, type ModelProbe } from "./probe.ts";
-import { SINGLE_VENDOR_WARNING, checkPanel, modelKey } from "./rules.ts";
+import { SINGLE_VENDOR_WARNING, checkPanel, modelKey } from "../panel-rules.ts";
 import { sameConfig, snapshot, type ConfigSnapshot, type SetupSettings } from "./settings.ts";
 
 const FAMILY: Record<string, string> = { anthropic: "anthropic", "openai-codex": "openai", openai: "openai" };
@@ -162,32 +162,45 @@ describe("/pstack setup choices", () => {
 
 describe("presets", () => {
 	const choices = listChoices(modelsApi());
+	const seatSpecs = (assignment: Record<string, string | undefined>) => PANEL_ROLES.map(role => assignment[role.id]);
+	const filledSeats = (assignment: Record<string, string | undefined>) => seatSpecs(assignment).filter(spec => spec !== undefined);
 	for (const name of PRESET_NAMES) {
-		it(`${name} fills every role with a served model and distinct seats`, () => {
+		it(`${name} fills every work role with a served model and gives the seats it fills distinct served models`, () => {
 			const assignment = presetAssignment(name, choices)!;
 			expect(Object.keys(assignment).sort()).toEqual(MODEL_ROLES.map(role => role.id).sort());
-			for (const role of MODEL_ROLES) expect(SERVED_SPECS).toContain(assignment[role.id]!);
-			const seats = PANEL_ROLES.map(role => modelKey(assignment[role.id]!));
-			expect(new Set(seats).size).toBe(seats.length);
+			for (const role of WORK_ROLES) expect(SERVED_SPECS).toContain(assignment[role.id]!);
+			const seats = filledSeats(assignment) as string[];
+			for (const spec of seats) expect(SERVED_SPECS).toContain(spec);
+			expect(new Set(seats.map(modelKey)).size).toBe(seats.length);
 		});
 	}
 
-	it("claude-codex moves the judge to Codex and mixes vendors in the panel", () => {
-		const assignment = presetAssignment("claude-codex", choices)!;
-		expect(assignment["pstack-judge"]).toBe(CODEX);
-		const vendors = new Set(PANEL_ROLES.map(role => choices.find(choice => choice.spec === assignment[role.id])!.vendor));
-		expect(vendors.size).toBe(2);
+	it("claude-only fills seats A to C with the top, mid and cheap Claude models and leaves D and E unset", () => {
+		const assignment = presetAssignment("claude-only", choices)!;
+		expect(seatSpecs(assignment)).toEqual([OPUS, SONNET, HAIKU, undefined, undefined]);
+		expect(Object.values(assignment).every(spec => spec === undefined || spec.startsWith("anthropic/"))).toBe(true);
 	});
 
-	it("claude-only uses no Codex model", () => {
-		const assignment = presetAssignment("claude-only", choices)!;
-		expect(Object.values(assignment).every(spec => spec!.startsWith("anthropic/"))).toBe(true);
+	it("lean fills seats A and B only", () => {
+		const assignment = presetAssignment("lean", choices)!;
+		expect(seatSpecs(assignment)).toEqual([SONNET, HAIKU, undefined, undefined, undefined]);
+	});
+
+	it("claude-codex is claude-only plus exactly one Codex seat, and moves the judge to Codex", () => {
+		const assignment = presetAssignment("claude-codex", choices)!;
+		expect(seatSpecs(assignment)).toEqual([OPUS, SONNET, HAIKU, CODEX, undefined]);
+		expect(assignment["pstack-judge"]).toBe(CODEX);
+		expect({ ...assignment, "pstack-judge": undefined, "pstack-panel-d": undefined }).toEqual({
+			...presetAssignment("claude-only", choices)!,
+			"pstack-judge": undefined,
+			"pstack-panel-d": undefined,
+		});
 	});
 
 	it("leaves seats absent when the registry has too few distinct models", () => {
 		const two = listChoices(modelsApi(SERVED.slice(0, 2)));
 		const assignment = presetAssignment("claude-only", two)!;
-		expect(PANEL_ROLES.filter(role => assignment[role.id] !== undefined)).toHaveLength(2);
+		expect(filledSeats(assignment)).toHaveLength(2);
 		for (const role of WORK_ROLES) expect(assignment[role.id]).toBeDefined();
 	});
 
@@ -201,6 +214,33 @@ describe("presets", () => {
 		expect(presetAssignment("claude-codex", listChoices(modelsApi(SERVED.slice(0, 5))))).toBeUndefined();
 		expect(presetAssignment("claude-only", listChoices(modelsApi(SERVED.slice(5))))).toBeUndefined();
 	});
+
+	describe("claude-codex on roles the user already has", () => {
+		const existing = {
+			"pstack-explore": HAIKU,
+			"pstack-build": OPUS,
+			"pstack-judge": SONNET,
+			"pstack-panel-a": OPUS,
+			"pstack-panel-b": SONNET,
+		};
+
+		it("keeps every other role, adds a Codex seat in the first free seat and moves the judge", () => {
+			const assignment = presetAssignment("claude-codex", choices, existing)!;
+			expect(assignment).toEqual({ ...existing, "pstack-judge": CODEX, "pstack-panel-c": CODEX });
+		});
+
+		it("adds no seat when a seat already runs Codex, and changes nothing when rerun", () => {
+			const once = presetAssignment("claude-codex", choices, existing)!;
+			expect(presetAssignment("claude-codex", choices, once)).toEqual(once);
+			const withCodexSeat = { ...existing, "pstack-panel-b": "openai-codex/gpt-6-mini" };
+			expect(presetAssignment("claude-codex", choices, withCodexSeat)).toEqual({ ...withCodexSeat, "pstack-judge": CODEX });
+		});
+
+		it("replaces the last seat when every seat is taken", () => {
+			const full = { ...existing, "pstack-panel-c": HAIKU, "pstack-panel-d": "anthropic/claude-opus-4-1", "pstack-panel-e": "anthropic/claude-sonnet-4-5" };
+			expect(presetAssignment("claude-codex", choices, full)).toEqual({ ...full, "pstack-judge": CODEX, "pstack-panel-e": CODEX });
+		});
+	});
 });
 
 describe("/pstack setup writes", () => {
@@ -208,9 +248,8 @@ describe("/pstack setup writes", () => {
 		const h = createHarness({ answers: ["claude-only", SAVE], confirms: [false] });
 		await h.run();
 		const expected = presetAssignment("claude-only", listChoices(modelsApi()))!;
-		for (const role of MODEL_ROLES) expect(h.state.roles[role.id]).toBe(expected[role.id]!);
-		for (const role of PANEL_ROLES) expect(h.state.chains[role.id]).toEqual([]);
-		expect(levels(h)).not.toContain("error");
+		for (const role of MODEL_ROLES) expect(h.state.roles[role.id] as string | undefined).toBe(expected[role.id]);
+		for (const role of PANEL_ROLES) expect(h.state.chains[role.id] as string[] | undefined).toEqual(expected[role.id] === undefined ? undefined : []);
 	});
 
 	it("probes every selected model once and before writing", async () => {
@@ -262,12 +301,12 @@ describe("/pstack setup writes", () => {
 	});
 
 	it("unsetting a role and a seat removes the role and the seat chain", async () => {
-		const h = createHarness({ answers: ["claude-only", "pstack-explore", UNSET, "pstack-panel-e", UNSET, SAVE] });
+		const h = createHarness({ answers: ["claude-only", "pstack-explore", UNSET, "pstack-panel-c", UNSET, SAVE] });
 		await h.run();
 		expect(h.state.roles["pstack-explore"]).toBeUndefined();
-		expect(h.state.roles["pstack-panel-e"]).toBeUndefined();
-		expect(h.state.chains["pstack-panel-e"]).toBeUndefined();
-		expect(h.state.chains["pstack-panel-d"]).toEqual([]);
+		expect(h.state.roles["pstack-panel-c"]).toBeUndefined();
+		expect(h.state.chains["pstack-panel-c"]).toBeUndefined();
+		expect(h.state.chains["pstack-panel-b"]).toEqual([]);
 	});
 
 	it("restores the previous config when the readback differs from what was written", async () => {
@@ -409,8 +448,25 @@ describe("/pstack preset", () => {
 		expect(order.indexOf(`probe:${CODEX}`)).toBeGreaterThanOrEqual(0);
 		expect(order.indexOf(`probe:${CODEX}`)).toBeLessThan(order.indexOf("write"));
 		expect(h.state.roles["pstack-judge"]).toBe(CODEX);
-		expect(PANEL_ROLES.some(role => h.state.roles[role.id]?.startsWith("openai-codex/"))).toBe(true);
+		expect(PANEL_ROLES.filter(role => h.state.roles[role.id]?.startsWith("openai-codex/"))).toHaveLength(1);
 		expect(nonPstack(h.state)).toEqual(nonPstack(USER_CONFIG));
+	});
+
+	it("claude-only writes seats A to C only", async () => {
+		const h = createHarness({ confirms: [false] });
+		await h.run("preset claude-only");
+		expect(PANEL_ROLES.map(role => h.state.roles[role.id] as string | undefined)).toEqual([OPUS, SONNET, HAIKU, undefined, undefined]);
+		expect(PANEL_ROLES.map(role => h.state.chains[role.id] as string[] | undefined)).toEqual([[], [], [], undefined, undefined]);
+	});
+
+	it("claude-codex on an existing pstack config keeps the other roles, adds one Codex seat and moves the judge", async () => {
+		const mine = { ...USER_CONFIG, roles: { ...USER_CONFIG.roles, "pstack-build": OPUS, "pstack-explore": HAIKU, "pstack-judge": SONNET, "pstack-panel-a": OPUS, "pstack-panel-b": SONNET } };
+		const h = createHarness({ settings: fakeSettings(mine), confirms: [false, false] });
+		await h.run("preset claude-codex");
+		expect(h.state.roles).toEqual({ ...mine.roles, "pstack-judge": CODEX, "pstack-panel-c": CODEX });
+		h.writes.length = 0;
+		await h.run("preset claude-codex");
+		expect(h.writes).toEqual([]);
 	});
 
 	it("an unreachable preset model writes nothing", async () => {

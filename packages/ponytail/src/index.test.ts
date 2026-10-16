@@ -429,7 +429,7 @@ describe("Ponytail suspension by pstack", () => {
 		const configBefore = fs.readFileSync(getCodesookOmpConfigPath(home), "utf8");
 		const harness = createHarness({ home });
 		await harness.fire("session_start");
-		suspendInstructionModes(harness.events, ["ponytail"]);
+		suspendInstructionModes(harness.events, "pstack", ["ponytail"]);
 		expect(await harness.prompt()).toBeUndefined();
 		expect(harness.snapshots.at(-1)!.sequence).toBeNull();
 		expect(fs.readFileSync(getCodesookOmpConfigPath(home), "utf8")).toBe(configBefore);
@@ -443,7 +443,7 @@ describe("Ponytail suspension by pstack", () => {
 		const parallel = createHarness({ home });
 		await suspended.fire("session_start");
 		await parallel.fire("session_start");
-		suspendInstructionModes(suspended.events, ["ponytail"]);
+		suspendInstructionModes(suspended.events, "pstack", ["ponytail"]);
 		expect(await suspended.prompt()).toBeUndefined();
 		expect(await level(parallel)).toBe("PONYTAIL MODE ACTIVE — level: full");
 	});
@@ -451,7 +451,7 @@ describe("Ponytail suspension by pstack", () => {
 	it("keeps the suspension when the session is resumed", async () => {
 		const first = createHarness();
 		await first.fire("session_start");
-		suspendInstructionModes(first.events, ["ponytail"]);
+		suspendInstructionModes(first.events, "pstack", ["ponytail"]);
 		const resumed = createHarness({ entries: [...first.entries] });
 		await resumed.fire("session_start");
 		expect(await resumed.prompt()).toBeUndefined();
@@ -459,7 +459,7 @@ describe("Ponytail suspension by pstack", () => {
 
 	it("applies a suspension that arrives before the session starts", async () => {
 		const harness = createHarness();
-		suspendInstructionModes(harness.events, ["ponytail"]);
+		suspendInstructionModes(harness.events, "pstack", ["ponytail"]);
 		await harness.fire("session_start");
 		expect(await harness.prompt()).toBeUndefined();
 	});
@@ -467,7 +467,7 @@ describe("Ponytail suspension by pstack", () => {
 	it("ignores a suspension that does not name Ponytail or has another protocol version", async () => {
 		const harness = createHarness();
 		await harness.fire("session_start");
-		suspendInstructionModes(harness.events, ["caveman"]);
+		suspendInstructionModes(harness.events, "pstack", ["caveman"]);
 		harness.events.emit(INSTRUCTION_MODE_SUSPENSION_CHANNEL, { protocol: 2, source: "pstack", modes: ["ponytail"] });
 		expect(await level(harness)).toBe("PONYTAIL MODE ACTIVE — level: full");
 	});

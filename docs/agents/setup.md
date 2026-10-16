@@ -2,7 +2,7 @@
 
 Procedure for an AI agent that is asked to install or set up `omp-plugins` for a user. Follow the phases in order. **Never install, uninstall, or overwrite anything before the user confirms that step.** Use the `ask` tool for every question; batch related questions into one call; put the recommended option first.
 
-Vocabulary: see `GLOSSARY.md`. Feature names: `headroom`, `prompt-border-style`, `shared-display`, `ponytail`, `caveman`, `codegraph`, `beads`, `rtk`. The root package also installs the unified `/omp-plugins` settings command.
+Vocabulary: see `GLOSSARY.md`. Feature names: `headroom`, `prompt-border-style`, `shared-display`, `ponytail`, `caveman`, `codegraph`, `beads`, `rtk`. `pstack` is offered alongside them but installs as its own package. The root package also installs the unified `/omp-plugins` settings command.
 
 ## Phase 0: inspect, change nothing
 
@@ -36,8 +36,9 @@ Ask one multi-select question. Describe each choice in one line and list its pre
 | `rtk` | Rewrites shell commands to filter output | `rtk` CLI >= 0.51.0 |
 | `codegraph` | Code graph exploration guidance | `codegraph` CLI plus an MCP server entry |
 | `beads` | Issue-tracker guidance | `bd` CLI |
+| `pstack` | pstack workflows (poteto-mode, playbooks, review panel on `pstack-*` model roles) | Its own package `@codesook/omp-pstack`, not a root feature; model roles chosen with `/pstack setup` |
 
-Recommend `shared-display` whenever the user picks any other display-producing feature (`headroom`, `ponytail`, `caveman`, `rtk`, `codegraph`, `beads`): without it their segments fall back to separate native status entries.
+Recommend `shared-display` whenever the user picks any other display-producing feature (`headroom`, `ponytail`, `caveman`, `rtk`, `codegraph`, `beads`, `pstack`): without it their segments fall back to separate native status entries.
 
 ## Phase 2: conflicting third-party plugins
 
@@ -49,6 +50,7 @@ For every selected feature, check `omp plugin list` for its third-party counterp
 | `rtk` | `pi-rtk-optimizer` | Both rewrite `bash` commands |
 | `caveman` | any other Caveman skill/plugin that injects Caveman rules | Both add terse-output rules |
 | `headroom` | any other Headroom or compression plugin/extension | Both compress the same tool results |
+| `pstack` | `pstack@omp-pstack` (the community marketplace port of pstack) | `@codesook/omp-pstack` replaces it: both ship `/poteto-mode` and the `pstack-*` agents, so the two copies would race for the same skills and agent names |
 
 If one is present, ask the user: **remove it, or keep it?** Show the tradeoff, then recommend removal.
 
@@ -67,6 +69,7 @@ After the user picks, ask them to **confirm the exact command** before running i
 ```sh
 omp plugin uninstall @dietrichgebert/ponytail
 omp plugin uninstall pi-rtk-optimizer
+omp plugin uninstall pstack@omp-pstack
 ```
 
 If the user keeps a conflicting plugin, do not enable the matching feature unless they confirm again after reading the tradeoff.
@@ -158,6 +161,8 @@ readlink ~/.omp/plugins/node_modules/omp-plugins   # prints the checkout path
 
 Keep selectors quoted; `[` and `]` are shell-special. Root install always includes the unified settings command.
 
+`pstack` is not an `omp-plugins` feature: it installs as its own package, `omp plugin install @codesook/omp-pstack` (developers: `omp plugin link ./packages/pstack`). Listing it as a feature as well would load its extension twice. Install it only after the user confirms.
+
 ## Phase 7: configure and verify
 
 1. Restart `omp` (features load at start).
@@ -172,6 +177,7 @@ Keep selectors quoted; `[` and `]` are shell-special. Root install always includ
    | `rtk` | footer segment or `rtk --version` | segment shows RTK savings |
    | `ponytail` | `/ponytail status` | mode reported |
    | `caveman` | `/caveman status` | mode reported |
+   | `pstack` | `/pstack doctor` | no errors; if model roles are unset, run `/pstack setup` with the user |
 
 4. Report to the user: what was installed, what was skipped or kept, any feature in a not-ready state with the exact fix, and any file you wrote. Do not commit, push, or sync anything unless asked.
 
