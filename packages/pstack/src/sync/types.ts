@@ -58,6 +58,21 @@ export interface TermCategory {
 	patterns: Record<string, RegExp>;
 }
 
+/**
+ * A Cursor-specific term the verify gate tolerates until the ticket that removes it lands. Exact: the file must
+ * hold exactly `count` matches. A matching entry the output no longer needs fails the gate, so the entry expires
+ * by being deleted in the same change that removes the term.
+ */
+export interface TermAllowance {
+	category: string;
+	file: string;
+	term: string;
+	count: number;
+	/** Beads ticket that removes the term. */
+	ticket: string;
+	reason: string;
+}
+
 /** One Adaptation group. Each group lives in its own file so tickets add rules without merge conflicts. */
 export interface Group {
 	name: string;
@@ -67,6 +82,7 @@ export interface Group {
 	renames?: readonly Rename[];
 	moves?: readonly Move[];
 	terms?: readonly TermCategory[];
+	allowances?: readonly TermAllowance[];
 }
 
 export interface Pin {

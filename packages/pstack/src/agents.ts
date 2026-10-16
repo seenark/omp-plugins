@@ -70,6 +70,12 @@ export function generatedAgents(): Map<string, string> {
 	return new Map(LANE_AGENTS.map(agent => [`${agent.name}.md`, renderAgent(agent)]));
 }
 
+/** True for a package-relative path (`agents/pstack-build.md`) that the role table owns, not sync. */
+export function isGeneratedAgent(file: string): boolean {
+	const name = path.posix.basename(file);
+	return path.posix.dirname(file) === "agents" && name.startsWith(GENERATED_PREFIX) && name.endsWith(".md");
+}
+
 function ownedFiles(directory: string): string[] {
 	if (!fs.existsSync(directory)) return [];
 	return fs.readdirSync(directory).filter(file => file.startsWith(GENERATED_PREFIX) && file.endsWith(".md"));

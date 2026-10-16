@@ -2,7 +2,7 @@ import { afterAll, afterEach, describe, expect, it } from "bun:test";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { NOTICES_FILE, PIN_FILE, runSync, SyncConfigError, type SyncOptions } from "./engine.ts";
+import { failsGate, NOTICES_FILE, PIN_FILE, runSync, SyncConfigError, type SyncOptions } from "./engine.ts";
 import { collisions } from "./rules/collisions.ts";
 import { dispatch } from "./rules/dispatch.ts";
 import { sessions } from "./rules/sessions.ts";
@@ -365,13 +365,141 @@ describe("Upstream changes", () => {
 		expect(fs.existsSync(path.join(packageRoot, "skills/a/SKILL.md"))).toBe(true);
 	});
 
-	it("leaves files it does not own alone", () => {
-		const pinned = upstreamTree({ "pstack/skills/a/SKILL.md": skill("a") });
+	it("reports a skill Upstream added for classification and one it dropped for the owner", () => {
+		const pinned = upstreamTree({ "pstack/skills/a/SKILL.md": skill("a"), "pstack/skills/gone/SKILL.md": skill("gone") });
 		const { packageRoot } = sync(pinned, [none]);
+		const next = upstreamTree({ "pstack/skills/a/SKILL.md": skill("a"), "pstack/skills/fresh/SKILL.md": skill("fresh") });
+		const { result } = sync(next, [none], { packageRoot, base: pinned, revision: "rev-2" });
+		expect(result.report).toMatch(/## New skills to classify\n\n- fresh\n/);
+		expect(result.report).toMatch(/## Skills sync removes[^\n]*\n\n- gone\n/);
+		expect(sync(next, [none], { packageRoot, revision: "rev-2" }).result.report).not.toContain("New skills to classify");
+	});
+
+	it("leaves files another generator owns alone", () => {
+		const pinned = upstreamTree({ "pstack/skills/a/SKILL.md": skill("a") });
+		const ownedElsewhere = (file: string) => file === "agents/generated.md";
+		const { packageRoot } = sync(pinned, [none], { ownedElsewhere });
 		fs.mkdirSync(path.join(packageRoot, "agents"), { recursive: true });
 		fs.writeFileSync(path.join(packageRoot, "agents/generated.md"), "ours\n");
-		sync(pinned, [none], { packageRoot });
+		const { result } = sync(pinned, [none], { packageRoot, ownedElsewhere, write: false });
+		expect(result.drift).toEqual([]);
 		expect(read(packageRoot, "agents/generated.md")).toBe("ours\n");
+	});
+});
+
+describe("stale generated files", () => {
+	const upstream = upstreamTree({
+		"pstack/skills/a/SKILL.md": skill("a"),
+		"pstack/skills/watch/SKILL.md": skill("watch"),
+		"pstack/skills/watch/scripts/run.sh": "run\n",
+	});
+	const excluded: Group = { name: "x", exclusions: [{ path: "skills/watch/**", rationale: "Excluded after the first sync." }] };
+
+	it("check mode names a file an earlier sync wrote that the current rules no longer produce, and leaves it", () => {
+		const { packageRoot } = sync(upstream, [none]);
+		const { result } = sync(upstream, [excluded], { packageRoot, write: false });
+		expect(result.drift).toEqual(
+			expect.arrayContaining([
+				{ path: "skills/watch/SKILL.md", kind: "stale" },
+				{ path: "skills/watch/scripts/run.sh", kind: "stale" },
+			]),
+		);
+		expect(failsGate(result)).toBe(true);
+		expect(fs.existsSync(path.join(packageRoot, "skills/watch/SKILL.md"))).toBe(true);
+	});
+
+	it("names a hand-added file in a vendored directory that has no fork entry", () => {
+		const { packageRoot } = sync(upstream, [none]);
+		fs.writeFileSync(path.join(packageRoot, "skills/a/extra.md"), "mine\n");
+		const { result } = sync(upstream, [none], { packageRoot, write: false });
+		expect(result.drift).toEqual([{ path: "skills/a/extra.md", kind: "stale" }]);
+	});
+
+	it("must pass: the same file under a fork entry is not stale", () => {
+		const fork: Group = { name: "f", forks: [{ path: "skills/a/extra.md", kind: "rewritten", reason: "ours alone", since: "9.9.9" }] };
+		const packageRoot = scratch();
+		fs.mkdirSync(path.join(packageRoot, "skills/a"), { recursive: true });
+		fs.writeFileSync(path.join(packageRoot, "skills/a/extra.md"), "mine\n");
+		sync(upstream, [fork], { packageRoot });
+		const { result } = sync(upstream, [fork], { packageRoot, write: false });
+		expect(result.drift).toEqual([]);
+		expect(failsGate(result)).toBe(false);
+	});
+
+	it("sync deletes them and the directories they emptied", () => {
+		const { packageRoot } = sync(upstream, [none]);
+		sync(upstream, [excluded], { packageRoot });
+		expect(fs.existsSync(path.join(packageRoot, "skills/watch"))).toBe(false);
+		expect(fs.existsSync(path.join(packageRoot, "skills/a/SKILL.md"))).toBe(true);
+		expect(sync(upstream, [excluded], { packageRoot, write: false }).result.drift).toEqual([]);
+	});
+
+	it("ignores node_modules inside a vendored directory", () => {
+		const { packageRoot } = sync(upstream, [none]);
+		fs.mkdirSync(path.join(packageRoot, "skills/a/node_modules/dep"), { recursive: true });
+		fs.writeFileSync(path.join(packageRoot, "skills/a/node_modules/dep/index.js"), "x\n");
+		expect(sync(upstream, [none], { packageRoot, write: false }).result.drift).toEqual([]);
+	});
+});
+
+describe("verify gate", () => {
+	const upstream = upstreamTree({ "pstack/skills/a/SKILL.md": skill("a", "Use subagent_type here.\n") });
+	const terms = [{ id: "dispatch", owner: "T1", patterns: { subagent_type: /subagent_type/ } }];
+	const allowance = { category: "dispatch", file: "skills/a/SKILL.md", term: "subagent_type", count: 1, ticket: "T1", reason: "removed by T1" };
+
+	/** Writes once, then checks, as `bun run verify` does against a synced package. */
+	const checked = (groups: Group[], tree = upstream) => {
+		const { packageRoot } = sync(tree, groups);
+		return sync(tree, groups, { packageRoot, write: false }).result;
+	};
+
+	it("must trip: a Cursor term with no allowance fails the gate and the report names the term and file", () => {
+		const result = checked([{ name: "t", terms }]);
+		expect(result.termFailures).toEqual([{ category: "dispatch", owner: "T1", file: "skills/a/SKILL.md", term: "subagent_type", count: 1 }]);
+		expect(failsGate(result)).toBe(true);
+		expect(result.report).toContain("skills/a/SKILL.md: subagent_type x1");
+	});
+
+	it("must trip: a term typed into a vendored file by hand is named with its file", () => {
+		const clean: Group = { name: "t", terms, rules: [{ id: "t/fix", rationale: "r", pattern: "subagent_type", replacement: "agent" }] };
+		const { packageRoot } = sync(upstream, [clean]);
+		fs.writeFileSync(path.join(packageRoot, "skills/a/SKILL.md"), skill("a", "typed subagent_type by hand\n"));
+		const { result } = sync(upstream, [clean], { packageRoot, write: false });
+		expect(result.termFailures).toEqual([{ category: "dispatch", owner: "T1", file: "skills/a/SKILL.md", term: "subagent_type", count: 1 }]);
+		expect(failsGate(result)).toBe(true);
+	});
+
+	it("must pass: a clean package and an exact allowance both pass", () => {
+		expect(failsGate(checked([{ name: "t", terms, rules: [{ id: "t/fix", rationale: "r", pattern: "subagent_type", replacement: "agent" }] }]))).toBe(false);
+		expect(failsGate(checked([{ name: "t", terms, allowances: [allowance] }]))).toBe(false);
+	});
+
+	it("must trip: an allowance covers only its exact count, so a second match fails", () => {
+		const more = upstreamTree({ "pstack/skills/a/SKILL.md": skill("a", "subagent_type and subagent_type\n") });
+		const result = checked([{ name: "t", terms, allowances: [allowance] }], more);
+		expect(failsGate(result)).toBe(true);
+		expect(result.termFailures.map(finding => finding.count)).toEqual([2]);
+	});
+
+	it("must trip: an allowance whose term is gone expires and fails the gate", () => {
+		const fixed: Group = { name: "t", terms, allowances: [allowance], rules: [{ id: "t/fix", rationale: "r", pattern: "subagent_type", replacement: "agent" }] };
+		const result = checked([fixed]);
+		expect(result.termFailures).toEqual([]);
+		expect(result.expiredAllowances).toEqual([allowance]);
+		expect(failsGate(result)).toBe(true);
+		expect(result.report).toContain("skills/a/SKILL.md: subagent_type x1 no longer matches");
+	});
+
+	it("rejects an allowance without a ticket, with a bad count, or for an unknown term", () => {
+		for (const bad of [{ ...allowance, ticket: "" }, { ...allowance, count: 0 }, { ...allowance, term: "nope" }]) {
+			expect(() => sync(upstream, [{ name: "t", terms, allowances: [bad] }])).toThrow(SyncConfigError);
+		}
+	});
+
+	it("fails on drift, not only on terms", () => {
+		const { packageRoot } = sync(upstream, [none]);
+		fs.writeFileSync(path.join(packageRoot, "skills/a/SKILL.md"), "hand edit\n");
+		expect(failsGate(sync(upstream, [none], { packageRoot, write: false }).result)).toBe(true);
 	});
 });
 
