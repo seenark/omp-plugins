@@ -279,7 +279,7 @@ const goalMode: Rule[] = [
 		rationale: "Cursor's /loop is replaced by OMP goal mode.",
 		files: "skills/poteto-help/SKILL.md",
 		pattern: "- `/loop` and `/create-skill` are Cursor built-ins.",
-		replacement: "- Use OMP goal mode (`/goal set <objective>`) where Cursor has `/loop`. `/create-skill` is a Cursor built-in.",
+		replacement: "- Use OMP goal mode (`/goal set <objective>`) for a long run that must reach a finish condition.",
 	},
 	{
 		id: "sessions/goal-help-troubleshooting",

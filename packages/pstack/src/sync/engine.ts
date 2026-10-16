@@ -243,7 +243,8 @@ function resolveFork(fork: Fork, ours: VFile | undefined, base: VFile | undefine
 		return ours;
 	}
 	if (theirs === undefined) {
-		if (ours !== undefined) conflicts.push({ path: fork.path, reason: "Upstream removed a forked file" });
+		// A fork Upstream never had (base is absent too) is ours alone; one Upstream dropped is a conflict.
+		if (ours !== undefined && base !== undefined) conflicts.push({ path: fork.path, reason: "Upstream removed a forked file" });
 		return ours;
 	}
 	if (ours === undefined) return theirs;
