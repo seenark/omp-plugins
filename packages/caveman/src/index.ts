@@ -6,6 +6,7 @@ import type {
 } from "@oh-my-pi/pi-coding-agent";
 import { CODESOOK_OMP_CONFIG_CHANGED } from "@codesook/omp-shared-display/config-store";
 import { connectSharedDisplay } from "@codesook/omp-shared-display/client";
+import { onInstructionModeSuspension } from "@codesook/omp-shared-display/instruction-mode";
 import { loadCavemanConfig, normalizeCavemanRootConfig } from "./config.ts";
 import {
 	loadCavemanSequence,
@@ -293,6 +294,16 @@ export default function cavemanExtension(pi: ExtensionAPI, options: CavemanExten
 		reportInfo(pi, ctx, mode === "off" ? "Caveman off." : `Caveman ${mode}.`);
 	};
 
+	// pstack asks for Mode Level off for the rest of the session. Recorded as a session entry like /caveman off, so a later rehydrate keeps it; the Root Plugin Configuration is never written.
+	const unsubscribeSuspension = onInstructionModeSuspension(pi.events, "caveman", () => {
+		if (disposed || (sessionModeExplicit && mode === "off")) return;
+		hasSessionState = true;
+		sessionModeExplicit = true;
+		mode = "off";
+		pi.appendEntry("caveman-mode", { mode });
+		if (activeContext) void syncDisplay(activeContext);
+	});
+
 	pi.on("session_start", async (_event, ctx) => {
 		await rehydrateSession(ctx, true);
 	});
@@ -320,6 +331,7 @@ export default function cavemanExtension(pi: ExtensionAPI, options: CavemanExten
 		syncVersion += 1;
 		activeContext = undefined;
 		unsubscribeConfig?.();
+		unsubscribeSuspension();
 		ctx.ui.setStatus("caveman", undefined);
 		publisher.publish(null);
 		publisher.dispose();

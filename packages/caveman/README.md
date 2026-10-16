@@ -44,6 +44,10 @@ Ponytail's subagent default is not inherited: Ponytail reads its default at its 
 
 Breaking change (Upstream sync): the old levels `lite`, `full`, `ultra`, `wenyan-lite`, `wenyan-full`, and `wenyan-ultra` are removed, as are `behavior.caveman.defaultLevel`, the `{level}` template placeholder, the `caveman-level` session entry, and the `lite|full|wenyan-*` glyph files. There is no migration: an old `defaultLevel` or an unknown `defaultMode` fails closed to `off` with a warning, and old `caveman-level` entries are ignored. `/caveman config` remains removed; root `/omp-plugins` owns persisted settings.
 
+## Suspension by pstack
+
+When `@codesook/omp-pstack` activates, it asks Caveman over the `codesook/instruction-mode-suspension/v1` EventBus channel to switch off for the Agent Session. Caveman records Mode Level `off` as a `caveman-mode` session entry, exactly like `/caveman off`; the Root Plugin Configuration is not touched and other sessions are unaffected. `/caveman <mode>` turns it back on. Turn the suspension off with `behavior.pstack.suspendCaveman` in `/omp-plugins`.
+
 ## Configuration
 
 All feature settings persist in root envelope:

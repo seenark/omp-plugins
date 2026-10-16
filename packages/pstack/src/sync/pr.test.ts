@@ -40,7 +40,6 @@ const FALLBACK_FILE = `${MODE}/SKILL.md`;
 
 /** Package paths that the glob-scoped rules need a concrete file for. */
 const FILE_OF: Record<string, string> = {
-	"pr/check-plan-heartbeat": `${MODE}/scripts/check-plan.mjs`,
 	"pr/triage-reference-wording": `${MODE}/references/bugbot-triage.md`,
 };
 

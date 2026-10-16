@@ -49,6 +49,10 @@ Upstream aliases these to `/skill:<name>`. OMP expands `/skill:` only for text t
 
 **Skill registration.** OMP plugin `features` accept `extensions`, `tools`, `hooks` and `commands` entries but no `skills` entry (`PluginFeature` in OMP's `extensibility/plugins/types.ts`), and `resources_discover` (the extension hook that could return `skillPaths`) is declared but never emitted by OMP 18.6.1. OMP picks up skills only from a `skills/` directory at the root of an installed package. Installing this package on its own (`omp plugin install npm:@codesook/omp-ponytail` or the `packages/ponytail` path) therefore also lists the six vendored skills as `/skill:ponytail*`, while installing the repository root with the `ponytail` feature does not, because the root has no `skills/`. The helper commands work in both cases, so they are the supported way to run the skills.
 
+## Suspension by pstack
+
+When `@codesook/omp-pstack` activates, it asks Ponytail over the `codesook/instruction-mode-suspension/v1` EventBus channel to switch off for the Agent Session. Ponytail records Mode Level `off` as a `ponytail-mode` session entry, exactly like `/ponytail off`; the Root Plugin Configuration is not touched and other sessions are unaffected. `/ponytail <mode>` turns it back on. Turn the suspension off with `behavior.pstack.suspendPonytail` in `/omp-plugins`.
+
 ## Configuration
 
 All settings persist in the root envelope `~/.config/codesook-omp/config.json`, edited through `/omp-plugins` or by hand:

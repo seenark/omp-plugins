@@ -44,6 +44,10 @@ Source revisions remain monotonic across publisher disposal and reconnection on 
 
 Producers needing a native footer fallback should subscribe to availability changes and read the getter after subscribing. Use Shared Display only while `hostAvailable` is true; clear the fallback when it becomes true to avoid duplicate status. Producers do not own Shared Display widgets or animation timers.
 
+## Instruction Mode suspension
+
+`@codesook/omp-shared-display/instruction-mode` holds the versioned channel (`INSTRUCTION_MODE_SUSPENSION_CHANNEL`, `codesook/instruction-mode-suspension/v1`) and payload (`InstructionModeSuspension`) pstack uses to switch Caveman and Ponytail off for one Agent Session. `suspendInstructionModes(events, modes)` emits it; `onInstructionModeSuspension(events, mode, handler)` subscribes for one mode and ignores other protocol versions.
+
 ## Frame assets
 
 All plugin glyph files use shared `FrameSequence` text format. Optional first nonblank `fps=<positive number>` sets animation rate; blank-line-separated blocks form frames, and rows within each block stay together. One frame or missing/invalid FPS displays first frame statically. Context Rail also accepts `size=<width>x<height>` as layout metadata before frame rows.
