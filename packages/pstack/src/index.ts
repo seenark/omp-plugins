@@ -198,8 +198,8 @@ export default function pstackExtension(pi: ExtensionAPI, options: PstackExtensi
 			const [subcommand = "", ...rest] = args.trim().split(/\s+/);
 			const report = (level: "info" | "warning" | "error", message: string): void => notify(pi, ctx, level, message);
 			if (subcommand === "" || subcommand === "status") notify(pi, ctx, "info", statusReport(activation.state()));
-			else if (subcommand === "setup") await runSetupCommand(pi, ctx, report, options.setup);
-			else if (subcommand === "preset") await runPresetCommand(pi, ctx, report, rest[0] ?? "", options.setup);
+			else if (subcommand === "setup") await runSetupCommand(pi, ctx, report, behavior.current().defaultThinking, options.setup);
+			else if (subcommand === "preset") await runPresetCommand(pi, ctx, report, rest[0] ?? "", behavior.current().defaultThinking, options.setup);
 			else if (subcommand === "doctor") {
 				try {
 					const findings = diagnose({

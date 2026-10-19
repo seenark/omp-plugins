@@ -10,6 +10,8 @@ export interface ModelChoice {
 	name: string;
 	/** Lineage token from the models API: every Claude release shares one, Claude and GPT differ. */
 	vendor: string;
+	/** Thinking levels the registry lists for the model, least to most intensive; empty when it lists none. */
+	efforts: readonly string[];
 }
 
 const PROVIDER_ORDER = ["anthropic", "openai-codex", "openai"];
@@ -27,7 +29,7 @@ export function listChoices(models: ModelQuery): ModelChoice[] {
 		const spec = `${model.provider}/${model.id}`;
 		if (seen.has(spec)) continue;
 		seen.add(spec);
-		choices.push({ spec, provider: model.provider, id: model.id, name: model.name || model.id, vendor: models.family(model) });
+		choices.push({ spec, provider: model.provider, id: model.id, name: model.name || model.id, vendor: models.family(model), efforts: model.reasoning ? (model.thinking?.efforts ?? []) : [] });
 	}
 	return choices.sort(
 		(a, b) => providerRank(a.provider) - providerRank(b.provider) || a.spec.localeCompare(b.spec, undefined, { numeric: true }),

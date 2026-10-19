@@ -2,9 +2,12 @@ import { PANEL_SEATS, seatRoleId, type PanelSeat } from "./roles.ts";
 
 const THINKING_SUFFIX = /:(off|minimal|low|medium|high|xhigh|max)$/i;
 
+/** `provider/id` without a trailing thinking suffix. */
+export const stripThinking = (spec: string): string => spec.replace(THINKING_SUFFIX, "");
+
 /** Identity of a model across providers and thinking suffixes: two seats on one key are the same model. */
 export function modelKey(spec: string): string {
-	const id = spec.replace(THINKING_SUFFIX, "");
+	const id = stripThinking(spec);
 	return (id.includes("/") ? id.slice(id.indexOf("/") + 1) : id).toLowerCase();
 }
 

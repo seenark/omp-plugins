@@ -81,6 +81,18 @@ describe("mergeVerdicts", () => {
 		expect(mergeVerdicts(THREE, []).notes).not.toContain(SINGLE_VENDOR_WARNING);
 	});
 
+	it("carries no single-vendor note of any wording for a panel of two or more vendors", () => {
+		const mixed = [
+			run("a", "anthropic/claude-a", "claude", verdict("approve")),
+			run("b", "openai-codex/gpt-y", "gpt", verdict("concerns")),
+			run("c", "anthropic/claude-c", "claude", null),
+		];
+		for (const runs of [THREE, mixed]) {
+			const { notes } = mergeVerdicts(runs, []);
+			expect(notes.join("\n")).not.toMatch(/single|one vendor|vendor/i);
+		}
+	});
+
 	it("measures vendor over the seats that returned a verdict", () => {
 		const runs = [run("a", "anthropic/claude-a", "claude", verdict("approve")), run("b", "openai/gpt", "gpt", null)];
 		expect(mergeVerdicts(runs, []).notes).toContain(SINGLE_VENDOR_WARNING);

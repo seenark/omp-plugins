@@ -1,6 +1,7 @@
 import { MODEL_ROLES, PANEL_SEATS, seatRoleId } from "../roles.ts";
 import type { ModelChoice } from "./catalog.ts";
 import { modelKey } from "../panel-rules.ts";
+import { DEFAULT_THINKING, clampThinking, stepThinking, type ThinkingLevel } from "../thinking.ts";
 
 /** Model spec per role id; undefined leaves the role unset (a work role falls back, a seat is absent). */
 export type Assignment = Record<string, string | undefined>;
@@ -13,6 +14,17 @@ export const PRESET_DESCRIPTIONS: Record<PresetName, string> = {
 	"claude-codex": "claude-only plus one Codex seat, with Codex as judge. On roles you already have, only adds the seat and moves the judge.",
 	lean: "Cheaper models for work roles and the judge; a two-seat panel (A and B).",
 };
+
+/** Balanced presets and hand-picked models run seats and work roles at the default level and the judge one above; lean runs seats one below and the judge at the default. */
+export type ThinkingProfile = "balanced" | "lean";
+
+/** `choice`'s spec for `roleId`, suffixed with the profile's level clamped to the efforts the registry lists for it (no suffix when it lists none). */
+export function specWithThinking(roleId: string, choice: ModelChoice, profile: ThinkingProfile, base: ThinkingLevel): string {
+	const kind = MODEL_ROLES.find(role => role.id === roleId)?.kind;
+	const step = kind === "panel" && profile === "lean" ? -1 : roleId === "pstack-judge" && profile === "balanced" ? 1 : 0;
+	const level = clampThinking(stepThinking(base, step), choice.efforts);
+	return level === undefined ? choice.spec : `${choice.spec}:${level}`;
+}
 
 const CLAUDE = "anthropic";
 const CODEX_PROVIDER = "openai-codex";
@@ -63,10 +75,13 @@ function seatPicks(tiers: Tiers, order: readonly TierName[], count: number): Mod
 	return [...picked.values()].slice(0, count);
 }
 
-function assign(work: readonly [string, ModelChoice][], seats: readonly ModelChoice[]): Assignment {
-	const assignment: Assignment = Object.fromEntries(work.map(([role, choice]) => [role, choice.spec]));
+type Spec = (roleId: string, choice: ModelChoice) => string;
+
+function assign(work: readonly [string, ModelChoice][], seats: readonly ModelChoice[], spec: Spec): Assignment {
+	const assignment: Assignment = Object.fromEntries(work.map(([role, choice]) => [role, spec(role, choice)]));
 	PANEL_SEATS.forEach((seat, index) => {
-		assignment[seatRoleId(seat)] = seats[index]?.spec;
+		const choice = seats[index];
+		assignment[seatRoleId(seat)] = choice && spec(seatRoleId(seat), choice);
 	});
 	return assignment;
 }
@@ -79,15 +94,16 @@ const LEAN_SEATS = 2;
  * Seats the preset does not fill stay unset. `claude-codex` on roles the user already has is a delta on `current`:
  * one Codex seat in the first free seat (none when a seat already runs Codex) and the judge moved to Codex.
  */
-export function presetAssignment(name: PresetName, choices: readonly ModelChoice[], current: Assignment = {}): Assignment | undefined {
+export function presetAssignment(name: PresetName, choices: readonly ModelChoice[], current: Assignment = {}, base: ThinkingLevel = DEFAULT_THINKING): Assignment | undefined {
 	const claude = rank(choices.filter(choice => choice.vendor === CLAUDE));
 	const codexPool = choices.filter(choice => choice.provider === CODEX_PROVIDER);
 	const codexChoices = codexPool.length > 0 ? codexPool : choices.filter(choice => choice.vendor === CODEX_VENDOR);
 	const codex = rank(codexChoices);
+	const spec: Spec = (roleId, choice) => specWithThinking(roleId, choice, name === "lean" ? "lean" : "balanced", base);
 	switch (name) {
 		case "claude-only":
 			if (!claude) return undefined;
-			return assign(claudeWork(claude, claude.top), seatPicks(claude, ["top", "mid", "cheap"], CLAUDE_SEATS));
+			return assign(claudeWork(claude, claude.top), seatPicks(claude, ["top", "mid", "cheap"], CLAUDE_SEATS), spec);
 		case "claude-codex": {
 			if (!claude || !codex) return undefined;
 			if (MODEL_ROLES.some(role => current[role.id] !== undefined)) {
@@ -95,9 +111,9 @@ export function presetAssignment(name: PresetName, choices: readonly ModelChoice
 				const codexKeys = new Set(codexChoices.map(choice => modelKey(choice.spec)));
 				const hasCodexSeat = seatIds.some(id => current[id] !== undefined && codexKeys.has(modelKey(current[id]!)));
 				const freeSeat = seatIds.find(id => current[id] === undefined) ?? seatIds[seatIds.length - 1]!;
-				return { ...current, "pstack-judge": codex.top.spec, ...(hasCodexSeat ? {} : { [freeSeat]: codex.top.spec }) };
+				return { ...current, "pstack-judge": spec("pstack-judge", codex.top), ...(hasCodexSeat ? {} : { [freeSeat]: spec(freeSeat, codex.top) }) };
 			}
-			return assign(claudeWork(claude, codex.top), [...seatPicks(claude, ["top", "mid", "cheap"], CLAUDE_SEATS), codex.top]);
+			return assign(claudeWork(claude, codex.top), [...seatPicks(claude, ["top", "mid", "cheap"], CLAUDE_SEATS), codex.top], spec);
 		}
 		case "lean": {
 			const pool = claude ?? rank(choices);
@@ -112,6 +128,7 @@ export function presetAssignment(name: PresetName, choices: readonly ModelChoice
 					["pstack-security", pool.mid],
 				],
 				seatPicks(pool, ["mid", "cheap", "top"], LEAN_SEATS),
+				spec,
 			);
 		}
 	}

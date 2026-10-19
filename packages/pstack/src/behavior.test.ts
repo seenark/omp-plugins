@@ -39,6 +39,7 @@ describe("Behavior Configuration reader", () => {
 			suspendPonytail: true,
 			maxPanelSize: 5,
 			guardStrictness: "block-and-warn",
+			defaultThinking: "medium",
 		});
 	});
 
@@ -48,7 +49,7 @@ describe("Behavior Configuration reader", () => {
 	});
 
 	it("reads each saved field", () => {
-		const saved = { suspendCaveman: false, suspendPonytail: false, maxPanelSize: 2, guardStrictness: "warn-only" as const };
+		const saved = { suspendCaveman: false, suspendPonytail: false, maxPanelSize: 2, guardStrictness: "warn-only" as const, defaultThinking: "xhigh" as const };
 		const store = createBehaviorStore(bus(), { configPath: configFile(root(saved)) });
 		expect(store.current()).toEqual(saved);
 	});
@@ -74,6 +75,15 @@ describe("Behavior Configuration reader", () => {
 		for (const level of ["block-and-warn", "warn-only", "off"] as const) {
 			const store = createBehaviorStore(bus(), { configPath: configFile(root({ guardStrictness: level })) });
 			expect(store.current().guardStrictness).toBe(level);
+		}
+	});
+
+	it("reads each default thinking level and falls back to medium for anything else", () => {
+		for (const level of ["low", "medium", "high", "xhigh"] as const) {
+			expect(createBehaviorStore(bus(), { configPath: configFile(root({ defaultThinking: level })) }).current().defaultThinking).toBe(level);
+		}
+		for (const bad of ["max", "minimal", "HIGH", "", 3, null]) {
+			expect(createBehaviorStore(bus(), { configPath: configFile(root({ defaultThinking: bad })) }).current().defaultThinking).toBe("medium");
 		}
 	});
 

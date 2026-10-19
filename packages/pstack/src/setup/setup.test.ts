@@ -1,4 +1,7 @@
-import { describe, expect, it } from "bun:test";
+import { afterEach, describe, expect, it } from "bun:test";
+import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import pstackExtension from "../index.ts";
 import { MODEL_ROLES, PANEL_ROLES, WORK_ROLES } from "../roles.ts";
@@ -10,6 +13,11 @@ import { probeAll, type ModelProbe } from "./probe.ts";
 import { SINGLE_VENDOR_WARNING, checkPanel, modelKey } from "../panel-rules.ts";
 import { sameConfig, snapshot, type ConfigSnapshot, type SetupSettings } from "./settings.ts";
 
+const homes: string[] = [];
+afterEach(() => {
+	for (const home of homes.splice(0)) fs.rmSync(home, { recursive: true, force: true });
+});
+
 const FAMILY: Record<string, string> = { anthropic: "anthropic", "openai-codex": "openai", openai: "openai" };
 const model = (provider: string, id: string) => ({ provider, id, name: id }) as never as { provider: string; id: string; name: string };
 const SERVED = [
@@ -20,6 +28,18 @@ const SERVED = [
 	model("anthropic", "claude-sonnet-4-5"),
 	model("openai-codex", "gpt-6-sol"),
 	model("openai-codex", "gpt-6-mini"),
+	model("openai-codex", "gpt-5-codex"),
+];
+const reasoning = (provider: string, id: string, efforts: string[]) => ({ ...model(provider, id), reasoning: true, thinking: { mode: "effort", efforts } });
+const FULL = ["low", "medium", "high", "xhigh", "max"];
+const NO_MAX = ["low", "medium", "high", "xhigh"];
+/** The same registry with the thinking levels it lists: Claude up to max, Haiku from minimal, Codex without max, the Codex mini with two levels, one non-reasoning model. */
+const THINKING_SERVED = [
+	reasoning("anthropic", "claude-opus-5-5", FULL),
+	reasoning("anthropic", "claude-sonnet-5-5", FULL),
+	reasoning("anthropic", "claude-haiku-4-5", ["minimal", ...NO_MAX]),
+	reasoning("openai-codex", "gpt-6-sol", NO_MAX),
+	reasoning("openai-codex", "gpt-6-mini", ["low", "medium"]),
 	model("openai-codex", "gpt-5-codex"),
 ];
 const SERVED_SPECS = SERVED.map(served => `${served.provider}/${served.id}`);
@@ -34,6 +54,7 @@ const USER_CONFIG: ConfigSnapshot = {
 	isolation: false,
 };
 
+const seatsOf = (assignment: Record<string, string | undefined>) => PANEL_ROLES.map(role => assignment[role.id]);
 const clone = (config: ConfigSnapshot): ConfigSnapshot => structuredClone(config);
 const modelsApi = (served = SERVED) =>
 	({
@@ -72,13 +93,13 @@ function fakeSettings(initial: ConfigSnapshot = USER_CONFIG) {
 type Matcher = string | ((label: string) => boolean);
 const matches = (matcher: Matcher, label: string) => (typeof matcher === "string" ? label === matcher || label.startsWith(`${matcher}:`) : matcher(label));
 
-function createHarness(options: { settings?: ReturnType<typeof fakeSettings>; probe?: ModelProbe; answers?: Array<Matcher | undefined>; confirms?: boolean[]; served?: typeof SERVED; hasUI?: boolean } = {}) {
+function createHarness(options: { settings?: ReturnType<typeof fakeSettings>; probe?: ModelProbe; answers?: Array<Matcher | undefined>; confirms?: boolean[]; served?: typeof SERVED; hasUI?: boolean; defaultThinking?: string } = {}) {
 	const fake = options.settings ?? fakeSettings();
 	const probed: string[] = [];
 	const probe: ModelProbe = options.probe ?? (async spec => (probed.push(spec), { ok: true }));
 	const answers = [...(options.answers ?? [])];
 	const confirms = [...(options.confirms ?? [])];
-	const selects: Array<{ title: string; labels: string[] }> = [];
+	const selects: Array<{ title: string; labels: string[]; initialIndex?: number }> = [];
 	const confirmed: string[] = [];
 	const notices: Array<{ level: string; message: string }> = [];
 	const commands = new Map<string, { handler: (args: string, ctx: unknown) => Promise<void> }>();
@@ -94,16 +115,23 @@ function createHarness(options: { settings?: ReturnType<typeof fakeSettings>; pr
 		models: modelsApi(options.served),
 		ui: {
 			notify: (message: string, level: string) => void notices.push({ level, message }),
-			select: async (title: string, items: Array<string | { label: string }>) => {
+			select: async (title: string, items: Array<string | { label: string }>, dialogOptions?: { initialIndex?: number }) => {
 				const labels = items.map(item => (typeof item === "string" ? item : item.label));
-				selects.push({ title, labels });
+				selects.push({ title, labels, initialIndex: dialogOptions?.initialIndex });
 				const matcher = answers.shift();
 				return matcher === undefined ? undefined : labels.find(label => matches(matcher, label));
 			},
 			confirm: async (title: string) => (confirmed.push(title), confirms.shift() ?? false),
 		},
 	};
-	pstackExtension(pi as never, { homeDirectory: "/nonexistent", setup: { settings: () => fake.settings, probe: () => probe } });
+	let home = "/nonexistent";
+	if (options.defaultThinking !== undefined) {
+		home = fs.mkdtempSync(path.join(os.tmpdir(), "pstack-setup-"));
+		homes.push(home);
+		fs.mkdirSync(path.join(home, ".config", "codesook-omp"), { recursive: true });
+		fs.writeFileSync(path.join(home, ".config", "codesook-omp", "config.json"), JSON.stringify({ version: 1, display: {}, behavior: { pstack: { defaultThinking: options.defaultThinking } } }));
+	}
+	pstackExtension(pi as never, { homeDirectory: home, setup: { settings: () => fake.settings, probe: () => probe } });
 	return { ...fake, probed, selects, confirmed, notices, run: (args = "setup") => commands.get("pstack")!.handler(args, ctx) };
 }
 
@@ -113,6 +141,168 @@ const nonPstack = (config: ConfigSnapshot) => ({
 	chains: Object.fromEntries(Object.entries(config.chains).filter(([role]) => !role.startsWith("pstack-"))),
 });
 const levels = (h: { notices: Array<{ level: string }> }) => h.notices.map(notice => notice.level);
+
+const FIXTURE_LEVELS = ["low", "medium", "high", "xhigh"] as const;
+/** What each default level must write, spelled out per level rather than derived from the code under test. */
+const BALANCED = {
+	low: { base: "low", judge: "medium" },
+	medium: { base: "medium", judge: "high" },
+	high: { base: "high", judge: "xhigh" },
+	xhigh: { base: "xhigh", judge: "max" },
+} as const;
+const LEAN = { low: { seat: "low", judge: "low" }, medium: { seat: "low", judge: "medium" }, high: { seat: "medium", judge: "high" }, xhigh: { seat: "high", judge: "xhigh" } } as const;
+const thinkingChoices = listChoices(modelsApi(THINKING_SERVED as never));
+const WORK_IDS = WORK_ROLES.map(role => role.id).filter(id => id !== "pstack-judge");
+
+describe("thinking levels written by presets", () => {
+	for (const level of FIXTURE_LEVELS) {
+		it(`claude-only at default ${level}: seats and work roles at ${level}, the judge one above`, () => {
+			const assignment = presetAssignment("claude-only", thinkingChoices, {}, level)!;
+			const { base, judge } = BALANCED[level];
+			for (const id of WORK_IDS) expect(assignment[id]).toMatch(new RegExp(`:${base}$`));
+			expect(assignment["pstack-judge"]).toBe(`${OPUS}:${judge}`);
+			expect(seatsOf(assignment)).toEqual([`${OPUS}:${base}`, `${SONNET}:${base}`, `${HAIKU}:${base}`, undefined, undefined]);
+		});
+
+		it(`claude-codex at default ${level}: Codex judge clamped to its listed levels`, () => {
+			const assignment = presetAssignment("claude-codex", thinkingChoices, {}, level)!;
+			const { base, judge } = BALANCED[level];
+			expect(assignment["pstack-judge"]).toBe(`${CODEX}:${judge === "max" ? "xhigh" : judge}`);
+			expect(assignment["pstack-panel-d"]).toBe(`${CODEX}:${base}`);
+			expect(assignment["pstack-build"]).toBe(`${SONNET}:${base}`);
+		});
+
+		it(`lean at default ${level}: seats one below, the judge at ${level}`, () => {
+			const assignment = presetAssignment("lean", thinkingChoices, {}, level)!;
+			expect(seatsOf(assignment)).toEqual([`${SONNET}:${LEAN[level].seat}`, `${HAIKU}:${LEAN[level].seat}`, undefined, undefined, undefined]);
+			expect(assignment["pstack-judge"]).toBe(`${SONNET}:${LEAN[level].judge}`);
+			for (const id of WORK_IDS) expect(assignment[id]).toMatch(new RegExp(`:${level}$`));
+		});
+	}
+
+	it("clamps to the nearest level the model lists, the lower one on a tie, and writes no suffix when it lists none", () => {
+		const served = [
+			reasoning("anthropic", "claude-opus-5-5", ["low", "high"]),
+			reasoning("anthropic", "claude-sonnet-5-5", ["medium"]),
+			model("anthropic", "claude-haiku-4-5"),
+			reasoning("openai-codex", "gpt-6-sol", ["low", "medium"]),
+		];
+		const assignment = presetAssignment("claude-codex", listChoices(modelsApi(served as never)), {}, "xhigh")!;
+		expect(seatsOf(assignment)).toEqual([`${OPUS}:high`, `${SONNET}:medium`, HAIKU, `${CODEX}:medium`, undefined]);
+		expect(presetAssignment("claude-only", listChoices(modelsApi(served as never)), {}, "medium")!["pstack-design"]).toBe(`${OPUS}:low`);
+	});
+
+	it("defaults to medium when no level is given", () => {
+		expect(presetAssignment("claude-only", thinkingChoices)!["pstack-build"]).toBe(`${SONNET}:medium`);
+	});
+
+	it("reads the default level from behavior.pstack.defaultThinking and treats an unset or invalid one as medium", async () => {
+		for (const [configured, base, judge] of [["xhigh", "xhigh", "max"], ["low", "low", "medium"], [undefined, "medium", "high"], ["max", "medium", "high"]] as const) {
+			const h = createHarness({ served: THINKING_SERVED as never, confirms: [false], defaultThinking: configured });
+			await h.run("preset claude-only");
+			expect(h.state.roles["pstack-build"]).toBe(`${SONNET}:${base}`);
+			expect(h.state.roles["pstack-judge"]).toBe(`${OPUS}:${judge}`);
+		}
+	});
+
+	it("writes the suffixed selectors to the config", async () => {
+		const h = createHarness({ served: THINKING_SERVED as never, confirms: [false] });
+		await h.run("preset claude-only");
+		expect(h.state.roles["pstack-judge"]).toBe(`${OPUS}:high`);
+		expect(h.state.roles["pstack-panel-a"]).toBe(`${OPUS}:medium`);
+		expect(h.state.roles["pstack-build"]).toBe(`${SONNET}:medium`);
+	});
+});
+
+describe("a no-op preset or setup makes no model call", () => {
+	it("a preset rerun probes nothing and writes nothing, while the first run and a changed level do probe", async () => {
+		const h = createHarness({ served: THINKING_SERVED as never, confirms: [false, false, false] });
+		await h.run("preset claude-only");
+		expect(h.probed.length).toBeGreaterThan(0);
+		h.probed.length = 0;
+		h.writes.length = 0;
+		h.notices.length = 0;
+		await h.run("preset claude-only");
+		expect(h.probed).toEqual([]);
+		expect(h.writes).toEqual([]);
+		expect(h.notices.some(notice => notice.message.includes("Probing"))).toBe(false);
+		await h.run("preset lean");
+		expect(h.probed.length).toBeGreaterThan(0);
+	});
+
+	it("a claude-codex rerun over a finished claude-codex probes nothing", async () => {
+		const h = createHarness({ served: THINKING_SERVED as never, confirms: [false, false] });
+		await h.run("preset claude-codex");
+		h.probed.length = 0;
+		await h.run("preset claude-codex");
+		expect(h.probed).toEqual([]);
+	});
+
+	it("saving unchanged roles from setup probes nothing", async () => {
+		const fake = fakeSettings();
+		await createHarness({ settings: fake, served: THINKING_SERVED as never, answers: ["claude-only", SAVE], confirms: [false] }).run();
+		const again = createHarness({ settings: fake, served: THINKING_SERVED as never, answers: [KEEP_CURRENT, SAVE], confirms: [false] });
+		await again.run();
+		expect(again.probed).toEqual([]);
+	});
+
+	it("still asks about task isolation on a no-op when it is off", async () => {
+		const h = createHarness({ served: THINKING_SERVED as never, confirms: [false, true] });
+		await h.run("preset claude-only");
+		h.probed.length = 0;
+		await h.run("preset claude-only");
+		expect(h.probed).toEqual([]);
+		expect(h.state.isolation).toBe(true);
+	});
+
+	it("probes each model without its thinking suffix", async () => {
+		const h = createHarness({ served: THINKING_SERVED as never, confirms: [false] });
+		await h.run("preset claude-only");
+		expect(h.probed.sort()).toEqual([HAIKU, OPUS, SONNET]);
+	});
+});
+
+describe("setup role menus offer a thinking choice", () => {
+	it("preselects the preset rule for the role and writes the chosen level", async () => {
+		const h = createHarness({
+			served: THINKING_SERVED as never,
+			answers: ["claude-only", "pstack-judge", OPUS, "xhigh", "pstack-panel-d", CODEX, "xhigh", SAVE],
+			confirms: [false],
+		});
+		await h.run();
+		const judge = h.selects.find(select => select.title.startsWith("pstack-judge thinking"))!;
+		expect(judge.labels).toEqual(FULL);
+		expect(judge.initialIndex).toBe(FULL.indexOf("high"));
+		const seat = h.selects.find(select => select.title.startsWith("pstack-panel-d thinking"))!;
+		expect(seat.labels).toEqual(NO_MAX);
+		expect(seat.initialIndex).toBe(NO_MAX.indexOf("medium"));
+		expect(h.state.roles["pstack-judge"]).toBe(`${OPUS}:xhigh`);
+		expect(h.state.roles["pstack-panel-d"]).toBe(`${CODEX}:xhigh`);
+	});
+
+	it("preselects one below the default for a lean seat and offers only the listed levels", async () => {
+		const h = createHarness({ served: THINKING_SERVED as never, answers: ["lean", "pstack-panel-a", HAIKU, CANCEL] });
+		await h.run();
+		const menu = h.selects.find(select => select.title.startsWith("pstack-panel-a thinking"))!;
+		expect(menu.labels).toEqual(["minimal", ...NO_MAX]);
+		expect(menu.initialIndex).toBe(menu.labels.indexOf("low"));
+	});
+
+	it("keeps the role's current level on a re-pick of the same model, and skips the menu for a model that lists none or an unset role", async () => {
+		const mine = { ...USER_CONFIG, roles: { ...USER_CONFIG.roles, "pstack-build": `${SONNET}:xhigh` } };
+		const h = createHarness({ settings: fakeSettings(mine), served: THINKING_SERVED as never, answers: [KEEP_CURRENT, "pstack-build", SONNET, "xhigh", "pstack-explore", "openai-codex/gpt-5-codex", "pstack-judge", UNSET, CANCEL] });
+		await h.run();
+		const menus = h.selects.filter(select => select.title.includes("thinking level"));
+		expect(menus).toHaveLength(1);
+		expect(menus[0]!.initialIndex).toBe(FULL.indexOf("xhigh"));
+	});
+
+	it("escaping the thinking menu leaves the role unchanged", async () => {
+		const h = createHarness({ served: THINKING_SERVED as never, answers: ["claude-only", "pstack-judge", HAIKU, undefined, SAVE], confirms: [false] });
+		await h.run();
+		expect(h.state.roles["pstack-judge"]).toBe(`${OPUS}:high`);
+	});
+});
 
 describe("/pstack setup choices", () => {
 	it("offers only models the registry serves", async () => {

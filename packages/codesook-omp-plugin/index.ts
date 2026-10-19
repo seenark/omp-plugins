@@ -148,6 +148,7 @@ const sectionAbsentLabel = (sectionId: string): "not installed" | "not loaded" =
 
 const PSTACK_GUARD_STRICTNESS = ["block-and-warn", "warn-only", "off"] as const;
 const PSTACK_PANEL_SIZE = { min: 1, max: 5 } as const;
+const PSTACK_THINKING = ["low", "medium", "high", "xhigh"] as const;
 
 /** `behavior.pstack`. Read raw like CodeGraph and Beads: pstack is optional, so settings never import it. Defaults match pstack's own reader. */
 type PstackDraft = {
@@ -155,6 +156,7 @@ type PstackDraft = {
 	suspendPonytail: boolean;
 	maxPanelSize: number;
 	guardStrictness: (typeof PSTACK_GUARD_STRICTNESS)[number];
+	defaultThinking: (typeof PSTACK_THINKING)[number];
 };
 
 function pstackDraft(raw: unknown): PstackDraft {
@@ -165,6 +167,7 @@ function pstackDraft(raw: unknown): PstackDraft {
 		suspendPonytail: typeof source.suspendPonytail === "boolean" ? source.suspendPonytail : true,
 		maxPanelSize: Number.isInteger(size) && (size as number) >= PSTACK_PANEL_SIZE.min && (size as number) <= PSTACK_PANEL_SIZE.max ? (size as number) : PSTACK_PANEL_SIZE.max,
 		guardStrictness: (PSTACK_GUARD_STRICTNESS as readonly unknown[]).includes(source.guardStrictness) ? (source.guardStrictness as PstackDraft["guardStrictness"]) : "block-and-warn",
+		defaultThinking: (PSTACK_THINKING as readonly unknown[]).includes(source.defaultThinking) ? (source.defaultThinking as PstackDraft["defaultThinking"]) : "medium",
 	};
 }
 
@@ -945,6 +948,7 @@ function validateDraft(draft: UnifiedSettingsDraft): string | undefined {
 	if (typeof pstack.suspendCaveman !== "boolean" || typeof pstack.suspendPonytail !== "boolean") return "pstack suspend settings must be true or false.";
 	if (!Number.isInteger(pstack.maxPanelSize) || pstack.maxPanelSize < PSTACK_PANEL_SIZE.min || pstack.maxPanelSize > PSTACK_PANEL_SIZE.max) return `pstack maximum panel size must be an integer from ${PSTACK_PANEL_SIZE.min} through ${PSTACK_PANEL_SIZE.max}.`;
 	if (!PSTACK_GUARD_STRICTNESS.includes(pstack.guardStrictness)) return "pstack guard strictness must be block-and-warn, warn-only, or off.";
+	if (!PSTACK_THINKING.includes(pstack.defaultThinking)) return "pstack default thinking must be low, medium, high, or xhigh.";
 	const sharedErrors = validateSharedDisplayConfig(clone(draft.display.sharedDisplay));
 	if (sharedErrors.length > 0) return sharedErrors[0];
 	const cavemanError = validateCavemanConfig({
@@ -1142,6 +1146,7 @@ function settingsItems(
 		boolItem("pstack.suspendPonytail", "Suspend Ponytail", behavior.pstack.suspendPonytail, "Switch Ponytail off for the rest of an Agent Session once pstack is activated.", pstackWarning),
 		numberItem("pstack.maxPanelSize", "Maximum panel size", behavior.pstack.maxPanelSize, `Cap on panel seats a review uses, ${PSTACK_PANEL_SIZE.min}-${PSTACK_PANEL_SIZE.max}; unset seats are never counted.`, pstackWarning),
 		selectItem("pstack.guardStrictness", "Guard strictness", behavior.pstack.guardStrictness, PSTACK_GUARD_STRICTNESS, "block-and-warn stops damaging commands and warns on style; warn-only never blocks; off silences every guard.", pstackWarning),
+		selectItem("pstack.defaultThinking", "Default thinking", behavior.pstack.defaultThinking, PSTACK_THINKING, "Thinking level /pstack setup and presets write on every role (the judge one above it; lean seats one below), clamped to what each model supports. Unset means medium.", pstackWarning),
 		{ id: "pstack.setup", label: "Model roles", currentValue: "/pstack setup", description: "Choose the models for pstack's roles and panel seats with /pstack setup in an Agent Session. Not edited here.", warning: pstackWarning },
 		{ id: "section:headroom", label: "Headroom", currentValue: "", heading: true },
 		boolItem("headroom.enabled", "Enabled", behavior.headroom.enabled, "Compression behavior; live only when Headroom extension is loaded.", headroomWarning),
@@ -1237,6 +1242,7 @@ function updateDraft(draft: UnifiedSettingsDraft, id: string, value: string): vo
 		case "pstack.suspendCaveman": draft.behavior.pstack.suspendCaveman = bool; return;
 		case "pstack.suspendPonytail": draft.behavior.pstack.suspendPonytail = bool; return;
 		case "pstack.maxPanelSize": draft.behavior.pstack.maxPanelSize = Number(value); return;
+		case "pstack.defaultThinking": if ((PSTACK_THINKING as readonly string[]).includes(value)) draft.behavior.pstack.defaultThinking = value as PstackDraft["defaultThinking"]; return;
 		case "pstack.guardStrictness": if ((PSTACK_GUARD_STRICTNESS as readonly string[]).includes(value)) draft.behavior.pstack.guardStrictness = value as PstackDraft["guardStrictness"]; return;
 		case "headroom.enabled": draft.behavior.headroom.enabled = bool; return;
 		case "headroom.baseUrl": draft.behavior.headroom.baseUrl = value; return;
