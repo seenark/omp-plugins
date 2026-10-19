@@ -84,7 +84,10 @@ function checkPanelRules(models: DoctorInput["models"]): Finding[] {
 		...errors.map((message): Finding => ({ check: "panel", severity: "error", message })),
 		...warnings.map((message): Finding => ({ check: "panel", severity: "warning", message })),
 	];
-	if (findings.length === 0) findings.push({ check: "panel", severity: "ok", message: vendors.size === 0 ? "No seats to compare." : `${new Set(vendors.values()).size} vendor(s) across ${vendors.size} seat model(s), none shared.` });
+	const configured = seats.filter(seat => seat.model !== undefined);
+	if (configured.length > 0) {
+		findings.push({ check: "panel", severity: "ok", message: `seats: ${configured.map(seat => `${seat.seat.toUpperCase()} ${seat.model} (vendor ${seat.vendor})`).join(", ")}.` });
+	}
 	return findings;
 }
 

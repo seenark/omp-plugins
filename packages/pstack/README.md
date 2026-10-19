@@ -84,28 +84,39 @@ When pstack activates, and again when a session is resumed at startup with pstac
 
 ## Setup
 
-`/pstack setup` is interactive. It lists only models your OMP registry serves, offers the presets `claude-only`, `claude-codex` and `lean` (a preset appears only when the registry has the models it needs), then shows one menu per role with what the role is, when pstack uses it and what kind of model suits it. Edit the pstack roles by hand in your OMP config instead if you prefer: setup is a convenience.
+`/pstack setup` is interactive. It lists only models your OMP registry serves, offers the presets `claude-only`, `claude-codex` and `lean` (a preset appears only when the registry has the models it needs), then shows one menu per role with what the role is, when pstack uses it and what kind of model suits it. Picking a model that lists thinking levels opens a second menu for the level, preselected from the thinking rules below. Edit the pstack roles by hand in your OMP config instead if you prefer: setup is a convenience.
 
 On Save it:
 
 - refuses two seats on the same model (the same model through another provider or thinking suffix counts as the same) and warns `diversity reduced: single vendor` when every seat shares a vendor;
-- probes each selected model with one real turn, and writes nothing if any probe fails;
+- probes each selected model with one real turn, and writes nothing if any probe fails. When the roles already match what would be written there is nothing to verify, so it makes no model call;
 - asks before enabling `task.isolation.enabled` when it is off, and leaves it unchanged unless you confirm;
 - writes only `pstack-*` model roles, plus an empty fallback chain for every configured seat, through OMP's in-process settings API, so `default`, `commit`, `vision`, `tiny`, `advisor` and every other role stay as they are;
 - reads the config back and restores the previous one when it differs from what was written.
+
+### Thinking levels
+
+Every role a preset or setup writes carries an explicit thinking suffix (`anthropic/claude-opus-5-5:high`), so no role runs at whatever OMP defaults to. The base level is `behavior.pstack.defaultThinking` (`low`, `medium`, `high` or `xhigh`; `medium` when unset). Levels are ordered `low` < `medium` < `high` < `xhigh` < `max`:
+
+| Profile | Work roles | Panel seats | `pstack-judge` |
+| --- | --- | --- | --- |
+| `claude-only`, `claude-codex`, or a hand-picked model | default | default | one above the default |
+| `lean` | default | one below the default | default |
+
+One above or below steps along that order and stops at its ends, then clamps to the levels the OMP registry lists for the model: the nearest listed level, the lower one on a tie. A model that lists no levels (a non-reasoning model) is written without a suffix. `claude-codex` on roles you already have still touches only the new Codex seat and the judge, and writes both with a suffix.
 
 Running it again with the same choices changes nothing. Presets pick tiers from model-id keywords (`opus`, `sonnet`, `haiku`, `mini`, ...), because OMP exposes no capability tier: adjust a role by hand when a vendor names its models differently.
 
 ## Presets and doctor
 
-`/pstack preset <name>` applies a preset (`claude-only`, `claude-codex` or `lean`) and then saves it exactly as setup's Save does: seat and single-vendor rules, one probe turn per model (nothing is written when one fails), the isolation question, a write limited to `pstack-*` roles and, if you agree, `task.isolation.enabled`, readback and restore. The presets fill only the seats they need: `claude-only` fills the work roles and seats A to C with the top, mid and cheap Claude models, `lean` fills seats A and B, and unfilled seats stay unset. `claude-codex` is `claude-only` plus one Codex seat (seat D) with `pstack-judge` on Codex. When you already have `pstack-*` roles, `claude-codex` is a delta: it verifies Codex first, adds one Codex seat in your first free seat (none when a seat already runs Codex), moves `pstack-judge` to Codex and keeps every other role. `claude-only` and `lean` replace the `pstack-*` roles with their own set.
+`/pstack preset <name>` applies a preset (`claude-only`, `claude-codex` or `lean`) and then saves it exactly as setup's Save does: seat and single-vendor rules, one probe turn per model (nothing is written when one fails), the isolation question, a write limited to `pstack-*` roles and, if you agree, `task.isolation.enabled`, readback and restore. The presets fill only the seats they need: `claude-only` fills the work roles and seats A to C with the top, mid and cheap Claude models, `lean` fills seats A and B, and unfilled seats stay unset. `claude-codex` is `claude-only` plus one Codex seat (seat D) with `pstack-judge` on Codex. Every role is written at the thinking level described under Setup. A preset whose roles already match your config makes no model call, so rerunning it costs nothing. When you already have `pstack-*` roles, `claude-codex` is a delta: it verifies Codex first, adds one Codex seat in your first free seat (none when a seat already runs Codex), moves `pstack-judge` to Codex and keeps every other role. `claude-only` and `lean` replace the `pstack-*` roles with their own set.
 
 `/pstack doctor` is read-only and prints one line per finding at the worst severity found:
 
 | Check | Flags |
 | --- | --- |
 | `roles` | a pstack role set to a model the registry does not serve; no panel seat with a model |
-| `panel` | two seats on one model (error); a single-vendor panel (warning) |
+| `panel` | two seats on one model (error); a single-vendor panel (warning). It also lists every configured seat with its model and vendor |
 | `skills` | a workflow-called skill (`poteto-mode` and every skill its playbooks and references name) that OMP does not list, or resolves to another source's copy. Native user and project skills, skillshare and `skills.customDirectories` outrank this package. Needs OMP's skill commands (`skills.enableSkillCommands`) to see the resolved owner |
 | `instruction-modes` | whether Caveman and Ponytail are loaded and whether the suspend settings switch them off while pstack is active. It reads the loaded commands: the event bus does not list subscribers, so it cannot prove a plugin listens |
 | `display-host` | no Display Host running, so the Status Segment is not shown |
@@ -141,7 +152,7 @@ Work-role agents list the pstack role, then the built-in role, so OMP skips an u
 
 ## Panel workflows
 
-`interrogate`, `arena`, `swarm`, `architect` and the critique step of `how` run on the configured seats. The session learns its seats from a hidden roster note: on activation, and when one of these skills is started outside a run. The note lists each seat that has a model, in seat order and capped by `maxPanelSize`, with its model and vendor (the models API's family token), and says so when every seat is one vendor. Critics return the structured verdict; their findings are deduplicated with `judge_batch`, then `pstack-judge` synthesizes. The helpers for the mechanical part are in `src/verdict.ts` (`duplicateCandidates`, `mergeVerdicts`, `reviewerLines`); the skills import them from an `eval` cell, and `skills/poteto-mode/references/panel-verdicts.md` is the procedure. The merged verdict names each seat's model and carries `diversity reduced: single vendor` when the seats that answered are one vendor. Arena builders run as isolated tasks, and arena asks the user to turn `task.isolation.apply` off first, so each candidate stays a patch or task branch to graft from.
+`interrogate`, `arena`, `swarm`, `architect` and the critique step of `how` run on the configured seats. The session learns its seats from a hidden roster note: on activation, and when one of these skills is started outside a run. The note lists each seat that has a model, in seat order and capped by `maxPanelSize`, with its model and vendor (the models API's family token), and says so when every seat is one vendor. A panel of two or more vendors carries no vendor note in the roster or the merged verdict, not even a negated one. Critics return the structured verdict; their findings are deduplicated with `judge_batch`, then `pstack-judge` synthesizes. The helpers for the mechanical part are in `src/verdict.ts` (`duplicateCandidates`, `mergeVerdicts`, `reviewerLines`); the skills import them from an `eval` cell, and `skills/poteto-mode/references/panel-verdicts.md` is the procedure. The merged verdict names each seat's model and carries `diversity reduced: single vendor` when the seats that answered are one vendor. Arena builders run as isolated tasks, and arena asks the user to turn `task.isolation.apply` off first, so each candidate stays a patch or task branch to graft from.
 
 ## Behavior Configuration
 
@@ -153,6 +164,7 @@ Work-role agents list the pstack role, then the built-in role, so OMP skips an u
 | `suspendPonytail` | `true` | boolean |
 | `maxPanelSize` | `5` | integer 1 to 5 |
 | `guardStrictness` | `block-and-warn` | `block-and-warn`, `warn-only`, `off` |
+| `defaultThinking` | `medium` | `low`, `medium`, `high`, `xhigh` |
 
 ## Guards
 

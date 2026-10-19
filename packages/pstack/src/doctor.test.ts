@@ -137,6 +137,19 @@ describe("/pstack doctor", () => {
 		expect(single.message).toContain("anthropic");
 	});
 
+	it("lists every configured seat with its model and vendor, and only those seats", async () => {
+		const mixed = (await createWorld().doctor()).message;
+		expect(mixed).toContain(`A ${OPUS} (vendor anthropic)`);
+		expect(mixed).toContain(`B ${CODEX} (vendor openai)`);
+		expect(mixed).not.toMatch(/single[- ]vendor/i);
+		const single = (await createWorld({ roles: { ...HEALTHY_ROLES, "pstack-panel-b": SONNET } }).doctor()).message;
+		expect(single).toContain(`B ${SONNET} (vendor anthropic)`);
+		const { "pstack-panel-b": _b, ...oneSeat } = HEALTHY_ROLES;
+		const one = (await createWorld({ roles: oneSeat }).doctor()).message;
+		expect(one).toContain(`A ${OPUS} (vendor anthropic)`);
+		expect(one).not.toContain(CODEX);
+	});
+
 	it("flags a workflow-called skill owned by another source, and ignores a foreign standalone skill", async () => {
 		const foreign = path.join(tempDirectory(), "pstack-tdd", "SKILL.md");
 		const stolen = await createWorld({ skillPaths: { "pstack-tdd": foreign } }).doctor();

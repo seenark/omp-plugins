@@ -75,4 +75,4 @@ Spawn one `pstack-judge` agent as the lead reviewer, a pragmatic senior engineer
 [Where models agreed and diverged, and what that pattern tells us.]
 
 ### Notes
-[Every note from the merge, word for word: `diversity reduced: single vendor` when every reviewer is one vendor, seats without a verdict, fallbacks, seats that ran one model.]
+[Every note from the merge, word for word: seats without a verdict, fallbacks, seats that ran one model, and `diversity reduced: single vendor` when every reviewer is one vendor. Write nothing for a note the merge did not return, and never state that one does not apply.]

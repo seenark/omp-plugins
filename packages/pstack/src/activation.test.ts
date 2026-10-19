@@ -231,7 +231,7 @@ describe("seat roster and the panel skills", () => {
 		const content = h.sentMessages[0]!.message.content!;
 		for (const model of ["anthropic/a", "openai/b", "google/c"]) expect(content).toContain(model);
 		for (const vendor of ["anthropic", "openai", "google"]) expect(content).toContain(`vendor ${vendor}`);
-		expect(content).not.toContain(SINGLE_VENDOR_WARNING);
+		expect(content).not.toMatch(/single[- ]vendor|one vendor/i);
 	});
 
 	it("tells the session when every configured seat is one vendor", async () => {

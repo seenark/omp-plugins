@@ -47,7 +47,7 @@ A pair the judge failed on stays two findings: a duplicate left in costs a line,
 
 One verdict for the whole panel, never one per seat. It names every seat's model (`reviewers` has the lines) and carries every entry of `notes` word for word:
 
-- `diversity reduced: single vendor` when every seat that returned a verdict is one vendor. A one-seat panel is single-vendor. The note stands beside the verdict, so that the reader weighs agreement as one lineage's opinion.
+- `diversity reduced: single vendor` when every seat that returned a verdict is one vendor. A one-seat panel is single-vendor. The note stands beside the verdict, so that the reader weighs agreement as one lineage's opinion. A panel of two or more vendors gets no vendor note at all: do not write that it is not single-vendor, and do not mention the phrase.
 - A seat that returned no verdict is a gap, not an approval.
 - A seat that fell back names the model it ran on.
 - Seats that ran the same model count as one opinion.

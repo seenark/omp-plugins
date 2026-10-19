@@ -4,6 +4,7 @@ import {
 	readCodesookOmpConfig,
 } from "@codesook/omp-shared-display/config-store";
 import type { SuspendableInstructionMode } from "@codesook/omp-shared-display/instruction-mode";
+import { DEFAULT_THINKING, THINKING_LEVELS, type ThinkingLevel } from "./thinking.ts";
 import * as os from "node:os";
 import * as path from "node:path";
 
@@ -24,6 +25,8 @@ export interface PstackBehavior {
 	suspendPonytail: boolean;
 	maxPanelSize: number;
 	guardStrictness: GuardStrictness;
+	/** Thinking level setup and presets write on every pstack role; the judge and lean seats sit a step off it. */
+	defaultThinking: ThinkingLevel;
 }
 
 export const DEFAULT_PSTACK_BEHAVIOR: Readonly<PstackBehavior> = {
@@ -31,6 +34,7 @@ export const DEFAULT_PSTACK_BEHAVIOR: Readonly<PstackBehavior> = {
 	suspendPonytail: true,
 	maxPanelSize: MAX_PANEL_SIZE,
 	guardStrictness: "block-and-warn",
+	defaultThinking: DEFAULT_THINKING,
 };
 
 const SUSPEND_SETTING = { caveman: "suspendCaveman", ponytail: "suspendPonytail" } as const satisfies Record<SuspendableInstructionMode, keyof PstackBehavior>;
@@ -40,6 +44,10 @@ export const suspendsMode = (behavior: PstackBehavior, mode: SuspendableInstruct
 
 function isStrictness(value: unknown): value is GuardStrictness {
 	return GUARD_STRICTNESS_LEVELS.includes(value as GuardStrictness);
+}
+
+function isThinking(value: unknown): value is ThinkingLevel {
+	return THINKING_LEVELS.includes(value as ThinkingLevel);
 }
 
 function isPanelSize(value: unknown): value is number {
@@ -55,6 +63,7 @@ export function normalizePstackBehavior(raw: unknown): PstackBehavior {
 		suspendPonytail: typeof source.suspendPonytail === "boolean" ? source.suspendPonytail : defaults.suspendPonytail,
 		maxPanelSize: isPanelSize(source.maxPanelSize) ? source.maxPanelSize : defaults.maxPanelSize,
 		guardStrictness: isStrictness(source.guardStrictness) ? source.guardStrictness : defaults.guardStrictness,
+		defaultThinking: isThinking(source.defaultThinking) ? source.defaultThinking : defaults.defaultThinking,
 	};
 }
 

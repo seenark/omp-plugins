@@ -362,14 +362,15 @@ test("pstack settings default, persist beside unknown keys, and block invalid va
 	const file = path.join(temporary(), "global.json");
 	const root = { version: 1, display: {}, behavior: { pstack: { suspendCaveman: false, maxPanelSize: 9, custom: 1 }, ponytail: { defaultMode: "lite" } } };
 	writeFileSync(file, JSON.stringify(root));
-	expect(draftFromRootConfig({ version: 1, display: {}, behavior: {} }).behavior.pstack).toEqual({ suspendCaveman: true, suspendPonytail: true, maxPanelSize: 5, guardStrictness: "block-and-warn" });
+	expect(draftFromRootConfig({ version: 1, display: {}, behavior: {} }).behavior.pstack).toEqual({ suspendCaveman: true, suspendPonytail: true, maxPanelSize: 5, guardStrictness: "block-and-warn", defaultThinking: "medium" });
 	const draft = draftFromRootConfig(root);
-	expect(draft.behavior.pstack).toEqual({ suspendCaveman: false, suspendPonytail: true, maxPanelSize: 5, guardStrictness: "block-and-warn" });
+	expect(draft.behavior.pstack).toEqual({ suspendCaveman: false, suspendPonytail: true, maxPanelSize: 5, guardStrictness: "block-and-warn", defaultThinking: "medium" });
 	draft.behavior.pstack.maxPanelSize = 2;
 	draft.behavior.pstack.guardStrictness = "warn-only";
+	draft.behavior.pstack.defaultThinking = "high";
 	persistDraftToRoot(draft, file);
 	const saved = JSON.parse(readFileSync(file, "utf8"));
-	expect(saved.behavior.pstack).toEqual({ suspendCaveman: false, suspendPonytail: true, maxPanelSize: 2, guardStrictness: "warn-only", custom: 1 });
+	expect(saved.behavior.pstack).toEqual({ suspendCaveman: false, suspendPonytail: true, maxPanelSize: 2, guardStrictness: "warn-only", defaultThinking: "high", custom: 1 });
 	expect(saved.behavior.ponytail).toMatchObject({ defaultMode: "lite" });
 
 	const before = readFileSync(file, "utf8");
@@ -380,7 +381,14 @@ test("pstack settings default, persist beside unknown keys, and block invalid va
 	draft.behavior.pstack.maxPanelSize = 3;
 	draft.behavior.pstack.guardStrictness = "strict" as never;
 	expect(() => persistDraftToRoot(draft, file)).toThrow("pstack guard strictness");
+	draft.behavior.pstack.guardStrictness = "warn-only";
+	for (const level of ["minimal", "max", "", "HIGH"]) {
+		draft.behavior.pstack.defaultThinking = level as never;
+		expect(() => persistDraftToRoot(draft, file)).toThrow("pstack default thinking");
+	}
 	expect(readFileSync(file, "utf8")).toBe(before);
+	for (const level of ["low", "medium", "high", "xhigh"] as const) expect(draftFromRootConfig({ version: 1, display: {}, behavior: { pstack: { defaultThinking: level } } }).behavior.pstack.defaultThinking).toBe(level);
+	expect(draftFromRootConfig({ version: 1, display: {}, behavior: { pstack: { defaultThinking: "max" } } }).behavior.pstack.defaultThinking).toBe("medium");
 });
 
 test("pstack presence is only the standalone package, enabled or not", () => {
