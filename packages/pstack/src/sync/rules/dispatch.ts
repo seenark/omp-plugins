@@ -485,7 +485,7 @@ Each critic is read-only and returns a structured verdict with findings. Report 
 		reason: "pstack installs as an OMP package, not a Cursor plugin.",
 		files: "skills/poteto-help/SKILL.md",
 		pattern: "1. Install with `/add-plugin pstack` in chat, or from Customize in the sidebar.",
-		replacement: "1. Install with `omp plugin install @codesook/omp-pstack`.",
+		replacement: "1. Install with `omp plugin install github:seenark/omp-pstack`.",
 	},
 	{
 		id: "dispatch/help-setup-step",

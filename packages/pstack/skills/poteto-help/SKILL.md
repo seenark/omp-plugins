@@ -34,7 +34,7 @@ When no `pstack-*` model roles are set and it matters, ask whether the user want
 
 ## Get set up
 
-1. Install with `omp plugin install @codesook/omp-pstack`.
+1. Install with `omp plugin install github:seenark/omp-pstack`.
 2. Run [`/pstack setup`](../setup-pstack/SKILL.md). It offers presets, then a menu per role, probes each model it picks, and writes only the `pstack-*` model roles. The next subagent you spawn uses them.
 3. Start a real task with `/skill:poteto-mode`, a goal, and a check that can pass or fail.
 

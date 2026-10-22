@@ -1,6 +1,6 @@
 {
 	"name": "@codesook/omp-pstack",
-	"version": "1.1.0",
+	"version": "1.1.1",
 	"type": "module",
 	"description": "pstack workflows (poteto-mode, playbooks, principles) for oh-my-pi",
 	"license": "MIT",
