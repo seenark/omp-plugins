@@ -38,7 +38,8 @@ function fixture(rtkVersion: string | null = "rtk 0.51.0") {
 				if (rtkVersion === null) throw new Error("ENOENT");
 				return { code: 0, stdout: rtkVersion, stderr: "", killed: false };
 			}
-			return { code: 0, stdout: args[1] === "git status" ? "rtk git status\n" : "", stderr: "", killed: false };
+			const marker = /^(?:export OMP_PLUGINS_SESSION='[^']*'; )?/.exec(args[1]!)![0];
+			return { code: 0, stdout: args[1]!.slice(marker.length).endsWith("git status") ? `${marker}rtk git status\n` : "", stderr: "", killed: false };
 		},
 	} as unknown as ExtensionAPI;
 	const context = { hasUI: false, sessionManager: { getSessionId: () => "s1" }, ui: { notify: () => {} } } as unknown as ExtensionContext;
@@ -87,6 +88,19 @@ test("commands that already run rtk keep their text and gain the session databas
 	await fire("tool_call", call);
 	expect(call.input.command).toEndWith("; rtk recall --list");
 	expect(call.input.command).toStartWith("export RTK_DB_PATH=");
+});
+
+test("a session marker in front of the command does not change which commands rtk rewrites", async () => {
+	const { sessionsRoot, fire, startSession } = fixture();
+	await startSession();
+	const dir = path.join(sessionsRoot, "s1");
+	const marker = "export OMP_PLUGINS_SESSION='s1'; ";
+	const rewritten = { type: "tool_call", toolName: "bash", toolCallId: "c1", input: { command: `${marker}git status` } };
+	await fire("tool_call", rewritten);
+	expect(rewritten.input.command).toBe(`export RTK_DB_PATH='${dir}/history.db'; export RTK_RECALL_DB='${dir}/recall.db'; ${marker}rtk git status`);
+	const disabled = { type: "tool_call", toolName: "bash", toolCallId: "c2", input: { command: `${marker}RTK_DISABLED=1 git status` } };
+	await fire("tool_call", disabled);
+	expect(disabled.input.command).toBe(`${marker}RTK_DISABLED=1 git status`);
 });
 
 test("missing rtk publishes the missing state and leaves commands and prompt alone", async () => {

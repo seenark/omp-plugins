@@ -1,0 +1,28 @@
+{
+	"name": "@codesook/omp-process-monitor",
+	"version": "1.0.0",
+	"type": "module",
+	"description": "/procs dashboard for processes and ports left running by oh-my-pi Agent Sessions",
+	"license": "MIT",
+	"files": ["src", "README.md"],
+	"scripts": {
+		"check:types": "tsc -p tsconfig.json --noEmit",
+		"test": "bun test",
+		"pack:check": "bun ../../scripts/check-package-files.ts"
+	},
+	"exports": { ".": "./src/index.ts" },
+	"dependencies": { "@codesook/omp-shared-display": "^1.4.0" },
+	"peerDependencies": {
+		"@oh-my-pi/pi-coding-agent": ">=18.3.1",
+		"@oh-my-pi/pi-tui": ">=18.3.1"
+	},
+	"devDependencies": {
+		"@codesook/omp-shared-display": "workspace:*",
+		"@oh-my-pi/pi-coding-agent": "18.3.1",
+		"@oh-my-pi/pi-tui": "18.3.1",
+		"bun-types": "latest",
+		"typescript": "latest"
+	},
+	"omp": { "extensions": ["./src/index.ts"] },
+	"publishConfig": { "access": "public" }
+}

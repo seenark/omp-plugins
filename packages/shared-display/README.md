@@ -1,6 +1,6 @@
 # @codesook/omp-shared-display
 
-Opt-in OMP extension that owns `codesook-shared-display` widget and versioned EventBus snapshot protocol for Ponytail, Caveman, Headroom, RTK, CodeGraph, Beads, and pstack producers. Default source order preserves that sequence. Beads source support requires version 1.2.0 or newer; pstack source support requires 1.3.0 or newer.
+Opt-in OMP extension that owns `codesook-shared-display` widget and versioned EventBus snapshot protocol for Ponytail, Caveman, Headroom, RTK, CodeGraph, Beads, pstack, and process-monitor producers. Default source order preserves that sequence. Beads source support requires version 1.2.0 or newer; pstack source support requires 1.3.0 or newer; process-monitor source support requires 1.4.0 or newer.
 
 Side-effect-free client and root config helpers:
 
@@ -17,7 +17,7 @@ Shared Display presentation persists in `display.sharedDisplay` inside:
 
 Legacy `~/.config/codesook-omp/shared-display/config.json` migrates once when root section is missing. `/shared-display` command is removed; root `/omp-plugins` settings owns persisted presentation. Producers remain safe when host/EventBus is absent.
 
-Effective source order appends every known source (`ponytail`, `caveman`, `headroom`, `rtk`, `codegraph`, `beads`, `pstack`) that a persisted order omits, including orders saved before a source existed. Sources present keep their configured relative order; unknown names and duplicates are dropped. Each integration's visibility controls whether its segment appears; removing it from source order does not hide it. The side-effect-free client never loads the display host or another integration.
+Effective source order appends every known source (`ponytail`, `caveman`, `headroom`, `rtk`, `codegraph`, `beads`, `pstack`, `process-monitor`) that a persisted order omits, including orders saved before a source existed. Sources present keep their configured relative order; unknown names and duplicates are dropped. Each integration's visibility controls whether its segment appears; removing it from source order does not hide it. The side-effect-free client never loads the display host or another integration.
 
 ## Style
 

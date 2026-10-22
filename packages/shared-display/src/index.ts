@@ -62,7 +62,7 @@ export {
 
 const WIDGET_KEY = "codesook-shared-display";
 const DEFAULT_HORIZONTAL_SEPARATOR = "  ";
-const SOURCE_ORDER: readonly DisplaySource[] = ["ponytail", "caveman", "headroom", "rtk", "codegraph", "beads", "pstack"];
+const SOURCE_ORDER: readonly DisplaySource[] = ["ponytail", "caveman", "headroom", "rtk", "codegraph", "beads", "pstack", "process-monitor"];
 
 export type SharedDisplayLayout = "horizontal" | "vertical";
 export type SharedDisplayStyle = "plain" | "powerline";

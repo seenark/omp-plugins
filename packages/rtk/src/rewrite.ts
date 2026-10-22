@@ -26,8 +26,12 @@ const GUARDS: readonly (readonly [reason: string, skips: (command: string) => bo
 	["long-lived", c => new RegExp(`${SEGMENT}(?:ssh|top|htop|vim|nvim)(?=\\s|$)|\\b(?:bun|npm|pnpm|yarn)\\s+(?:run\\s+)?dev\\b|--watch\\b`).test(c)],
 ];
 
+/** process-monitor (ADR-0010) may put this marker in front of a command before RTK sees it; the guards judge the command behind it. */
+const SESSION_MARKER = /^export OMP_PLUGINS_SESSION='[^']*'; /;
+
 export function guardReason(command: string): string | undefined {
-	return GUARDS.find(([, skips]) => skips(command))?.[0];
+	const body = command.replace(SESSION_MARKER, "");
+	return GUARDS.find(([, skips]) => skips(body))?.[0];
 }
 
 export type RewriteOutcome =

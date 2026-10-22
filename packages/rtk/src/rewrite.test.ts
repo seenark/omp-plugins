@@ -34,6 +34,10 @@ test("guards skip commands whose output rtk must not filter", () => {
 		["htop", "long-lived"],
 		["vim file", "long-lived"],
 		["ls -v", undefined],
+		["export OMP_PLUGINS_SESSION='s1'; git status", undefined],
+		["export OMP_PLUGINS_SESSION='s1'; RTK_DISABLED=1 git status", "rtk-disabled"],
+		["export OMP_PLUGINS_SESSION='s1'; FOO=1 cargo test", "env-assignment"],
+		["export OMP_PLUGINS_SESSION='s1'; bun run dev", "long-lived"],
 	];
 	for (const [command, reason] of table) expect([command, guardReason(command)]).toEqual([command, reason]);
 });
