@@ -110,7 +110,7 @@ const LEGACY_PROMPT_BORDER_CONFIG_PATH = path.join(
 	"config.json",
 );
 
-const PROJECT_FEATURES = ["shared-display", "ponytail", "caveman", "headroom", "rtk", "prompt-border-style", "codegraph", "beads", "pstack", "process-monitor"] as const;
+const PROJECT_FEATURES = ["shared-display", "ponytail", "caveman", "headroom", "rtk", "prompt-border-style", "codegraph", "beads", "skill-stats", "pstack", "process-monitor"] as const;
 type ProjectFeature = (typeof PROJECT_FEATURES)[number];
 
 const DEFAULT_PROJECT_FEATURES: Record<ProjectFeature, boolean> = {
@@ -122,6 +122,7 @@ const DEFAULT_PROJECT_FEATURES: Record<ProjectFeature, boolean> = {
 	"prompt-border-style": true,
 	codegraph: false,
 	beads: false,
+	"skill-stats": false,
 	pstack: false,
 	"process-monitor": false,
 };
@@ -135,6 +136,7 @@ const STANDALONE_FEATURE_PACKAGES: Record<ProjectFeature, string> = {
 	"prompt-border-style": "@codesook/omp-prompt-border-style",
 	codegraph: "@codesook/omp-codegraph",
 	beads: "@codesook/omp-beads",
+	"skill-stats": "@codesook/omp-skill-stats",
 	pstack: "@codesook/omp-pstack",
 	"process-monitor": "@codesook/omp-process-monitor",
 };

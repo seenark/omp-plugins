@@ -94,6 +94,13 @@
         "extensions": [
           "./packages/process-monitor/src/index.ts"
         ]
+      },
+      "skill-stats": {
+        "description": "Records every Skill Use and shows /skill-stats dashboards.",
+        "default": false,
+        "extensions": [
+          "./packages/skill-stats/src/index.ts"
+        ]
       }
     }
   },

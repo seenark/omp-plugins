@@ -1,3 +1,4 @@
+import * as path from "node:path";
 import type {
 	BeforeAgentStartEvent,
 	BeforeAgentStartEventResult,
@@ -7,6 +8,7 @@ import type {
 import { CODESOOK_OMP_CONFIG_CHANGED, isRecord } from "@codesook/omp-shared-display/config-store";
 import { connectSharedDisplay } from "@codesook/omp-shared-display/client";
 import { onInstructionModeSuspension } from "@codesook/omp-shared-display/instruction-mode";
+import { SKILL_USE_EVENT, type SkillUseEvent } from "@codesook/omp-shared-display/skill-use";
 import {
 	envDefaultMode,
 	loadPonytailConfig,
@@ -285,6 +287,8 @@ export default function ponytailExtension(pi: ExtensionAPI, options: PonytailExt
 					notify(pi, ctx, "error", `Unable to read vendored ${name} skill: ${String(error)}`);
 					return;
 				}
+				const use: SkillUseEvent = { name, path: path.join(skillDirectory, name, "SKILL.md"), source: "user" };
+				pi.events.emit(SKILL_USE_EVENT, use);
 				const message = buildHelperSkillPrompt(name, skill, args);
 				if (ctx.isIdle()) {
 					pi.sendUserMessage(message);

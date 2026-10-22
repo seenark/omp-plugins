@@ -292,6 +292,13 @@ test("Beads presence follows optional standalone and umbrella lifecycle state in
 	expect(parsePluginList({ npm: [{ name: "omp-plugins" }] }).projectFeatures.beads).toBe(false);
 });
 
+test("skill-stats presence follows its standalone package and the umbrella feature list", () => {
+	expect(parsePluginList({ npm: [{ name: "@codesook/omp-skill-stats", enabled: true }] }).projectFeatures["skill-stats"]).toBe(true);
+	expect(parsePluginList({ npm: [{ name: "@codesook/omp-skill-stats", enabled: false }] }).projectFeatures["skill-stats"]).toBe(false);
+	expect(parsePluginList({ npm: [{ name: "omp-plugins", enabledFeatures: ["skill-stats"] }] }).projectFeatures["skill-stats"]).toBe(true);
+	expect(parsePluginList({ npm: [{ name: "omp-plugins" }] }).projectFeatures["skill-stats"]).toBe(false);
+});
+
 test("Apply requires a visible confirmation in the settings overlay; Esc retains edits and only explicit Enter saves", async () => {
 	const project = temporary();
 	const global = path.join(project, "global.json");

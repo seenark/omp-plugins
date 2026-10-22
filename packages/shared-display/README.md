@@ -48,6 +48,10 @@ Producers needing a native footer fallback should subscribe to availability chan
 
 `@codesook/omp-shared-display/instruction-mode` holds the versioned channel (`INSTRUCTION_MODE_SUSPENSION_CHANNEL`, `codesook/instruction-mode-suspension/v1`) and payload (`InstructionModeSuspension`) pstack uses to switch Caveman and Ponytail off for one Agent Session. `suspendInstructionModes(events, modes)` emits it; `onInstructionModeSuspension(events, mode, handler)` subscribes for one mode and ignores other protocol versions.
 
+## Skill Use event
+
+`@codesook/omp-shared-display/skill-use` holds the versioned channel (`SKILL_USE_EVENT`, `codesook/skill-use/v1`) and payload (`SkillUseEvent`: `{ name, path, source: "user" }`) a feature emits when it sends a skill to the model as plain text, so OMP's own skill-prompt message never exists. `parseSkillUseEvent(data)` validates a payload. The `skill-stats` feature records each valid event as a user Skill Use; with it not loaded, nothing listens. Requires version 1.4.0 or newer.
+
 ## Frame assets
 
 All plugin glyph files use shared `FrameSequence` text format. Optional first nonblank `fps=<positive number>` sets animation rate; blank-line-separated blocks form frames, and rows within each block stay together. One frame or missing/invalid FPS displays first frame statically. Context Rail also accepts `size=<width>x<height>` as layout metadata before frame rows.
