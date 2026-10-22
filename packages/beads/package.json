@@ -1,6 +1,6 @@
 {
 	"name": "@codesook/omp-beads",
-	"version": "1.0.0",
+	"version": "1.0.1",
 	"type": "module",
 	"description": "On-demand Beads workflow and project integration status for oh-my-pi",
 	"license": "MIT",

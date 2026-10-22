@@ -36,7 +36,7 @@ Ask one multi-select question. Describe each choice in one line and list its pre
 | `rtk` | Rewrites shell commands to filter output | `rtk` CLI >= 0.51.0 |
 | `codegraph` | Code graph exploration guidance | `codegraph` CLI plus an MCP server entry |
 | `beads` | Issue-tracker guidance | `bd` CLI |
-| `pstack` | pstack workflows (poteto-mode, playbooks, review panel on `pstack-*` model roles) | Its own plugin, installed from the `release/pstack` branch (`github:seenark/omp-plugins#release/pstack`), not a root feature; model roles chosen with `/pstack setup` |
+| `pstack` | pstack workflows (poteto-mode, playbooks, review panel on `pstack-*` model roles) | Its own plugin, installed from npm (`@codesook/omp-pstack`), not a root feature; model roles chosen with `/pstack setup` |
 
 Recommend `shared-display` whenever the user picks any other display-producing feature (`headroom`, `ponytail`, `caveman`, `rtk`, `codegraph`, `beads`, `pstack`): without it their segments fall back to separate native status entries.
 
@@ -50,7 +50,7 @@ For every selected feature, check `omp plugin list` for its third-party counterp
 | `rtk` | `pi-rtk-optimizer` | Both rewrite `bash` commands |
 | `caveman` | any other Caveman skill/plugin that injects Caveman rules | Both add terse-output rules |
 | `headroom` | any other Headroom or compression plugin/extension | Both compress the same tool results |
-| `pstack` | `pstack@omp-pstack` (the community marketplace port of pstack) | pstack from `release/pstack` replaces it: both ship `/poteto-mode` and the `pstack-*` agents, so the two copies would race for the same skills and agent names |
+| `pstack` | `pstack@omp-pstack` (the community marketplace port of pstack) | `@codesook/omp-pstack` replaces it: both ship `/poteto-mode` and the `pstack-*` agents, so the two copies would race for the same skills and agent names |
 
 If one is present, ask the user: **remove it, or keep it?** Show the tradeoff, then recommend removal.
 
@@ -161,7 +161,7 @@ readlink ~/.omp/plugins/node_modules/omp-plugins   # prints the checkout path
 
 Keep selectors quoted; `[` and `]` are shell-special. Root install always includes the unified settings command.
 
-`pstack` is not an `omp-plugins` feature: it installs as its own plugin from the GitHub release branch, `omp plugin install github:seenark/omp-plugins#release/pstack` (pin with `#pstack-v<version>`; developers: `omp plugin link ./packages/pstack`). Listing it as a feature as well would load its extension twice. Install it only after the user confirms.
+`pstack` is not an `omp-plugins` feature: it installs as its own plugin from npm, `omp plugin install @codesook/omp-pstack` (pin with `@<version>`; developers: `omp plugin link ./packages/pstack`). Never install it from `github:seenark/omp-plugins#<ref>`: OMP keeps one plugin per git repository, so that install evicts the root `omp-plugins` plugin. If `omp plugin list` shows pstack installed from that repository, uninstall it and reinstall the root before installing from npm. Listing it as a feature as well would load its extension twice. Install it only after the user confirms.
 
 ## Phase 7: configure and verify
 

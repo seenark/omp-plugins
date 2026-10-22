@@ -11,7 +11,7 @@
 - Verify with `bun run verify` (scripts in root `package.json`).
 - `main` is protected: changes land through a pull request after the `verify` CI check passes; direct pushes to `main` are rejected. Work on a branch, push it, open the PR with `gh pr create`, and merge only after the check is green.
 - Git hooks come from `lefthook.yml` (install once per clone with `bun run hooks:install`). The pre-push hook runs the Beads hook and then `bun run verify`; never bypass it with `--no-verify`.
-- Releasing pstack: bump `packages/pstack/package.json` `version`; after merge the Release workflow publishes `release/pstack` and the `pstack-v<version>` tag.
+- Releasing pstack: bump `packages/pstack/package.json` `version`; after merge the Release workflow publishes `@codesook/omp-pstack` to npm.
 
 ## Pointers
 

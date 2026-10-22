@@ -21,10 +21,10 @@ Quota and subscription usage are not included.
 
 Headroom does not install, start, or stop proxy processes. Run Docker/Cloudflare or another external deployment separately. `/headroom health` checks reachability.
 
-Published package:
+Root feature (on by default):
 
 ```sh
-omp plugin install @codesook/omp-headroom
+omp plugin install 'github:seenark/omp-plugins[headroom]'
 ```
 
 Local checkout:

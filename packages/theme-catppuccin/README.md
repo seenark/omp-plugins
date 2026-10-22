@@ -6,11 +6,12 @@ This package installs four Catppuccin theme JSON files into OMP's custom theme d
 
 ## Install themes
 
+From a checkout of this repository:
+
 ```sh
-bunx -y @codesook/omp-theme-catppuccin
+bun packages/theme-catppuccin/bin/install.js
 ```
 
-If you are working from the monorepo checkout, run `bun packages/theme-catppuccin/bin/install.js` instead of `bunx`; running the scoped `bunx` command from the package's own source directory can resolve against the local package context and fail with `sh: omp-theme-catppuccin: command not found`.
 ## Select themes in OMP
 
 ```sh
@@ -39,16 +40,6 @@ tmp="$(mktemp -d)"
 PI_CODING_AGENT_DIR="$tmp/agent" bun packages/theme-catppuccin/bin/install.js
 rm -rf "$tmp"
 ```
-
-## Publish to npm
-
-From the monorepo root:
-
-```sh
-bun run publish:theme-catppuccin
-```
-
-Publishing requires npm login and npm 2FA if your account is configured for it.
 
 ## Uninstall installed theme files
 

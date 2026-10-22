@@ -2,7 +2,7 @@ import { afterAll, beforeAll, describe, expect, it } from "bun:test";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { PACKAGE_ROOT, TAG_PREFIX, buildRelease, decideRelease } from "./build.ts";
+import { PACKAGE_ROOT, buildRelease, decideRelease } from "./build.ts";
 
 function files(root: string, dir = ""): string[] {
 	return fs.readdirSync(path.join(root, dir), { withFileTypes: true }).flatMap(entry => {
@@ -12,33 +12,24 @@ function files(root: string, dir = ""): string[] {
 }
 
 describe("decideRelease", () => {
-	it("releases a version that has no tag yet", () => {
-		expect(decideRelease("1.2.0", ["pstack-v1.0.0", "pstack-v1.1.0"])).toEqual({
+	it("releases a version that is not on npm yet", () => {
+		expect(decideRelease("1.2.0", ["1.0.0", "1.1.0"])).toEqual({
 			release: true,
 			version: "1.2.0",
-			tag: "pstack-v1.2.0",
-			reason: "pstack-v1.2.0 does not exist yet",
+			reason: "1.2.0 is not on npm yet",
 		});
 	});
 
-	it("skips a version whose tag exists, so a re-run does nothing", () => {
-		const decision = decideRelease("1.1.0", ["pstack-v1.0.0", "pstack-v1.1.0"]);
-		expect(decision.release).toBe(false);
-		expect(decision.tag).toBe("pstack-v1.1.0");
+	it("skips a version already on npm, so a re-run does nothing", () => {
+		expect(decideRelease("1.1.0", ["1.0.0", "1.1.0"]).release).toBe(false);
 	});
 
-	it("matches the whole tag, not a prefix of it", () => {
-		expect(decideRelease("1.1.0", ["pstack-v1.1.0-rc.1", "pstack-v1.1.01"]).release).toBe(true);
-		expect(decideRelease("1.1.0", [`v1.1.0`, "1.1.0"]).release).toBe(true);
+	it("matches the whole version, not a prefix of it", () => {
+		expect(decideRelease("1.1.0", ["1.1.0-rc.1", "1.1.01", "v1.1.0"]).release).toBe(true);
 	});
 
 	it("rejects a version that is not semver", () => {
 		for (const bad of ["", "1.0", "v1.0.0", "1.0.0 ", "latest"]) expect(() => decideRelease(bad, [])).toThrow();
-	});
-
-	it("reads the version of the package in the repo", () => {
-		const { version } = JSON.parse(fs.readFileSync(path.join(PACKAGE_ROOT, "package.json"), "utf8"));
-		expect(decideRelease(version, []).tag).toBe(`${TAG_PREFIX}${version}`);
 	});
 });
 
@@ -90,6 +81,8 @@ describe("release build", () => {
 		expect(manifest).not.toHaveProperty("devDependencies");
 		expect(manifest.version).toBe(source.version);
 		expect(manifest.peerDependencies).toEqual(source.peerDependencies);
+		// npm provenance rejects a publish whose repository does not match the source repo.
+		expect(manifest.repository).toEqual(source.repository);
 		expect(manifest.omp.extensions).toEqual(["./src/index.js"]);
 		for (const extension of manifest.omp.extensions) expect(fs.existsSync(path.join(first, extension))).toBe(true);
 	});

@@ -15,7 +15,7 @@
     },
     "packages/beads": {
       "name": "@codesook/omp-beads",
-      "version": "1.0.0",
+      "version": "1.0.1",
       "dependencies": {
         "@codesook/omp-shared-display": "^1.2.0",
       },
@@ -69,7 +69,7 @@
     },
     "packages/codesook-omp-plugin": {
       "name": "@codesook/omp-plugin-settings",
-      "version": "1.2.0",
+      "version": "1.2.1",
       "dependencies": {
         "@codesook/omp-caveman": "^1.0.0",
         "@codesook/omp-headroom": "^2.0.0",
@@ -97,7 +97,7 @@
     },
     "packages/headroom": {
       "name": "@codesook/omp-headroom",
-      "version": "2.0.0",
+      "version": "2.0.1",
       "dependencies": {
         "@codesook/omp-shared-display": "^1.1.0",
       },
@@ -135,7 +135,7 @@
     },
     "packages/prompt-border-style": {
       "name": "@codesook/omp-prompt-border-style",
-      "version": "2.0.0",
+      "version": "2.0.1",
       "dependencies": {
         "@codesook/omp-shared-display": "^1.0.0",
       },
@@ -153,7 +153,7 @@
     },
     "packages/pstack": {
       "name": "@codesook/omp-pstack",
-      "version": "1.0.0",
+      "version": "1.0.1",
       "dependencies": {
         "@codesook/omp-shared-display": "^1.3.0",
       },
@@ -172,7 +172,7 @@
     },
     "packages/rtk": {
       "name": "@codesook/omp-rtk",
-      "version": "1.0.0",
+      "version": "1.0.1",
       "dependencies": {
         "@codesook/omp-shared-display": "^1.2.0",
       },
@@ -204,7 +204,7 @@
     },
     "packages/theme-catppuccin": {
       "name": "@codesook/omp-theme-catppuccin",
-      "version": "1.0.1",
+      "version": "1.0.2",
       "bin": {
         "omp-theme-catppuccin": "./bin/install.js",
       },

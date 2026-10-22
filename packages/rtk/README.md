@@ -68,7 +68,5 @@ Template placeholders: `{glyph}`, `{percent}`, `{tokensSaved}`, `{tokensInput}`,
 ## Install
 
 ```sh
-omp plugin install @codesook/omp-rtk
+omp plugin install 'github:seenark/omp-plugins[rtk]'
 ```
-
-or enable the `rtk` feature of `omp-plugins`.
