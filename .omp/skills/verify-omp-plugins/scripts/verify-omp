@@ -1,0 +1,105 @@
+#!/usr/bin/env bash
+# Launch, inspect, and tear down a disposable omp TUI that loads this checkout's plugins.
+#
+#   verify-omp launch  RUN_ID   scratch HOME, link checkout + pstack, enable all features, start omp in a PTY, wait until usable
+#   verify-omp restart RUN_ID   stop omp and start a new omp session on the same scratch HOME (persisted config survives)
+#   verify-omp doctor  RUN_ID   read-only: is this instance ours, alive, on this checkout, and isolated?
+#   verify-omp env     RUN_ID   print shell exports (PTY, SCRATCH_HOME, PROJECT, EVID, OMP_PTY); use: eval "$(verify-omp env RUN_ID)"
+#   verify-omp cleanup RUN_ID   stop what launch started, save the transcript into evidence, delete scratch state
+#
+# Layout: /tmp/omp-verify/RUN_ID/{home,project,pty} is scratch; /tmp/omp-verify-evidence/RUN_ID/ is evidence and survives cleanup.
+set -euo pipefail
+
+SCRIPTS="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO="$(cd "$SCRIPTS/../../../.." && pwd)"
+OMP_PTY="$SCRIPTS/omp-pty"
+FEATURES="headroom,prompt-border-style,shared-display,ponytail,caveman,codegraph,beads,rtk"
+
+op="${1:-}"; run_id="${2:-}"
+[[ -n "$op" && -n "$run_id" && "$run_id" =~ ^[A-Za-z0-9_-]+$ ]] || { sed -n '2,10p' "$0" | sed 's/^# \{0,1\}//'; exit 2; }
+RUN="/tmp/omp-verify/$run_id"
+SCRATCH_HOME="$RUN/home"; PROJECT="$RUN/project"; PTY="$RUN/pty"
+EVID="/tmp/omp-verify-evidence/$run_id"
+
+# Every omp call runs with scratch HOME and none of the parent session's agent/XDG overrides.
+# PI_SESSION_FILE/PI_SESSION_ID leak in when this runs inside an omp session; the child must never see the parent's session.
+SCRUB=(env -u PI_CODING_AGENT_DIR -u PI_SESSION_DIR -u PI_SESSION_FILE -u PI_SESSION_ID -u OMP_PROFILE
+	-u XDG_CONFIG_HOME -u XDG_DATA_HOME -u XDG_CACHE_HOME -u XDG_STATE_HOME
+	HOME="$SCRATCH_HOME" TERM=xterm-256color)
+scratch() { "${SCRUB[@]}" "$@"; }
+
+child_env() { /bin/ps -wwE -o command= -p "$(cat "$PTY/child.pid" 2>/dev/null)" 2>/dev/null; }
+
+ours() { # PIDs whose environment carries our scratch HOME (/bin/ps -E shows env of the caller's own processes)
+	/bin/ps -axwwE -o pid=,command= 2>/dev/null | awk -v h=" HOME=$SCRATCH_HOME" 'index($0 " ", h " ") { print $1 }'
+}
+
+start_omp() { # $1: regex the first painted screen must match
+	"$OMP_PTY" start "$PTY" --cols 120 --rows 50 --cwd "$PROJECT" -- "${SCRUB[@]}" omp --no-session >/dev/null
+	"$OMP_PTY" wait "$PTY" "$1" --timeout 60 >/dev/null
+	# Usable means an extension command round-trips, not just that the status line painted.
+	"$OMP_PTY" submit "$PTY" "/ponytail status"
+	"$OMP_PTY" wait "$PTY" 'Ponytail: current \w+ • default \w+' --timeout 15 >/dev/null
+}
+
+case "$op" in
+launch)
+	if [[ -S "$PTY/ctl.sock" ]]; then echo "verify-omp: $run_id already running; run doctor or cleanup" >&2; exit 1; fi
+	command -v omp >/dev/null && command -v uv >/dev/null || { echo "verify-omp: need omp and uv on PATH" >&2; exit 1; }
+	mkdir -p "$SCRATCH_HOME/.omp/agent" "$PROJECT" "$EVID"
+	printf 'setupVersion: 2\n' >"$SCRATCH_HOME/.omp/agent/config.yml" # skips the first-run onboarding wizard
+	git -C "$PROJECT" init -q
+	scratch omp plugin link "$REPO" >/dev/null
+	# --enable replaces the feature set; name all eight or the defaults (headroom, prompt-border-style) drop out.
+	scratch omp plugin features omp-plugins --enable="$FEATURES" >/dev/null
+	scratch omp plugin link "$REPO/packages/pstack" >/dev/null
+	start_omp 'ponytail: .*caveman.*Headroom.*rtk' # every default segment painted
+	{
+		echo "run_id=$run_id"
+		echo "checkout=$REPO"
+		echo "rev=$(git -C "$REPO" rev-parse --short HEAD)$(git -C "$REPO" diff --quiet HEAD 2>/dev/null || echo '+dirty')"
+		echo "omp=$(omp --version)"
+		echo "launched=$(date -u +%FT%TZ)"
+	} >"$EVID/run.txt"
+	echo "ready: $run_id (pty $PTY, evidence $EVID)"
+	;;
+restart)
+	[[ -S "$PTY/ctl.sock" ]] || { echo "verify-omp: $run_id is not running; launch it first" >&2; exit 1; }
+	"$OMP_PTY" stop "$PTY" >/dev/null
+	start_omp 'π >' # persisted modes may hide segments, so only require the editor
+	echo "restarted: $run_id"
+	;;
+doctor)
+	fail=0
+	check() { if eval "$2"; then echo "ok    $1"; else echo "FAIL  $1"; fail=1; fi; }
+	# Bail before any omp call: omp recreates a missing HOME, which would make doctor write.
+	[[ -d "$SCRATCH_HOME" ]] || { echo "FAIL  scratch dir $RUN exists (not launched or already cleaned)"; exit 1; }
+	echo "ok    scratch dir $RUN exists"
+	check "pty server socket" '[[ -S "$PTY/ctl.sock" ]]'
+	check "pty server pid alive" 'kill -0 "$(cat "$PTY/server.pid" 2>/dev/null)" 2>/dev/null'
+	check "omp child alive (pid $(cat "$PTY/child.pid" 2>/dev/null || echo ?))" '"$OMP_PTY" status "$PTY" 2>/dev/null | grep -q -E "\"exited\": ?null"'
+	check "child HOME is scratch" 'child_env | grep -q " HOME=$SCRATCH_HOME "'
+	check "child has no parent session vars" '! child_env | grep -q -E " PI_SESSION_(FILE|ID)="'
+	check "omp-plugins linked to this checkout" '[[ "$(readlink "$SCRATCH_HOME/.omp/plugins/node_modules/omp-plugins")" == "$REPO" ]]'
+	check "pstack linked to this checkout" '[[ "$(readlink "$SCRATCH_HOME/.omp/plugins/node_modules/@codesook/omp-pstack")" == "$REPO/packages/pstack" ]]'
+	check "all 8 features enabled" '[[ "$(scratch omp plugin list | grep -m1 "Features:" | tr -cd , | wc -c | tr -d " ")" == 7 ]]'
+	check "screen past onboarding" '! "$OMP_PTY" screen "$PTY" 2>/dev/null | grep -q "exit setup"'
+	check "prompt editor visible" '"$OMP_PTY" screen "$PTY" 2>/dev/null | grep -q "π >"'
+	echo "info  omp $(omp --version); checkout rev $(git -C "$REPO" rev-parse --short HEAD)"
+	exit "$fail"
+	;;
+env)
+	printf 'export RUN_ID=%q PTY=%q SCRATCH_HOME=%q PROJECT=%q EVID=%q OMP_PTY=%q\n' "$run_id" "$PTY" "$SCRATCH_HOME" "$PROJECT" "$EVID" "$OMP_PTY"
+	;;
+cleanup)
+	mkdir -p "$EVID"
+	[[ -S "$PTY/ctl.sock" ]] && "$OMP_PTY" stop "$PTY" >/dev/null || true
+	[[ -f "$PTY/transcript.raw" ]] && cp -f "$PTY/transcript.raw" "$EVID/transcript.raw"
+	for pid in $(ours); do kill "$pid" 2>/dev/null && echo "killed leftover pid $pid (HOME=$SCRATCH_HOME)"; done
+	rm -rf "$RUN"
+	echo "cleaned $RUN; evidence kept in $EVID"
+	;;
+*)
+	echo "verify-omp: unknown op $op" >&2; exit 2
+	;;
+esac
