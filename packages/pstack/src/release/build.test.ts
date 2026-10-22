@@ -66,7 +66,7 @@ describe("release build", () => {
 	afterAll(() => fs.rmSync(work, { recursive: true, force: true }));
 
 	it("lays out the plugin tree", () => {
-		for (const entry of ["package.json", "README.md", "THIRD-PARTY-NOTICES.txt", "src/index.js", "src/verdict.ts", "skills/bro/SKILL.md", "agents/pstack-judge.md"]) {
+		for (const entry of ["package.json", "README.md", "THIRD-PARTY-NOTICES.txt", "src/index.js", "src/verdict.ts", "skills/bro/SKILL.md", "agents/pstack-judge.md", "assets/cover.jpg"]) {
 			expect(fs.existsSync(path.join(first, entry))).toBe(true);
 		}
 		expect(fs.existsSync(path.join(first, "plugin.json"))).toBe(false);
