@@ -4,6 +4,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { CODESOOK_OMP_CONFIG_CHANGED, isRecord } from "@codesook/omp-shared-display/config-store";
 import { SHARED_DISPLAY_CHANNEL, type FrameSequence } from "@codesook/omp-shared-display/client";
+import { INSTRUCTION_MODE_SUSPENSION_CHANNEL, suspendInstructionModes } from "@codesook/omp-shared-display/instruction-mode";
 import ponytailExtension from "./index.ts";
 import { DEFAULT_SKILL_DIRECTORY, getCodesookOmpConfigPath } from "./types.ts";
 
@@ -417,5 +418,57 @@ describe("Ponytail display", () => {
 		await native.fire("session_shutdown");
 		expect(native.statuses.at(-1)).toBeUndefined();
 		expect(native.snapshots.at(-1)!.sequence).toBeNull();
+	});
+});
+
+describe("Ponytail suspension by pstack", () => {
+	const level = async (harness: ReturnType<typeof createHarness>) => (await harness.prompt())?.[2]?.split("\n")[0];
+
+	it("switches the session to off, never writes the config, and leaves /ponytail working", async () => {
+		const home = makeHome(rootDoc({ ponytail: { defaultMode: "full" } }));
+		const configBefore = fs.readFileSync(getCodesookOmpConfigPath(home), "utf8");
+		const harness = createHarness({ home });
+		await harness.fire("session_start");
+		suspendInstructionModes(harness.events, "pstack", ["ponytail"]);
+		expect(await harness.prompt()).toBeUndefined();
+		expect(harness.snapshots.at(-1)!.sequence).toBeNull();
+		expect(fs.readFileSync(getCodesookOmpConfigPath(home), "utf8")).toBe(configBefore);
+		await harness.command("ponytail", "lite");
+		expect(await level(harness)).toBe("PONYTAIL MODE ACTIVE — level: lite");
+	});
+
+	it("leaves a parallel session on its configured Mode Level", async () => {
+		const home = makeHome();
+		const suspended = createHarness({ home });
+		const parallel = createHarness({ home });
+		await suspended.fire("session_start");
+		await parallel.fire("session_start");
+		suspendInstructionModes(suspended.events, "pstack", ["ponytail"]);
+		expect(await suspended.prompt()).toBeUndefined();
+		expect(await level(parallel)).toBe("PONYTAIL MODE ACTIVE — level: full");
+	});
+
+	it("keeps the suspension when the session is resumed", async () => {
+		const first = createHarness();
+		await first.fire("session_start");
+		suspendInstructionModes(first.events, "pstack", ["ponytail"]);
+		const resumed = createHarness({ entries: [...first.entries] });
+		await resumed.fire("session_start");
+		expect(await resumed.prompt()).toBeUndefined();
+	});
+
+	it("applies a suspension that arrives before the session starts", async () => {
+		const harness = createHarness();
+		suspendInstructionModes(harness.events, "pstack", ["ponytail"]);
+		await harness.fire("session_start");
+		expect(await harness.prompt()).toBeUndefined();
+	});
+
+	it("ignores a suspension that does not name Ponytail or has another protocol version", async () => {
+		const harness = createHarness();
+		await harness.fire("session_start");
+		suspendInstructionModes(harness.events, "pstack", ["caveman"]);
+		harness.events.emit(INSTRUCTION_MODE_SUSPENSION_CHANNEL, { protocol: 2, source: "pstack", modes: ["ponytail"] });
+		expect(await level(harness)).toBe("PONYTAIL MODE ACTIVE — level: full");
 	});
 });

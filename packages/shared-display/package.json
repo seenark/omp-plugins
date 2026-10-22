@@ -1,12 +1,13 @@
 {
   "name": "@codesook/omp-shared-display",
-  "version": "1.2.0",
+  "version": "1.3.0",
   "type": "module",
   "description": "Opt-in shared status display host and EventBus client for oh-my-pi",
   "license": "MIT",
   "files": [
     "src/index.ts",
     "src/client.ts",
+    "src/instruction-mode.ts",
     "src/config-store.ts",
     "src/project-integrations.ts",
     "README.md",
@@ -21,7 +22,8 @@
     ".": "./src/index.ts",
     "./client": "./src/client.ts",
     "./config-store": "./src/config-store.ts",
-    "./project-integrations": "./src/project-integrations.ts"
+    "./project-integrations": "./src/project-integrations.ts",
+    "./instruction-mode": "./src/instruction-mode.ts"
   },
   "peerDependencies": {
     "@oh-my-pi/pi-coding-agent": ">=18.2.8",

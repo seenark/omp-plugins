@@ -110,7 +110,7 @@ const LEGACY_PROMPT_BORDER_CONFIG_PATH = path.join(
 	"config.json",
 );
 
-const PROJECT_FEATURES = ["shared-display", "ponytail", "caveman", "headroom", "rtk", "prompt-border-style", "codegraph", "beads"] as const;
+const PROJECT_FEATURES = ["shared-display", "ponytail", "caveman", "headroom", "rtk", "prompt-border-style", "codegraph", "beads", "pstack"] as const;
 type ProjectFeature = (typeof PROJECT_FEATURES)[number];
 
 const DEFAULT_PROJECT_FEATURES: Record<ProjectFeature, boolean> = {
@@ -122,6 +122,7 @@ const DEFAULT_PROJECT_FEATURES: Record<ProjectFeature, boolean> = {
 	"prompt-border-style": true,
 	codegraph: false,
 	beads: false,
+	pstack: false,
 };
 
 const STANDALONE_FEATURE_PACKAGES: Record<ProjectFeature, string> = {
@@ -133,7 +134,42 @@ const STANDALONE_FEATURE_PACKAGES: Record<ProjectFeature, string> = {
 	"prompt-border-style": "@codesook/omp-prompt-border-style",
 	codegraph: "@codesook/omp-codegraph",
 	beads: "@codesook/omp-beads",
+	pstack: "@codesook/omp-pstack",
 };
+
+/** Features the omp-plugins umbrella does not carry: they exist only as their own package, so a missing one is "not installed" and an umbrella feature list never enables it. */
+const STANDALONE_ONLY_FEATURES: readonly ProjectFeature[] = ["pstack"];
+const isStandaloneOnly = (feature: ProjectFeature): boolean => STANDALONE_ONLY_FEATURES.includes(feature);
+const absentLabel = (feature: ProjectFeature): "not installed" | "not enabled" => (isStandaloneOnly(feature) ? "not installed" : "not enabled");
+const sectionAbsentLabel = (sectionId: string): "not installed" | "not loaded" => {
+	const feature = PROJECT_FEATURES.find(candidate => `section:${candidate}` === sectionId);
+	return feature !== undefined && isStandaloneOnly(feature) ? "not installed" : "not loaded";
+};
+
+const PSTACK_GUARD_STRICTNESS = ["block-and-warn", "warn-only", "off"] as const;
+const PSTACK_PANEL_SIZE = { min: 1, max: 5 } as const;
+const PSTACK_THINKING = ["low", "medium", "high", "xhigh"] as const;
+
+/** `behavior.pstack`. Read raw like CodeGraph and Beads: pstack is optional, so settings never import it. Defaults match pstack's own reader. */
+type PstackDraft = {
+	suspendCaveman: boolean;
+	suspendPonytail: boolean;
+	maxPanelSize: number;
+	guardStrictness: (typeof PSTACK_GUARD_STRICTNESS)[number];
+	defaultThinking: (typeof PSTACK_THINKING)[number];
+};
+
+function pstackDraft(raw: unknown): PstackDraft {
+	const source = asRecord(raw);
+	const size = source.maxPanelSize;
+	return {
+		suspendCaveman: typeof source.suspendCaveman === "boolean" ? source.suspendCaveman : true,
+		suspendPonytail: typeof source.suspendPonytail === "boolean" ? source.suspendPonytail : true,
+		maxPanelSize: Number.isInteger(size) && (size as number) >= PSTACK_PANEL_SIZE.min && (size as number) <= PSTACK_PANEL_SIZE.max ? (size as number) : PSTACK_PANEL_SIZE.max,
+		guardStrictness: (PSTACK_GUARD_STRICTNESS as readonly unknown[]).includes(source.guardStrictness) ? (source.guardStrictness as PstackDraft["guardStrictness"]) : "block-and-warn",
+		defaultThinking: (PSTACK_THINKING as readonly unknown[]).includes(source.defaultThinking) ? (source.defaultThinking as PstackDraft["defaultThinking"]) : "medium",
+	};
+}
 
 const SHARED_LAYOUTS = ["horizontal", "vertical"] as const satisfies readonly SharedDisplayLayout[];
 const SHARED_STYLES = ["plain", "powerline"] as const satisfies readonly SharedDisplayStyle[];
@@ -195,6 +231,7 @@ export type UnifiedSettingsDraft = {
 	behavior: {
 		codegraph: { policy: IntegrationPolicy | undefined };
 		beads: { policy: IntegrationPolicy | undefined };
+		pstack: PstackDraft;
 		caveman: Pick<CavemanConfig, "defaultMode">;
 		ponytail: Pick<PonytailConfig, "defaultMode">;
 		headroom: {
@@ -295,7 +332,7 @@ export function parsePluginList(raw: unknown): PluginPresence {
 	if (!ompEntry || ompEntry.enabled === false) {
 		for (const feature of PROJECT_FEATURES) projectFeatures[feature] = false;
 	} else if (Array.isArray(ompEntry.enabledFeatures)) {
-		for (const feature of PROJECT_FEATURES) projectFeatures[feature] = ompEntry.enabledFeatures.includes(feature);
+		for (const feature of PROJECT_FEATURES.filter(candidate => !isStandaloneOnly(candidate))) projectFeatures[feature] = ompEntry.enabledFeatures.includes(feature);
 	}
 	for (const feature of PROJECT_FEATURES) {
 		const standalone = npm.find(entry => entry.name === STANDALONE_FEATURE_PACKAGES[feature]);
@@ -332,9 +369,11 @@ function featureEnabled(presence: PluginPresence, feature: ProjectFeature): bool
 	return presence.projectFeatures[feature] === true;
 }
 
+/** pstack ships only as its own package, so a missing one is not installed rather than not enabled. */
 function featureWarning(presence: PluginPresence, feature: ProjectFeature): string | undefined {
-	return featureEnabled(presence, feature)
-		? undefined
+	if (featureEnabled(presence, feature)) return undefined;
+	return isStandaloneOnly(feature)
+		? `${feature} is not installed; install ${STANDALONE_FEATURE_PACKAGES[feature]}. Settings apply when the extension loads (usually next start).`
 		: "Feature is not enabled in omp-plugins; setting applies when extension loads (usually next start).";
 }
 
@@ -418,6 +457,7 @@ function createDraft(raw: unknown, legacy: LegacySources = {}): UnifiedSettingsD
 		behavior: {
 			codegraph: { policy: behavior.codegraph !== undefined && !isRecord(behavior.codegraph) ? undefined : codegraphPolicy === undefined ? "auto" : codegraphPolicy === "auto" || codegraphPolicy === "off" ? codegraphPolicy : undefined },
 			beads: { policy: behavior.beads !== undefined && !isRecord(behavior.beads) ? undefined : beadsPolicy === undefined ? "auto" : beadsPolicy === "auto" || beadsPolicy === "off" ? beadsPolicy : undefined },
+			pstack: pstackDraft(behavior.pstack),
 			caveman: { defaultMode: caveman.defaultMode },
 			ponytail: { defaultMode: ponytail.defaultMode },
 			headroom: {
@@ -513,6 +553,7 @@ export function draftToRootSections(draft: UnifiedSettingsDraft): {
 		behavior: {
 			codegraph: { ...draft.behavior.codegraph },
 			beads: { ...draft.behavior.beads },
+			pstack: { ...draft.behavior.pstack },
 			caveman: { defaultMode: draft.behavior.caveman.defaultMode },
 			ponytail: { defaultMode: draft.behavior.ponytail.defaultMode },
 			headroom: { ...draft.behavior.headroom, autoStart: false },
@@ -903,6 +944,11 @@ function validateDraft(draft: UnifiedSettingsDraft): string | undefined {
 		if (draft.behavior[integration].policy !== "auto" && draft.behavior[integration].policy !== "off") return `${label} policy must be auto or off. Repair invalid configuration before Apply.`;
 		if (!["ready", "always", "never"].includes(draft.display[integration].visibility)) return `${label} visibility must be ready, always, or never.`;
 	}
+	const pstack = draft.behavior.pstack;
+	if (typeof pstack.suspendCaveman !== "boolean" || typeof pstack.suspendPonytail !== "boolean") return "pstack suspend settings must be true or false.";
+	if (!Number.isInteger(pstack.maxPanelSize) || pstack.maxPanelSize < PSTACK_PANEL_SIZE.min || pstack.maxPanelSize > PSTACK_PANEL_SIZE.max) return `pstack maximum panel size must be an integer from ${PSTACK_PANEL_SIZE.min} through ${PSTACK_PANEL_SIZE.max}.`;
+	if (!PSTACK_GUARD_STRICTNESS.includes(pstack.guardStrictness)) return "pstack guard strictness must be block-and-warn, warn-only, or off.";
+	if (!PSTACK_THINKING.includes(pstack.defaultThinking)) return "pstack default thinking must be low, medium, high, or xhigh.";
 	const sharedErrors = validateSharedDisplayConfig(clone(draft.display.sharedDisplay));
 	if (sharedErrors.length > 0) return sharedErrors[0];
 	const cavemanError = validateCavemanConfig({
@@ -1038,6 +1084,7 @@ function settingsItems(
 	const ponytailWarning = featureWarning(presence, "ponytail");
 	const sharedWarning = featureWarning(presence, "shared-display");
 	const promptWarning = featureWarning(presence, "prompt-border-style");
+	const pstackWarning = featureWarning(presence, "pstack");
 	const shared = draft.display.sharedDisplay;
 	const caveman = draft.display.caveman;
 	const ponytail = draft.display.ponytail;
@@ -1060,7 +1107,7 @@ function settingsItems(
 		...PROJECT_FEATURES.map(feature => ({
 			id: `presence.${feature}`,
 			label: feature,
-			currentValue: featureEnabled(presence, feature) ? "enabled (next start)" : "not enabled",
+			currentValue: featureEnabled(presence, feature) ? "enabled (next start)" : absentLabel(feature),
 			warning: featureWarning(presence, feature),
 			description: "OMP lifecycle state is informational; this surface does not unload or load extensions.",
 		})),
@@ -1078,7 +1125,7 @@ function settingsItems(
 		boolItem("shared.enabled", "Enabled", shared.enabled, "Enable shared host composition and widget.", sharedWarning),
 		selectItem("shared.layout", "Layout", shared.layout, SHARED_LAYOUTS, "Horizontal or vertical source composition.", sharedWarning),
 		selectItem("shared.style", "Style", shared.style, SHARED_STYLES, "Plain text or theme-colored Starship-style powerline segments (needs a Nerd Font).", sharedWarning),
-		textItem("shared.order", "Source order", shared.order.join(","), "Comma-separated ponytail,caveman,headroom,rtk,codegraph,beads order.", sharedWarning),
+		textItem("shared.order", "Source order", shared.order.join(","), "Comma-separated ponytail,caveman,headroom,rtk,codegraph,beads,pstack order.", sharedWarning),
 		selectItem("shared.placement", "Placement", shared.widgetPlacement, SHARED_PLACEMENTS, "Widget placement relative to editor.", sharedWarning),
 		textItem("shared.separator", "Separator", shared.horizontalSeparator, "One-line separator for horizontal layout.", sharedWarning),
 		numberItem("shared.gap", "Vertical gap", shared.verticalGapRows, "Blank rows between vertical sources, 0-10.", sharedWarning),
@@ -1094,6 +1141,13 @@ function settingsItems(
 		boolItem("caveman.visible", "Display visible", caveman.display.visible, "Publish Caveman segment to Shared Display.", cavemanWarning),
 		textItem("caveman.template", "Display template", caveman.display.template, "Tokens: {activity}, {glyph}, {mode}.", cavemanWarning),
 		textItem("caveman.glyphDirectory", "Glyph directory", caveman.display.glyphDirectory, "External Caveman glyph directory; frame contents stay in files.", cavemanWarning),
+		{ id: "section:pstack", label: "pstack", currentValue: "", heading: true },
+		boolItem("pstack.suspendCaveman", "Suspend Caveman", behavior.pstack.suspendCaveman, "Switch Caveman off for the rest of an Agent Session once pstack is activated.", pstackWarning),
+		boolItem("pstack.suspendPonytail", "Suspend Ponytail", behavior.pstack.suspendPonytail, "Switch Ponytail off for the rest of an Agent Session once pstack is activated.", pstackWarning),
+		numberItem("pstack.maxPanelSize", "Maximum panel size", behavior.pstack.maxPanelSize, `Cap on panel seats a review uses, ${PSTACK_PANEL_SIZE.min}-${PSTACK_PANEL_SIZE.max}; unset seats are never counted.`, pstackWarning),
+		selectItem("pstack.guardStrictness", "Guard strictness", behavior.pstack.guardStrictness, PSTACK_GUARD_STRICTNESS, "block-and-warn stops damaging commands and warns on style; warn-only never blocks; off silences every guard.", pstackWarning),
+		selectItem("pstack.defaultThinking", "Default thinking", behavior.pstack.defaultThinking, PSTACK_THINKING, "Thinking level /pstack setup and presets write on every role (the judge one above it; lean seats one below), clamped to what each model supports. Unset means medium.", pstackWarning),
+		{ id: "pstack.setup", label: "Model roles", currentValue: "/pstack setup", description: "Choose the models for pstack's roles and panel seats with /pstack setup in an Agent Session. Not edited here.", warning: pstackWarning },
 		{ id: "section:headroom", label: "Headroom", currentValue: "", heading: true },
 		boolItem("headroom.enabled", "Enabled", behavior.headroom.enabled, "Compression behavior; live only when Headroom extension is loaded.", headroomWarning),
 		textItem("headroom.baseUrl", "Base URL", behavior.headroom.baseUrl, "HTTP(S) proxy URL; remote hosts require Allow remote.", headroomWarning),
@@ -1185,6 +1239,11 @@ function updateDraft(draft: UnifiedSettingsDraft, id: string, value: string): vo
 		case "caveman.visible": draft.display.caveman.display.visible = bool; return;
 		case "caveman.template": draft.display.caveman.display.template = value; return;
 		case "caveman.glyphDirectory": draft.display.caveman.display.glyphDirectory = value; return;
+		case "pstack.suspendCaveman": draft.behavior.pstack.suspendCaveman = bool; return;
+		case "pstack.suspendPonytail": draft.behavior.pstack.suspendPonytail = bool; return;
+		case "pstack.maxPanelSize": draft.behavior.pstack.maxPanelSize = Number(value); return;
+		case "pstack.defaultThinking": if ((PSTACK_THINKING as readonly string[]).includes(value)) draft.behavior.pstack.defaultThinking = value as PstackDraft["defaultThinking"]; return;
+		case "pstack.guardStrictness": if ((PSTACK_GUARD_STRICTNESS as readonly string[]).includes(value)) draft.behavior.pstack.guardStrictness = value as PstackDraft["guardStrictness"]; return;
 		case "headroom.enabled": draft.behavior.headroom.enabled = bool; return;
 		case "headroom.baseUrl": draft.behavior.headroom.baseUrl = value; return;
 		case "headroom.allowRemote": draft.behavior.headroom.allowRemote = bool; return;
@@ -1247,7 +1306,7 @@ function statusText(snapshot: StatusSnapshot): string {
 		"Codesook OMP Plugin",
 		`Root config: ${CODESOOK_OMP_CONFIG_PATH}${root?.exists ? (root.valid ? " (valid)" : " (invalid)") : " (not created)"}`,
 		`omp-plugins: ${presence.ompPlugins ? `installed${presence.ompPluginsEnabled ? ", enabled" : ", disabled"}` : "not installed"}`,
-		...PROJECT_FEATURES.map(feature => `  ${feature}: ${featureEnabled(presence, feature) ? "enabled for next start" : "not enabled"}`),
+		...PROJECT_FEATURES.map(feature => `  ${feature}: ${featureEnabled(presence, feature) ? "enabled for next start" : absentLabel(feature)}`),
 		"",
 		"Lifecycle toggles are informational; this extension does not unload or load plugins.",
 	];
@@ -1417,7 +1476,7 @@ export async function openSettings(pi: ExtensionAPI, ctx: ExtensionContext, conf
 					return {
 						id: section.id,
 						label: section.label,
-						detail: [changed > 0 ? `${changed} changed` : "", unloaded ? "not loaded" : ""].filter(Boolean).join(" · "),
+						detail: [changed > 0 ? `${changed} changed` : "", unloaded ? sectionAbsentLabel(section.id) : ""].filter(Boolean).join(" · "),
 					};
 				}),
 				...SETTINGS_ACTIONS.map(action => ({

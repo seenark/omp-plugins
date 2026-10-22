@@ -12,6 +12,7 @@ Standalone [oh-my-pi](https://github.com/can1357/oh-my-pi) extensions in one Bun
 | `@codesook/omp-shared-display` | `shared-display` | no | `packages/shared-display/src/index.ts` |
 | `@codesook/omp-caveman` | `caveman` | no | `packages/caveman/src/index.ts` |
 | `@codesook/omp-ponytail` | `ponytail` | no | `packages/ponytail/src/index.ts` |
+| `@codesook/omp-pstack` | — (install the package; skills and agents need it) | — | `packages/pstack/src/index.ts` |
 | `@codesook/omp-codegraph` | `codegraph` | no | `packages/codegraph/src/index.ts` |
 | `@codesook/omp-beads` | `beads` | no | `packages/beads/src/index.ts` |
 | `@codesook/omp-rtk` | `rtk` | no | `packages/rtk/src/index.ts` |
@@ -103,6 +104,8 @@ bun packages/theme-catppuccin/bin/install.js
 /headroom [status|on|off|health|stats|token|init [config|glyphs|all]]
 /ponytail [status|off|lite|full|ultra|review]
 /caveman [status|off|caveman|ultracave|megacave]
+/poteto <task>
+/pstack [status|setup|preset <name>|doctor]
 /ultracave
 /megacave
 /codegraph [init|status|auto|off]
@@ -122,7 +125,7 @@ Without an interactive selector, bare commands and incomplete menu routes show t
 
 Root settings owns persisted configuration. Feature commands own session behavior; CodeGraph and Beads policy commands explicitly write shared project policy. Feature `config` commands and `/shared-display` are removed. Status commands open focused read-only overlays; Enter/Esc closes. `/omp-plugins init config` creates the v1 global config only when absent and seeds only missing glyph files.
 
-`/omp-plugins` opens a two-level overlay that edits a draft. The first screen lists one entry per section (Presence, CodeGraph, Beads, Shared Display, Ponytail, Caveman, Headroom, RTK, Prompt Border, Context Rail), each showing its count of changed values and a `not loaded` badge when that feature is not enabled in omp-plugins, followed by the actions. ↑↓ moves, Enter opens a section and edits values there, Esc returns from a section to the list. The header shows the total unsaved count.
+`/omp-plugins` opens a two-level overlay that edits a draft. The first screen lists one entry per section (Presence, CodeGraph, Beads, Shared Display, Ponytail, Caveman, pstack, Headroom, RTK, Prompt Border, Context Rail), each showing its count of changed values and a `not loaded` badge when that feature is not enabled in omp-plugins (pstack, which installs only as its own package, reads `not installed`), followed by the actions. ↑↓ moves, Enter opens a section and edits values there, Esc returns from a section to the list. The header shows the total unsaved count.
 
 Shift+Enter applies directly from any screen. Bare Enter on Apply opens confirmation inside the same focused overlay without saving. Enter confirms; Esc declines and returns to the unchanged draft without writes or live-change events. Esc on the section list, or the Cancel action, closes at once when nothing changed. With unsaved changes it asks first: Enter discards the draft, Esc keeps editing, Shift+Enter applies instead. Reload discards the draft without asking and leaves persisted and live state unchanged.
 
@@ -220,6 +223,7 @@ Package publication is dependency ordered:
 bun run publish:shared-display
 bun run publish:ponytail
 bun run publish:caveman
+bun run publish:pstack
 bun run publish:codegraph
 bun run publish:beads
 bun run publish:headroom
