@@ -31,8 +31,8 @@ OMP discovers `skills/`, `agents/` and `rules/` from the package root through it
 
 ```text
 /poteto <task>   Start poteto-mode on the task and mark pstack active for this Agent Session
-/pstack          Show the Activation state
-/pstack status   Same
+/pstack          Open a menu of the subcommands below (Status without a UI)
+/pstack status   Show the Activation state
 /pstack setup    Choose models for the pstack roles
 /pstack preset <name>  Apply claude-only, claude-codex or lean without the menus
 /pstack doctor   Check that pstack is healthy

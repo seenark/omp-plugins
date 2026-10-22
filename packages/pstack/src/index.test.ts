@@ -6,7 +6,8 @@ import { createExtensionModelQuery } from "@oh-my-pi/pi-coding-agent/extensibili
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import pstackExtension from "./index.ts";
 
-type Command = { description?: string; handler: (args: string, ctx: unknown) => unknown };
+type Completion = { value: string; label: string; description: string };
+type Command = { description?: string; getArgumentCompletions?: (prefix: string) => Completion[] | null; handler: (args: string, ctx: unknown) => unknown };
 type Handler = (event: unknown, ctx: unknown) => unknown;
 
 const roots: string[] = [];
@@ -21,7 +22,8 @@ function tempDirectory(): string {
 }
 
 /** `configured` lists the model roles that resolve to a model, as `ctx.models.resolve` does in OMP. */
-function createHarness(options: { hasUI?: boolean; configured?: string[]; models?: { resolve(spec: string): unknown } } = {}) {
+function createHarness(options: { hasUI?: boolean; configured?: string[]; models?: { resolve(spec: string): unknown }; pick?: string } = {}) {
+	const menus: string[][] = [];
 	const commands = new Map<string, Command>();
 	const handlers = new Map<string, Handler>();
 	const bus = new Map<string, Array<(data: unknown) => void>>();
@@ -46,7 +48,13 @@ function createHarness(options: { hasUI?: boolean; configured?: string[]; models
 	const ctx = {
 		hasUI: options.hasUI ?? true,
 		agent: { kind: "main", id: "Main", name: "main", depth: 0 },
-		ui: { notify: (message: string, level: string) => void notices.push({ level, message }) },
+		ui: {
+			notify: (message: string, level: string) => void notices.push({ level, message }),
+			select: async (_title: string, items: Array<{ label: string }>) => {
+				menus.push(items.map(item => item.label));
+				return options.pick;
+			},
+		},
 		sessionManager: { getBranch: () => [] },
 		models: options.models ?? {
 			resolve: (spec: string) => (options.configured?.includes(spec) ? { provider: "test", id: spec.slice(1) } : undefined),
@@ -64,6 +72,8 @@ function createHarness(options: { hasUI?: boolean; configured?: string[]; models
 		home,
 		command: (args = "") => commands.get("pstack")!.handler(args, ctx),
 		fire: (name: string, event: unknown = {}) => handlers.get(name)!(event, ctx),
+		menus,
+		complete: (prefix: string) => commands.get("pstack")!.getArgumentCompletions?.(prefix) ?? null,
 	};
 }
 
@@ -82,10 +92,32 @@ describe("/pstack", () => {
 		expect(h.notices[0]?.message).toContain("inactive");
 	});
 
-	it("bare /pstack is status", async () => {
+	it("completes subcommands and preset names", () => {
+		const h = createHarness();
+		expect(h.complete("")?.map(c => c.value)).toEqual(["status", "setup", "preset claude-only", "preset claude-codex", "preset lean", "doctor"]);
+		expect(h.complete("pr")?.map(c => c.value)).toEqual(["preset claude-only", "preset claude-codex", "preset lean"]);
+		expect(h.complete("preset claude-c")?.map(c => c.value)).toEqual(["preset claude-codex"]);
+		expect(h.complete("nope")).toBeNull();
+	});
+
+	it("bare /pstack with a UI opens a menu and runs the chosen subcommand", async () => {
+		const h = createHarness({ pick: "Status" });
+		await h.command("");
+		expect(h.menus[0]).toEqual(["Status", "Setup", "Preset: claude-only", "Preset: claude-codex", "Preset: lean", "Doctor"]);
+		expect(h.notices[0]?.message).toContain("inactive");
+	});
+
+	it("bare /pstack menu dismissed does nothing", async () => {
 		const h = createHarness();
 		await h.command("");
-		expect(h.notices[0]?.message).toContain("inactive");
+		expect(h.menus).toHaveLength(1);
+		expect(h.notices).toEqual([]);
+	});
+
+	it("bare /pstack without a UI reports status", async () => {
+		const h = createHarness({ hasUI: false });
+		await h.command("");
+		expect(h.logs[0]?.message).toContain("inactive");
 	});
 
 	it("falls back to the logger without a UI", async () => {

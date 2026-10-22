@@ -23,9 +23,23 @@ import { playbookOpenedBy, progressFromTodo } from "./observe.ts";
 import { activeSeats, guardSeatSpawn, type SeatStatus } from "./panel.ts";
 import { createActivationStore, reenabledInstructionModes } from "./activation-state.ts";
 import { loadSetupSettings, runPresetCommand, runSetupCommand, type SetupOptions } from "./setup/index.ts";
+import { PRESET_NAMES } from "./setup/presets.ts";
 import { createWarningGuards } from "./warn-guards.ts";
 
 const COMMAND_USAGE = "Usage: /pstack [status|setup|preset <name>|doctor]";
+
+const PSTACK_MENU = [
+	{ command: "status", label: "Status", description: "Show the Activation state of this Agent Session" },
+	{ command: "setup", label: "Setup", description: "Pick models for the pstack-* model roles" },
+	...PRESET_NAMES.map(name => ({ command: `preset ${name}`, label: `Preset: ${name}`, description: `Apply the ${name} preset to the pstack-* model roles` })),
+	{ command: "doctor", label: "Doctor", description: "Check roles, panel seats, skills, Instruction Modes, display and isolation" },
+];
+
+function commandCompletions(prefix: string): Array<{ value: string; label: string; description: string }> | null {
+	const normalized = prefix.trimStart().toLowerCase();
+	const matches = PSTACK_MENU.filter(item => item.command.startsWith(normalized));
+	return matches.length > 0 ? matches.map(item => ({ value: item.command, label: item.command, description: item.description })) : null;
+}
 
 function notify(pi: ExtensionAPI, ctx: ExtensionContext, level: "info" | "warning" | "error", message: string): void {
 	if (ctx.hasUI) ctx.ui.notify(message, level);
@@ -193,9 +207,17 @@ export default function pstackExtension(pi: ExtensionAPI, options: PstackExtensi
 	});
 
 	pi.registerCommand("pstack", {
-		description: "pstack: show the Activation state of this Agent Session",
+		description: "pstack: status, setup, preset, doctor",
+		getArgumentCompletions: commandCompletions,
 		handler: async (args, ctx) => {
-			const [subcommand = "", ...rest] = args.trim().split(/\s+/);
+			let argument = args.trim();
+			if (!argument && ctx.hasUI) {
+				const choice = await ctx.ui.select("pstack", PSTACK_MENU.map(({ label, description }) => ({ label, description })));
+				const selected = PSTACK_MENU.find(item => item.label === choice);
+				if (!selected) return;
+				argument = selected.command;
+			}
+			const [subcommand = "", ...rest] = argument.split(/\s+/);
 			const report = (level: "info" | "warning" | "error", message: string): void => notify(pi, ctx, level, message);
 			if (subcommand === "" || subcommand === "status") notify(pi, ctx, "info", statusReport(activation.state()));
 			else if (subcommand === "setup") await runSetupCommand(pi, ctx, report, behavior.current().defaultThinking, options.setup);
