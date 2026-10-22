@@ -36,7 +36,7 @@ Ask one multi-select question. Describe each choice in one line and list its pre
 | `rtk` | Rewrites shell commands to filter output | `rtk` CLI >= 0.51.0 |
 | `codegraph` | Code graph exploration guidance | `codegraph` CLI plus an MCP server entry |
 | `beads` | Issue-tracker guidance | `bd` CLI |
-| `pstack` | pstack workflows (poteto-mode, playbooks, review panel on `pstack-*` model roles) | Its own plugin, installed from npm (`@codesook/omp-pstack`), not a root feature; model roles chosen with `/pstack setup` |
+| `pstack` | pstack workflows (poteto-mode, playbooks, review panel on `pstack-*` model roles) | Its own plugin, installed from `github:seenark/omp-pstack` (`@codesook/omp-pstack`), not a root feature; model roles chosen with `/pstack setup` |
 
 Recommend `shared-display` whenever the user picks any other display-producing feature (`headroom`, `ponytail`, `caveman`, `rtk`, `codegraph`, `beads`, `pstack`): without it their segments fall back to separate native status entries.
 
@@ -161,7 +161,7 @@ readlink ~/.omp/plugins/node_modules/omp-plugins   # prints the checkout path
 
 Keep selectors quoted; `[` and `]` are shell-special. Root install always includes the unified settings command.
 
-`pstack` is not an `omp-plugins` feature: it installs as its own plugin from npm, `omp plugin install @codesook/omp-pstack` (pin with `@<version>`; developers: `omp plugin link ./packages/pstack`). Never install it from `github:seenark/omp-plugins#<ref>`: OMP keeps one plugin per git repository, so that install evicts the root `omp-plugins` plugin. If `omp plugin list` shows pstack installed from that repository, uninstall it and reinstall the root before installing from npm. Listing it as a feature as well would load its extension twice. Install it only after the user confirms.
+`pstack` is not an `omp-plugins` feature: it installs as its own plugin from its dist repository, `omp plugin install github:seenark/omp-pstack` (pin with `'github:seenark/omp-pstack#v<version>'`; developers: `omp plugin link ./packages/pstack`). Never install it from `github:seenark/omp-plugins#<ref>`: OMP keeps one plugin per git repository, so that install evicts the root `omp-plugins` plugin. If `omp plugin list` shows pstack installed from that repository, uninstall it and reinstall the root before installing from `seenark/omp-pstack`. Listing it as a feature as well would load its extension twice. Install it only after the user confirms.
 
 ## Phase 7: configure and verify
 

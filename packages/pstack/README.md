@@ -6,18 +6,18 @@ Tracks Upstream pstack 0.15.25, Pinned Revision `f713f14203cd6420cec13cd7c55c32d
 
 ## Install
 
-From npm:
+From the dist repository [`seenark/omp-pstack`](https://github.com/seenark/omp-pstack), which holds only built releases:
 
 ```sh
-omp plugin install @codesook/omp-pstack            # latest release
-omp plugin install @codesook/omp-pstack@<version>  # pinned release
+omp plugin install github:seenark/omp-pstack             # latest release
+omp plugin install 'github:seenark/omp-pstack#v<version>' # pinned release
 ```
 
 Requires OMP `>=18.11.1`. Shared Display, Caveman and Ponytail come from the root `omp-plugins` install (`github:seenark/omp-plugins`); pstack works without them, but then shows no Status Segment and cannot suspend the modes.
 
 Do not install pstack from `github:seenark/omp-plugins#<ref>`. OMP keeps one plugin per git repository, so that install evicts the root `omp-plugins` plugin, and reinstalling the root evicts pstack.
 
-To upgrade, run `omp plugin install @codesook/omp-pstack` again.
+To upgrade, run `omp plugin install github:seenark/omp-pstack` again.
 
 From this workspace, link the package so OMP discovers its skills and agents as well as its extension:
 
@@ -27,7 +27,7 @@ omp plugin link ./packages/pstack
 
 ## Releasing
 
-Releasing follows the version-bump rule: bump `version` in `packages/pstack/package.json` and merge to `main`. The Release workflow then builds the plugin tree and publishes it to npm. A version already on npm does nothing, so re-running is safe.
+Releasing follows the version-bump rule: bump `version` in `packages/pstack/package.json` and merge to `main`. The Release workflow then builds the plugin tree, commits it to `seenark/omp-pstack` and tags it `v<version>`. A version already tagged does nothing, so re-running is safe. Never edit `seenark/omp-pstack` by hand; the next release replaces its whole tree.
 
 ```sh
 bun run build:release -- --decide          # would this version release? prints release, version, reason

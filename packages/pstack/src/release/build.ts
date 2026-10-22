@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 /**
- * Release build for the npm package `@codesook/omp-pstack`.
+ * Release build for `@codesook/omp-pstack`, distributed as `github:seenark/omp-pstack`.
  *
  *   bun run build:release -- --out <dir>   build the plugin tree into <dir> (emptied first)
  *   bun run build:release -- --decide      print `release`, `version`, `reason` as key=value lines
@@ -11,7 +11,8 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { parseArgs } from "node:util";
 
-const REGISTRY = "https://registry.npmjs.org";
+/** Dist repo: the Release workflow pushes the built tree here and tags it `v<version>`. */
+const DIST_REPO = "https://github.com/seenark/omp-pstack.git";
 export const PACKAGE_ROOT = path.resolve(import.meta.dir, "..", "..");
 
 const VERSION = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/;
@@ -26,11 +27,17 @@ export interface ReleaseDecision {
 	reason: string;
 }
 
-/** A version not yet on npm releases; one already published does nothing. */
-export function decideRelease(version: string, published: readonly string[]): ReleaseDecision {
+/** A version not yet tagged in the dist repo releases; one already tagged does nothing. */
+export function decideRelease(version: string, released: readonly string[]): ReleaseDecision {
 	if (!VERSION.test(version)) throw new Error(`not a semver version: ${JSON.stringify(version)}`);
-	const exists = published.includes(version);
-	return { release: !exists, version, reason: exists ? `${version} is already on npm` : `${version} is not on npm yet` };
+	const exists = released.includes(version);
+	return { release: !exists, version, reason: exists ? `v${version} is already released` : `v${version} is not released yet` };
+}
+
+/** Versions from `git ls-remote --tags` output: `refs/tags/v<version>`, peeled `^{}` lines folded in. */
+export function releasedVersions(lsRemote: string): string[] {
+	const versions = [...lsRemote.matchAll(/\trefs\/tags\/v([^\s^]+)(?:\^\{\})?$/gm)].map(match => match[1]!);
+	return [...new Set(versions)];
 }
 
 type Manifest = Record<string, unknown>;
@@ -92,23 +99,18 @@ export async function buildRelease(out: string, root = PACKAGE_ROOT): Promise<vo
 	fs.writeFileSync(path.join(out, "package.json"), `${JSON.stringify(releaseManifest(sourceManifest), null, "\t")}\n`);
 }
 
-/** Versions already on npm; a package that was never published has none. */
-async function publishedVersions(name: string): Promise<string[]> {
-	const response = await fetch(`${REGISTRY}/${name.replace("/", "%2f")}`);
-	if (response.status === 404) return [];
-	if (!response.ok) throw new Error(`npm registry lookup for ${name} failed: HTTP ${response.status}`);
-	const packument: unknown = await response.json();
-	if (!packument || typeof packument !== "object" || !("versions" in packument) || !packument.versions || typeof packument.versions !== "object") {
-		throw new Error(`npm registry lookup for ${name} returned no versions object`);
-	}
-	return Object.keys(packument.versions);
+/** Tags in the dist repo; an empty repo has none. */
+function lsRemoteTags(): string {
+	const result = Bun.spawnSync(["git", "ls-remote", "--tags", DIST_REPO], { env: { ...process.env, GIT_TERMINAL_PROMPT: "0" } });
+	if (result.exitCode !== 0) throw new Error(`git ls-remote ${DIST_REPO} failed: ${result.stderr.toString()}`);
+	return result.stdout.toString();
 }
 
 if (import.meta.main) {
 	const { values } = parseArgs({ args: Bun.argv.slice(2), options: { out: { type: "string" }, decide: { type: "boolean" } } });
 	if (values.decide) {
-		const { name, version } = JSON.parse(fs.readFileSync(path.join(PACKAGE_ROOT, "package.json"), "utf8")) as { name: string; version: string };
-		for (const [key, value] of Object.entries(decideRelease(version, await publishedVersions(name)))) console.log(`${key}=${value}`);
+		const { version } = JSON.parse(fs.readFileSync(path.join(PACKAGE_ROOT, "package.json"), "utf8")) as { version: string };
+		for (const [key, value] of Object.entries(decideRelease(version, releasedVersions(lsRemoteTags())))) console.log(`${key}=${value}`);
 	} else if (values.out) {
 		await buildRelease(path.resolve(values.out));
 		console.log(`built ${path.resolve(values.out)}`);
