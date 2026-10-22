@@ -26,7 +26,8 @@
     "publish:prompt-border-style": "bun run verify && bun publish --cwd packages/prompt-border-style --access public",
     "publish:settings": "bun run verify && bun publish --cwd packages/codesook-omp-plugin --access public",
     "publish:theme-catppuccin": "bun run verify && bun publish --cwd packages/theme-catppuccin --access public",
-    "publish:all": "bun run verify && bun publish --cwd packages/shared-display --access public && bun publish --cwd packages/ponytail --access public && bun publish --cwd packages/caveman --access public && bun publish --cwd packages/codegraph --access public && bun publish --cwd packages/beads --access public && bun publish --cwd packages/rtk --access public && bun publish --cwd packages/headroom --access public && bun publish --cwd packages/prompt-border-style --access public && bun publish --cwd packages/codesook-omp-plugin --access public && bun publish --cwd packages/theme-catppuccin --access public"
+    "publish:all": "bun run verify && bun publish --cwd packages/shared-display --access public && bun publish --cwd packages/ponytail --access public && bun publish --cwd packages/caveman --access public && bun publish --cwd packages/codegraph --access public && bun publish --cwd packages/beads --access public && bun publish --cwd packages/rtk --access public && bun publish --cwd packages/headroom --access public && bun publish --cwd packages/prompt-border-style --access public && bun publish --cwd packages/codesook-omp-plugin --access public && bun publish --cwd packages/theme-catppuccin --access public",
+    "hooks:install": "lefthook install"
   },
   "peerDependencies": {
     "@oh-my-pi/pi-ai": ">=18.2.8",
@@ -99,5 +100,8 @@
         ]
       }
     }
+  },
+  "devDependencies": {
+    "lefthook": "2.2.2"
   }
 }

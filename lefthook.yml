@@ -1,0 +1,33 @@
+# Git hooks for this repository. Install once per clone with `bun run hooks:install`.
+# The Beads hook scripts stay the source of truth for Beads behavior; lefthook only chains them.
+
+pre-commit:
+  commands:
+    beads:
+      run: .beads/hooks/pre-commit {0}
+
+prepare-commit-msg:
+  commands:
+    beads:
+      run: .beads/hooks/prepare-commit-msg {0}
+
+post-checkout:
+  commands:
+    beads:
+      run: .beads/hooks/post-checkout {0}
+
+post-merge:
+  commands:
+    beads:
+      run: .beads/hooks/post-merge {0}
+
+pre-push:
+  piped: true
+  commands:
+    beads:
+      priority: 1
+      use_stdin: true
+      run: .beads/hooks/pre-push {0}
+    verify:
+      priority: 2
+      run: bun run verify
