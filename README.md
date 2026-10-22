@@ -12,7 +12,7 @@ Standalone [oh-my-pi](https://github.com/can1357/oh-my-pi) extensions in one Bun
 | `@codesook/omp-shared-display` | `shared-display` | no | `packages/shared-display/src/index.ts` |
 | `@codesook/omp-caveman` | `caveman` | no | `packages/caveman/src/index.ts` |
 | `@codesook/omp-ponytail` | `ponytail` | no | `packages/ponytail/src/index.ts` |
-| pstack (`@codesook/omp-pstack`) | — (separate npm install; skills and agents need it) | — | `packages/pstack/src/index.ts` |
+| pstack (`@codesook/omp-pstack`) | — (separate install from `github:seenark/omp-pstack`; skills and agents need it) | — | `packages/pstack/src/index.ts` |
 | `@codesook/omp-codegraph` | `codegraph` | no | `packages/codegraph/src/index.ts` |
 | `@codesook/omp-beads` | `beads` | no | `packages/beads/src/index.ts` |
 | `@codesook/omp-rtk` | `rtk` | no | `packages/rtk/src/index.ts` |
@@ -219,16 +219,16 @@ bun run verify
 
 ## Releasing pstack
 
-pstack installs from npm:
+pstack installs from its dist repository, [`seenark/omp-pstack`](https://github.com/seenark/omp-pstack):
 
 ```sh
-omp plugin install @codesook/omp-pstack            # latest
-omp plugin install @codesook/omp-pstack@<version>  # pinned
+omp plugin install github:seenark/omp-pstack             # latest
+omp plugin install 'github:seenark/omp-pstack#v<version>' # pinned
 ```
 
 It must not install from this repository as a git spec. OMP keeps one plugin per git repository: installing a second ref of `github:seenark/omp-plugins` removes the root `omp-plugins` entry from `~/.omp/plugins/package.json`, and the loader then skips it.
 
-To cut a release, bump `version` in `packages/pstack/package.json` and merge to `main`. The Release workflow (`.github/workflows/release.yml`) builds the plugin tree and runs `npm publish --provenance` on it, authenticated by the `NPM_TOKEN` repository secret. The token needs publish rights on the `@codesook` scope. A version already on npm does nothing. Preview the decision and build the tree locally:
+To cut a release, bump `version` in `packages/pstack/package.json` and merge to `main`. The Release workflow (`.github/workflows/release.yml`) builds the plugin tree, commits it to `main` of `seenark/omp-pstack`, and tags it `v<version>`. It pushes with the `PSTACK_DIST_DEPLOY_KEY` repository secret, the private half of a write deploy key on `seenark/omp-pstack`. A version already tagged there does nothing. Preview the decision and build the tree locally:
 
 ```sh
 bun run build:release -- --decide
