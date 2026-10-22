@@ -1,0 +1,234 @@
+#!/usr/bin/env -S uv run --quiet --with pyte==0.8.2 python3
+"""Drive a TUI in a background PTY and read its rendered screen.
+
+  omp-pty start  RUN_DIR [--cols N] [--rows N] [--cwd DIR] -- CMD...
+  omp-pty submit RUN_DIR TEXT            close any dialog, clear editor, type TEXT, dismiss autocomplete, Enter
+  omp-pty send   RUN_DIR TEXT            literal text, no Enter
+  omp-pty key    RUN_DIR KEY...          enter esc tab bspace up down left right ctrl-c ctrl-d
+  omp-pty wait   RUN_DIR REGEX [--timeout S] [--absent]
+  omp-pty screen RUN_DIR [--out FILE]
+  omp-pty status RUN_DIR
+  omp-pty stop   RUN_DIR
+
+State in RUN_DIR: ctl.sock, server.pid, child.pid, transcript.raw (every byte the TUI wrote).
+"""
+import argparse, json, os, pty, re, select, signal, socket, struct, sys, time, fcntl, termios
+
+KEYS = {
+    "enter": "\r", "esc": "\x1b", "tab": "\t", "bspace": "\x7f",
+    "up": "\x1b[A", "down": "\x1b[B", "right": "\x1b[C", "left": "\x1b[D",
+    "ctrl-c": "\x03", "ctrl-d": "\x04", "ctrl-u": "\x15",
+}
+
+
+def sock_path(run_dir):
+    return os.path.join(run_dir, "ctl.sock")
+
+
+def request(run_dir, payload, timeout=5):
+    s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    s.settimeout(timeout)
+    try:
+        s.connect(sock_path(run_dir))
+    except OSError as error:
+        sys.exit(f"omp-pty: no server in {run_dir} ({error})")
+    s.sendall((json.dumps(payload) + "\n").encode())
+    data = b""
+    while not data.endswith(b"\n"):
+        chunk = s.recv(65536)
+        if not chunk:
+            break
+        data += chunk
+    s.close()
+    return json.loads(data or b"{}")
+
+
+def press(run_dir, *keys):
+    for key in keys:
+        request(run_dir, {"op": "write", "data": KEYS[key]})
+        time.sleep(0.3)
+
+
+def serve(run_dir, cols, rows, cwd, cmd):
+    import pyte
+
+    screen = pyte.Screen(cols, rows)
+    stream = pyte.ByteStream(screen)
+    pid, fd = pty.fork()
+    if pid == 0:
+        if cwd:
+            os.chdir(cwd)
+        os.execvp(cmd[0], cmd)
+    fcntl.ioctl(fd, termios.TIOCSWINSZ, struct.pack("HHHH", rows, cols, 0, 0))
+    with open(os.path.join(run_dir, "child.pid"), "w") as f:
+        f.write(str(pid))
+    raw = open(os.path.join(run_dir, "transcript.raw"), "ab", buffering=0)
+    server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    server.bind(sock_path(run_dir))
+    server.listen(4)
+    exited = None
+
+    def text():
+        return "\n".join(line.rstrip() for line in screen.display)
+
+    def drain():
+        try:
+            data = os.read(fd, 65536)
+        except OSError:
+            return False
+        if data:
+            raw.write(data)
+            stream.feed(data)
+        return bool(data)
+
+    def reap():
+        nonlocal exited
+        if exited is None:
+            done, status = os.waitpid(pid, os.WNOHANG)
+            if done:
+                exited = os.waitstatus_to_exitcode(status)
+        return exited is not None
+
+    def terminate(sig, seconds):
+        # pty.fork made the child a session leader, so its pgid is its pid: this signals only what we spawned.
+        try:
+            os.killpg(pid, sig)
+        except ProcessLookupError:
+            pass
+        deadline = time.time() + seconds
+        while time.time() < deadline:
+            if reap():
+                return True
+            if not (select.select([fd], [], [], 0.1)[0] and drain()):
+                time.sleep(0.1)  # keep reading so a shutting-down TUI never blocks on a full PTY buffer
+        return reap()
+
+    eof = False
+    while True:
+        readable, _, _ = select.select([server] if eof else [fd, server], [], [], 0.2)
+        if fd in readable and not drain():
+            eof = True
+        reap()
+        if server in readable:
+            conn, _ = server.accept()
+            line = b""
+            while not line.endswith(b"\n"):
+                chunk = conn.recv(65536)
+                if not chunk:
+                    break
+                line += chunk
+            req = json.loads(line or b"{}")
+            op = req.get("op")
+            reply = {"ok": True, "exited": exited, "child": pid}
+            if op == "write" and exited is None and not eof:
+                os.write(fd, req["data"].encode())
+            elif op == "screen":
+                reply["screen"] = text()
+            elif op == "stop":
+                if not terminate(signal.SIGTERM, 5):
+                    terminate(signal.SIGKILL, 3)
+                reply["exited"] = exited
+                conn.sendall((json.dumps(reply) + "\n").encode())
+                conn.close()
+                break
+            conn.sendall((json.dumps(reply) + "\n").encode())
+            conn.close()
+    server.close()
+    os.unlink(sock_path(run_dir))
+    os.unlink(os.path.join(run_dir, "server.pid"))
+
+
+def main():
+    parser = argparse.ArgumentParser(prog="omp-pty")
+    sub = parser.add_subparsers(dest="op", required=True)
+    p = sub.add_parser("start"); p.add_argument("run_dir"); p.add_argument("--cols", type=int, default=120)
+    p.add_argument("--rows", type=int, default=40); p.add_argument("--cwd")
+    p = sub.add_parser("send"); p.add_argument("run_dir"); p.add_argument("text")
+    p = sub.add_parser("submit"); p.add_argument("run_dir"); p.add_argument("text")
+    p = sub.add_parser("key"); p.add_argument("run_dir"); p.add_argument("keys", nargs="+", choices=sorted(KEYS))
+    p = sub.add_parser("wait"); p.add_argument("run_dir"); p.add_argument("pattern")
+    p.add_argument("--timeout", type=float, default=20); p.add_argument("--absent", action="store_true")
+    p = sub.add_parser("screen"); p.add_argument("run_dir"); p.add_argument("--out")
+    for name in ("status", "stop"):
+        sub.add_parser(name).add_argument("run_dir")
+    argv = sys.argv[1:]
+    split = argv.index("--") if argv[:1] == ["start"] and "--" in argv else len(argv)
+    cmd = argv[split + 1:]
+    args = parser.parse_args(argv[:split])
+    run_dir = os.path.abspath(args.run_dir)
+
+    if args.op == "start":
+        if not cmd:
+            sys.exit("omp-pty start: missing command after --")
+        if os.path.exists(sock_path(run_dir)):
+            sys.exit(f"omp-pty: {run_dir} already has a server; stop it first")
+        os.makedirs(run_dir, exist_ok=True)
+        if os.fork() == 0:
+            os.setsid()
+            if os.fork() == 0:
+                devnull = os.open(os.devnull, os.O_RDWR)
+                for stream_fd in (0, 1, 2):
+                    os.dup2(devnull, stream_fd)
+                with open(os.path.join(run_dir, "server.pid"), "w") as f:
+                    f.write(str(os.getpid()))
+                serve(run_dir, args.cols, args.rows, args.cwd, cmd)
+            os._exit(0)
+        deadline = time.time() + 10
+        while not os.path.exists(sock_path(run_dir)):
+            if time.time() > deadline:
+                sys.exit("omp-pty: server did not start")
+            time.sleep(0.05)
+        print(json.dumps(request(run_dir, {"op": "status"})))
+    elif args.op == "send":
+        request(run_dir, {"op": "write", "data": args.text})
+    elif args.op == "submit":
+        # Esc closes an open dialog; Enter on an open autocomplete popup would accept the completion, so Esc again before Enter.
+        # Each key is its own write with a pause: ESC followed by another byte in one read parses as a Meta chord.
+        press(run_dir, "esc", "ctrl-u")
+        request(run_dir, {"op": "write", "data": args.text})
+        deadline = time.time() + 5
+        # omp draws the editor inside ║ box edges; match there so stale notifications do not count.
+        while not any("║" in line and args.text in line for line in request(run_dir, {"op": "screen"})["screen"].splitlines()):
+            if time.time() > deadline:
+                sys.exit(f"omp-pty submit: editor never showed {args.text!r}")
+            time.sleep(0.1)
+        time.sleep(0.6)
+        request(run_dir, {"op": "write", "data": KEYS["esc"]})
+        time.sleep(0.3)
+        request(run_dir, {"op": "write", "data": KEYS["enter"]})
+    elif args.op == "key":
+        press(run_dir, *args.keys)
+    elif args.op == "wait":
+        regex = re.compile(args.pattern, re.MULTILINE)
+        deadline = time.time() + args.timeout
+        while True:
+            reply = request(run_dir, {"op": "screen"})
+            found = bool(regex.search(reply["screen"]))
+            if found != args.absent:
+                return
+            if reply["exited"] is not None or time.time() > deadline:
+                print(reply["screen"])
+                state = f"exited {reply['exited']}" if reply["exited"] is not None else f"timeout {args.timeout}s"
+                sys.exit(f"omp-pty wait: {'still present' if args.absent else 'not found'}: {args.pattern!r} ({state})")
+            time.sleep(0.2)
+    elif args.op == "screen":
+        shot = request(run_dir, {"op": "screen"})["screen"] + "\n"
+        if args.out:
+            os.makedirs(os.path.dirname(os.path.abspath(args.out)), exist_ok=True)
+            with open(args.out, "w") as f:
+                f.write(shot)
+        sys.stdout.write(shot)
+    elif args.op == "status":
+        print(json.dumps(request(run_dir, {"op": "status"})))
+    elif args.op == "stop":
+        if not os.path.exists(sock_path(run_dir)):
+            print(json.dumps({"ok": True, "note": "no server"}))
+            return
+        print(json.dumps(request(run_dir, {"op": "stop"}, timeout=15)))
+        deadline = time.time() + 5
+        while os.path.exists(sock_path(run_dir)) and time.time() < deadline:
+            time.sleep(0.05)  # the server unlinks its socket just after replying
+
+
+if __name__ == "__main__":
+    main()
