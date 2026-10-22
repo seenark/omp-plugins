@@ -6,13 +6,33 @@ Tracks Upstream pstack 0.15.25, Pinned Revision `f713f14203cd6420cec13cd7c55c32d
 
 ## Install
 
+From the GitHub release branch (no npm package):
+
+```sh
+omp plugin install github:seenark/omp-plugins#release/pstack      # latest release
+omp plugin install github:seenark/omp-plugins#pstack-v<version>   # pinned release
+```
+
+Requires OMP `>=18.11.1`. Shared Display, Caveman and Ponytail come from the root `omp-plugins` install (`github:seenark/omp-plugins`); pstack works without them, but then shows no Status Segment and cannot suspend the modes.
+
+To upgrade, install the same ref again. A pinned `#pstack-v<version>` stays where it is until you install a newer tag.
+
 From this workspace, link the package so OMP discovers its skills and agents as well as its extension:
 
 ```sh
 omp plugin link ./packages/pstack
 ```
 
-As a published package: `omp plugin install @codesook/omp-pstack`. Requires OMP `>=18.11.1`.
+## Releasing
+
+Releasing follows the version-bump rule: bump `version` in `packages/pstack/package.json` and merge to `main`. The Release workflow then builds the plugin tree, commits it to `release/pstack` (a branch with no `main` history) and tags the commit `pstack-v<version>`. A version that already has its tag does nothing, so re-running is safe.
+
+```sh
+bun run build:release -- --decide          # would this version release? prints release, version, tag, reason
+bun run build:release -- --out <dir>       # build the plugin tree into <dir>
+```
+
+The tree is deterministic: the same commit gives byte-identical output. It holds `skills/`, `agents/`, `README.md`, `THIRD-PARTY-NOTICES.txt`, a `package.json` with no `dependencies` (the `@oh-my-pi/*` packages are peers) and an `omp` key, and `src/` with two files: `index.js`, the extension bundled with every `@codesook/*` import inlined, and `verdict.ts`, the panel verdict helper that `panel-verdicts.md` imports from `<skill dir>/../../src/verdict.ts`. The sync engine, tests and dev tooling stay out. The release build is `src/release/build.ts`.
 
 This package is not a root `omp.features` entry. Features gate extensions only, and listing it there as well as installing it would load the extension twice.
 

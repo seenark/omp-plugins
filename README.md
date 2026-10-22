@@ -12,7 +12,7 @@ Standalone [oh-my-pi](https://github.com/can1357/oh-my-pi) extensions in one Bun
 | `@codesook/omp-shared-display` | `shared-display` | no | `packages/shared-display/src/index.ts` |
 | `@codesook/omp-caveman` | `caveman` | no | `packages/caveman/src/index.ts` |
 | `@codesook/omp-ponytail` | `ponytail` | no | `packages/ponytail/src/index.ts` |
-| `@codesook/omp-pstack` | — (install the package; skills and agents need it) | — | `packages/pstack/src/index.ts` |
+| pstack (`@codesook/omp-pstack`) | — (install from the `release/pstack` branch; skills and agents need it) | — | `packages/pstack/src/index.ts` |
 | `@codesook/omp-codegraph` | `codegraph` | no | `packages/codegraph/src/index.ts` |
 | `@codesook/omp-beads` | `beads` | no | `packages/beads/src/index.ts` |
 | `@codesook/omp-rtk` | `rtk` | no | `packages/rtk/src/index.ts` |
@@ -217,13 +217,12 @@ bun run pack:check
 bun run verify
 ```
 
-Package publication is dependency ordered:
+npm package publication is dependency ordered. pstack is not published to npm; it ships from the `release/pstack` branch (see below).
 
 ```sh
 bun run publish:shared-display
 bun run publish:ponytail
 bun run publish:caveman
-bun run publish:pstack
 bun run publish:codegraph
 bun run publish:beads
 bun run publish:headroom
@@ -232,6 +231,24 @@ bun run publish:settings
 bun run publish:theme-catppuccin
 bun run publish:all
 ```
+
+## Releasing pstack
+
+pstack installs from a GitHub release branch, not npm:
+
+```sh
+omp plugin install github:seenark/omp-plugins#release/pstack      # latest
+omp plugin install github:seenark/omp-plugins#pstack-v<version>   # pinned
+```
+
+To upgrade, reinstall from the same ref. To cut a release, bump `version` in `packages/pstack/package.json` and merge to `main`. The Release workflow (`.github/workflows/release.yml`) builds the plugin tree and commits it to `release/pstack`, a branch with no `main` history, then tags that commit `pstack-v<version>`. A version that already has its tag does nothing. Preview the decision and build the tree locally:
+
+```sh
+bun run build:release -- --decide
+bun run build:release -- --out /tmp/pstack-release
+```
+
+The CI workflow runs `bun run verify` on every pull request and push to `main`.
 
 ## Local OMP smoke loading
 
