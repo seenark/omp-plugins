@@ -4,6 +4,9 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
 
+// The child cold-starts Bun and imports the OMP host; on a loaded CI runner that alone can exceed bun:test's 5s default.
+const CHILD_TIMEOUT_MS = 30_000;
+
 test("settings initialization uses saved values, shows its result in place, and keeps the unapplied draft", () => {
 	const root = mkdtempSync(path.join(tmpdir(), "codesook-command-menu-"));
 	const environment: Record<string, string> = Object.fromEntries(["PATH", "LANG", "LC_ALL", "TERM", "COLORTERM"].flatMap(key => process.env[key] === undefined ? [] : [[key, process.env[key]!]]));
@@ -103,9 +106,9 @@ test("settings initialization uses saved values, shows its result in place, and 
 		console.log(JSON.stringify({ policy: saved.behavior.codegraph.policy, emits, glyph: readFileSync(existingGlyph, "utf8") }));
 	`;
 	try {
-		const output = execFileSync(process.execPath, ["--eval", script], { cwd: import.meta.dir, env: environment, encoding: "utf8", timeout: 30_000 });
+		const output = execFileSync(process.execPath, ["--eval", script], { cwd: import.meta.dir, env: environment, encoding: "utf8", timeout: CHILD_TIMEOUT_MS });
 		expect(JSON.parse(output)).toEqual({ policy: "auto", emits: 1, glyph: "preserve this glyph\n" });
 	} finally {
 		rmSync(root, { recursive: true, force: true });
 	}
-});
+}, CHILD_TIMEOUT_MS + 5_000);
