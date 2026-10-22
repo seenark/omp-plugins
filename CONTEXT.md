@@ -170,6 +170,10 @@ _Avoid_: Personal preference, global default
 Issue tracking through Beads for work that the user explicitly asks to track. Availability alone does not authorize the agent to create or modify issues for unrelated work.
 _Avoid_: Automatic issue tracking, mandatory task tracking
 
+**Ready Issue**:
+A Beads issue that is open and has no open blocker. Distinct from a Ready Integration, which says the Beads tool is usable at all.
+_Avoid_: Ready task, ready (unqualified)
+
 **Integration Project**:
 The repository working tree that owns shared Project Integration Policy and new tool initialization. Outside a Git repository, the active directory is the Integration Project.
 _Avoid_: Tool Workspace, every subdirectory
@@ -196,3 +200,23 @@ _Avoid_: Headroom password
 **Proxy Token File**:
 A local secret source for a Proxy Token, separate from Root Plugin Configuration.
 _Avoid_: Token configuration
+
+**Skill Use**:
+One occasion on which a skill's instructions were brought into an Agent Session, attributed to its source: the user, the agent on its own, or a subagent.
+_Avoid_: Skill activation, skill invocation, skill load
+
+**Project Skill**:
+A skill whose instructions live inside an Integration Project. Its Skill Uses are counted with that project.
+_Avoid_: Local skill, repo skill
+
+**Global Skill**:
+A skill available to every project, such as one in the user's home skill directories or one shipped with a plugin.
+_Avoid_: User skill, shared skill
+
+**Reset Point**:
+The moment from which skill statistics are counted again, for all skills or for one skill. Earlier Skill Uses are kept but not counted.
+_Avoid_: Clear, wipe, delete stats
+
+**Leftover Process**:
+A process started on behalf of an Agent Session that is still running after that Agent Session has ended.
+_Avoid_: Orphan, zombie, stale server

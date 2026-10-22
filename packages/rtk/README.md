@@ -22,6 +22,8 @@ These commands are never rewritten:
 | test-detail | test commands with `-v`, `--verbose`, `--list`, `-fuzz` |
 | long-lived | `ssh`, `top`, `htop`, `vim`, `nvim`, `bun/npm/pnpm run dev`, `--watch` |
 
+A leading `export OMP_PLUGINS_SESSION='…'; ` added by the `process-monitor` feature is ignored when these rules are checked, so the rules apply to the command behind it whichever extension runs first.
+
 The model sees one system prompt line (only when RTK is enabled and present): prefix a command with `RTK_DISABLED=1` for raw output, or run `rtk recall <hash>` (`--list` shows entries) for the full output behind a recovery hint.
 
 ### Per-session storage

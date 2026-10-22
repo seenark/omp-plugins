@@ -110,7 +110,7 @@ const LEGACY_PROMPT_BORDER_CONFIG_PATH = path.join(
 	"config.json",
 );
 
-const PROJECT_FEATURES = ["shared-display", "ponytail", "caveman", "headroom", "rtk", "prompt-border-style", "codegraph", "beads", "pstack"] as const;
+const PROJECT_FEATURES = ["shared-display", "ponytail", "caveman", "headroom", "rtk", "prompt-border-style", "codegraph", "beads", "pstack", "process-monitor"] as const;
 type ProjectFeature = (typeof PROJECT_FEATURES)[number];
 
 const DEFAULT_PROJECT_FEATURES: Record<ProjectFeature, boolean> = {
@@ -123,6 +123,7 @@ const DEFAULT_PROJECT_FEATURES: Record<ProjectFeature, boolean> = {
 	codegraph: false,
 	beads: false,
 	pstack: false,
+	"process-monitor": false,
 };
 
 const STANDALONE_FEATURE_PACKAGES: Record<ProjectFeature, string> = {
@@ -135,6 +136,7 @@ const STANDALONE_FEATURE_PACKAGES: Record<ProjectFeature, string> = {
 	codegraph: "@codesook/omp-codegraph",
 	beads: "@codesook/omp-beads",
 	pstack: "@codesook/omp-pstack",
+	"process-monitor": "@codesook/omp-process-monitor",
 };
 
 /** Features the omp-plugins umbrella does not carry: they exist only as their own package, so a missing one is "not installed" and an umbrella feature list never enables it. */
@@ -1125,7 +1127,7 @@ function settingsItems(
 		boolItem("shared.enabled", "Enabled", shared.enabled, "Enable shared host composition and widget.", sharedWarning),
 		selectItem("shared.layout", "Layout", shared.layout, SHARED_LAYOUTS, "Horizontal or vertical source composition.", sharedWarning),
 		selectItem("shared.style", "Style", shared.style, SHARED_STYLES, "Plain text or theme-colored Starship-style powerline segments (needs a Nerd Font).", sharedWarning),
-		textItem("shared.order", "Source order", shared.order.join(","), "Comma-separated ponytail,caveman,headroom,rtk,codegraph,beads,pstack order.", sharedWarning),
+		textItem("shared.order", "Source order", shared.order.join(","), "Comma-separated ponytail,caveman,headroom,rtk,codegraph,beads,pstack,process-monitor order.", sharedWarning),
 		selectItem("shared.placement", "Placement", shared.widgetPlacement, SHARED_PLACEMENTS, "Widget placement relative to editor.", sharedWarning),
 		textItem("shared.separator", "Separator", shared.horizontalSeparator, "One-line separator for horizontal layout.", sharedWarning),
 		numberItem("shared.gap", "Vertical gap", shared.verticalGapRows, "Blank rows between vertical sources, 0-10.", sharedWarning),

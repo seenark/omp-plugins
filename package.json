@@ -87,6 +87,13 @@
         "extensions": [
           "./packages/rtk/src/index.ts"
         ]
+      },
+      "process-monitor": {
+        "description": "/procs dashboard for processes and ports OMP leaves running.",
+        "default": false,
+        "extensions": [
+          "./packages/process-monitor/src/index.ts"
+        ]
       }
     }
   },

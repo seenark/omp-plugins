@@ -255,6 +255,7 @@ describe("Shared Display configuration", () => {
 			"codegraph",
 			"beads",
 			"pstack",
+			"process-monitor",
 		]);
 		expect(normalizeSharedDisplayConfig({ order: ["headroom", "codegraph", "beads"] }).order).toEqual([
 			"headroom",
@@ -264,6 +265,7 @@ describe("Shared Display configuration", () => {
 			"caveman",
 			"rtk",
 			"pstack",
+			"process-monitor",
 		]);
 	});
 

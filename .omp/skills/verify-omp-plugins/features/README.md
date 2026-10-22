@@ -6,7 +6,7 @@ This directory is the maintained source for verifying what users see from the om
 
 - Launch with `.omp/skills/verify-omp-plugins/scripts/verify-omp launch <run-id>`, then `eval "$(.omp/skills/verify-omp-plugins/scripts/verify-omp env <run-id>)"`.
 - `verify-omp doctor <run-id>` prints only `ok` lines and exits 0.
-- The scratch HOME starts empty. Every plugin uses its shipped defaults: Ponytail `full`, Caveman `caveman`, Headroom enabled at `http://127.0.0.1:8788` with no proxy running, all 8 omp-plugins features enabled, and pstack linked.
+- The scratch HOME starts empty. Every plugin uses its shipped defaults: Ponytail `full`, Caveman `caveman`, Headroom enabled at `http://127.0.0.1:8788` with no proxy running, all 9 omp-plugins features enabled, and pstack linked.
 - No model is configured. The editor header shows `no-model`.
 - Never drive an instance that this verification run did not launch.
 
@@ -45,5 +45,6 @@ Keep implementation details out of the map. Name only user paths, stable on-scre
 - [Plugin settings](./plugin-settings.md): `/omp-plugins` status, `init config` file creation, and the settings menu.
 - [Headroom](./headroom.md): `/headroom` status, health, on and off against a missing proxy, and the segment.
 - [pstack](./pstack.md): `/pstack` status and doctor.
+- [Process monitor](./process-monitor.md): `/procs` overlay, leftover rows, view-only unknown rows, confirmed stop, and the `⚠ N ports` segment, driven with a tagged stand-in process.
 
 Not mapped yet: `/prompt-border`, `/context-rail`, `/rtk`, `/beads`, `/codegraph`, `/pstack setup`, `/pstack preset`, `/poteto`, and the `/ponytail-review`, `/ponytail-audit` and `/ponytail-debt` helpers. The last three send an LLM prompt.

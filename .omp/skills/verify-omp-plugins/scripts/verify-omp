@@ -13,7 +13,8 @@ set -euo pipefail
 SCRIPTS="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO="$(cd "$SCRIPTS/../../../.." && pwd)"
 OMP_PTY="$SCRIPTS/omp-pty"
-FEATURES="headroom,prompt-border-style,shared-display,ponytail,caveman,codegraph,beads,rtk"
+FEATURES="$(jq -r '.omp.features | keys | join(",")' "$REPO/package.json")"
+FEATURE_COUNT="$(jq -r '.omp.features | length' "$REPO/package.json")"
 
 op="${1:-}"; run_id="${2:-}"
 [[ -n "$op" && -n "$run_id" && "$run_id" =~ ^[A-Za-z0-9_-]+$ ]] || { sed -n '2,10p' "$0" | sed 's/^# \{0,1\}//'; exit 2; }
@@ -50,7 +51,7 @@ launch)
 	printf 'setupVersion: 2\n' >"$SCRATCH_HOME/.omp/agent/config.yml" # skips the first-run onboarding wizard
 	git -C "$PROJECT" init -q
 	scratch omp plugin link "$REPO" >/dev/null
-	# --enable replaces the feature set; name all eight or the defaults (headroom, prompt-border-style) drop out.
+	# --enable replaces the feature set; name every root feature or the defaults (headroom, prompt-border-style) drop out.
 	scratch omp plugin features omp-plugins --enable="$FEATURES" >/dev/null
 	scratch omp plugin link "$REPO/packages/pstack" >/dev/null
 	start_omp 'ponytail: .*caveman.*Headroom.*rtk' # every default segment painted
@@ -82,7 +83,7 @@ doctor)
 	check "child has no parent session vars" '! child_env | grep -q -E " PI_SESSION_(FILE|ID)="'
 	check "omp-plugins linked to this checkout" '[[ "$(readlink "$SCRATCH_HOME/.omp/plugins/node_modules/omp-plugins")" == "$REPO" ]]'
 	check "pstack linked to this checkout" '[[ "$(readlink "$SCRATCH_HOME/.omp/plugins/node_modules/@codesook/omp-pstack")" == "$REPO/packages/pstack" ]]'
-	check "all 8 features enabled" '[[ "$(scratch omp plugin list | grep -m1 "Features:" | tr -cd , | wc -c | tr -d " ")" == 7 ]]'
+	check "all $FEATURE_COUNT features enabled" '[[ "$(scratch omp plugin list | grep -m1 "Features:" | tr -cd , | wc -c | tr -d " ")" == $((FEATURE_COUNT - 1)) ]]'
 	check "screen past onboarding" '! "$OMP_PTY" screen "$PTY" 2>/dev/null | grep -q "exit setup"'
 	check "prompt editor visible" '"$OMP_PTY" screen "$PTY" 2>/dev/null | grep -q "π >"'
 	echo "info  omp $(omp --version); checkout rev $(git -C "$REPO" rev-parse --short HEAD)"
