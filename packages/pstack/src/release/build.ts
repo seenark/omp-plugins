@@ -17,7 +17,7 @@ export const PACKAGE_ROOT = path.resolve(import.meta.dir, "..", "..");
 
 const VERSION = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/;
 const TEST_FILE = /\.test\.[cm]?[jt]sx?$/;
-const COPIED = ["skills", "agents", "README.md", "THIRD-PARTY-NOTICES.txt"] as const;
+const COPIED = ["skills", "agents", "assets", "README.md", "THIRD-PARTY-NOTICES.txt"] as const;
 const BUNDLE = "src/index.js";
 const VERDICT = "src/verdict.ts";
 

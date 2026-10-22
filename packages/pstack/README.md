@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="assets/cover.jpg" alt="pstack cover: a five-tier paper-cut pagoda, a playbook scroll, a panel of five owls and two guardian lions in Catppuccin Mocha colors" width="100%">
+</p>
+
 # @codesook/omp-pstack
 
 [pstack](https://github.com/cursor/plugins/tree/main/pstack) workflows for [oh-my-pi](https://github.com/can1357/oh-my-pi). pstack does nothing until you start it.
@@ -34,7 +38,7 @@ bun run build:release -- --decide          # would this version release? prints 
 bun run build:release -- --out <dir>       # build the plugin tree into <dir>
 ```
 
-The tree is deterministic: the same commit gives byte-identical output. It holds `skills/`, `agents/`, `README.md`, `THIRD-PARTY-NOTICES.txt`, a `package.json` with no `dependencies` (the `@oh-my-pi/*` packages are peers) and an `omp` key, and `src/` with two files: `index.js`, the extension bundled with every `@codesook/*` import inlined, and `verdict.ts`, the panel verdict helper that `panel-verdicts.md` imports from `<skill dir>/../../src/verdict.ts`. The sync engine, tests and dev tooling stay out. The release build is `src/release/build.ts`.
+The tree is deterministic: the same commit gives byte-identical output. It holds `skills/`, `agents/`, `assets/` (the README cover), `README.md`, `THIRD-PARTY-NOTICES.txt`, a `package.json` with no `dependencies` (the `@oh-my-pi/*` packages are peers) and an `omp` key, and `src/` with two files: `index.js`, the extension bundled with every `@codesook/*` import inlined, and `verdict.ts`, the panel verdict helper that `panel-verdicts.md` imports from `<skill dir>/../../src/verdict.ts`. The sync engine, tests and dev tooling stay out. The release build is `src/release/build.ts`.
 
 This package is not a root `omp.features` entry. Features gate extensions only, and listing it there as well as installing it would load the extension twice.
 
