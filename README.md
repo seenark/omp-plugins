@@ -28,6 +28,7 @@ Every feature except pstack and the themes lives in one plugin, `omp-plugins`. Y
 | `codegraph` | Tells the agent to explore code through [CodeGraph](https://github.com/colbymchenry/codegraph) in initialized projects | off | `codegraph` CLI and its MCP server |
 | `beads` | On-demand [Beads](https://github.com/gastownhall/beads) issue-tracker guidance, ready/open issue counts in the status line, and a live `/beads tasks` list in initialized workspaces | off | `bd` CLI |
 | `process-monitor` | `/procs` lists the processes OMP started with their ports and sessions, stops leftovers after a confirmation, and shows a `⚠ N ports` segment | off | `lsof` (macOS for full attribution) |
+| `skill-stats` | Records every skill use (yours, the agent's, a subagent's) and shows `/skill-stats` dashboards with delete candidates | off | — |
 | pstack | [pstack](https://github.com/cursor/plugins/tree/main/pstack) workflows: `/poteto` mode, playbooks, guards, a review panel on `pstack-*` model roles | separate plugin | OMP 18.11.1 or newer |
 | Catppuccin themes | Latte, Frappé, Macchiato and Mocha themes for OMP `/settings` | separate installer | A checkout of this repository |
 
@@ -38,7 +39,7 @@ Each package documents its own behavior in `packages/<name>/README.md`.
 Install every feature and pstack, then restart OMP:
 
 ```sh
-omp plugin install 'github:seenark/omp-plugins[headroom,prompt-border-style,shared-display,ponytail,caveman,codegraph,beads,rtk,process-monitor]'
+omp plugin install 'github:seenark/omp-plugins[headroom,prompt-border-style,shared-display,ponytail,caveman,codegraph,beads,rtk,process-monitor,skill-stats]'
 omp plugin install github:seenark/omp-pstack
 omp plugin list
 ```
@@ -159,7 +160,7 @@ Link the checkout so edits load on the next OMP start:
 ```sh
 bun install
 omp plugin link "$PWD"
-omp plugin features omp-plugins --enable=headroom,prompt-border-style,shared-display,ponytail,caveman,codegraph,beads,rtk,process-monitor
+omp plugin features omp-plugins --enable=headroom,prompt-border-style,shared-display,ponytail,caveman,codegraph,beads,rtk,process-monitor,skill-stats
 omp plugin link ./packages/pstack
 readlink ~/.omp/plugins/node_modules/omp-plugins   # should print this checkout's path
 ```
@@ -179,6 +180,7 @@ omp plugin install "$PWD/packages/codegraph"
 omp plugin install "$PWD/packages/beads"
 omp plugin install "$PWD/packages/rtk"
 omp plugin install "$PWD/packages/process-monitor"
+omp plugin install "$PWD/packages/skill-stats"
 ```
 
 ### Packages
@@ -195,6 +197,7 @@ omp plugin install "$PWD/packages/process-monitor"
 | `@codesook/omp-beads` | `beads` | `packages/beads/src/index.ts` |
 | `@codesook/omp-rtk` | `rtk` | `packages/rtk/src/index.ts` |
 | `@codesook/omp-process-monitor` | `process-monitor` | `packages/process-monitor/src/index.ts` |
+| `@codesook/omp-skill-stats` | `skill-stats` | `packages/skill-stats/src/index.ts` |
 | `@codesook/omp-pstack` | separate plugin | `packages/pstack/src/index.ts` |
 | `@codesook/omp-theme-catppuccin` | theme installer | `packages/theme-catppuccin/bin/install.js` |
 
@@ -214,6 +217,7 @@ omp plugin install "$PWD/packages/process-monitor"
 /codegraph [init|status|auto|off]
 /beads [init|status|tasks|auto|off]
 /procs
+/skill-stats [project|reset [skill]|project reset [skill]|import]
 /prompt-border [status|<style> [layout]|layout <layout>|reset|rail toggle|glyphs debug [frames|demo|on|off]]
 ```
 

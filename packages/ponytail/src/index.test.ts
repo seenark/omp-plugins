@@ -5,6 +5,7 @@ import * as path from "node:path";
 import { CODESOOK_OMP_CONFIG_CHANGED, isRecord } from "@codesook/omp-shared-display/config-store";
 import { SHARED_DISPLAY_CHANNEL, type FrameSequence } from "@codesook/omp-shared-display/client";
 import { INSTRUCTION_MODE_SUSPENSION_CHANNEL, suspendInstructionModes } from "@codesook/omp-shared-display/instruction-mode";
+import { SKILL_USE_EVENT } from "@codesook/omp-shared-display/skill-use";
 import ponytailExtension from "./index.ts";
 import { DEFAULT_SKILL_DIRECTORY, getCodesookOmpConfigPath } from "./types.ts";
 
@@ -367,6 +368,28 @@ describe("/ponytail commands", () => {
 		expect(harness.sent).toHaveLength(1);
 		expect(harness.sent[0]!.options).toEqual({ deliverAs: "followUp" });
 		expect(harness.notices.at(-1)?.message).toBe("ponytail-audit queued as follow-up.");
+	});
+
+	it("reports each helper command as a user Skill Use with the vendored SKILL.md path", async () => {
+		const harness = createHarness();
+		const uses: unknown[] = [];
+		harness.events.on(SKILL_USE_EVENT, data => void uses.push(data));
+		for (const name of ["ponytail-review", "ponytail-audit", "ponytail-debt"]) await harness.command(name);
+		expect(uses).toEqual(
+			["ponytail-review", "ponytail-audit", "ponytail-debt"].map(name => ({
+				name,
+				path: path.join(DEFAULT_SKILL_DIRECTORY, name, "SKILL.md"),
+				source: "user",
+			})),
+		);
+	});
+
+	it("reports no Skill Use for /ponytail mode commands", async () => {
+		const harness = createHarness();
+		const uses: unknown[] = [];
+		harness.events.on(SKILL_USE_EVENT, data => void uses.push(data));
+		await harness.command("ponytail", "ultra");
+		expect(uses).toEqual([]);
 	});
 });
 

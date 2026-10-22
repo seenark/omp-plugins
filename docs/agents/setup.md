@@ -2,7 +2,7 @@
 
 Procedure for an AI agent that is asked to install or set up `omp-plugins` for a user. Follow the phases in order. **Never install, uninstall, or overwrite anything before the user confirms that step.** Use the `ask` tool for every question; batch related questions into one call; put the recommended option first.
 
-Vocabulary: see `GLOSSARY.md`. Feature names: `headroom`, `prompt-border-style`, `shared-display`, `ponytail`, `caveman`, `codegraph`, `beads`, `rtk`, `process-monitor`. `pstack` is offered alongside them but installs as its own package. The root package also installs the unified `/omp-plugins` settings command.
+Vocabulary: see `GLOSSARY.md`. Feature names: `headroom`, `prompt-border-style`, `shared-display`, `ponytail`, `caveman`, `codegraph`, `beads`, `rtk`, `process-monitor`, `skill-stats`. `pstack` is offered alongside them but installs as its own package. The root package also installs the unified `/omp-plugins` settings command.
 
 ## Phase 0: inspect, change nothing
 
@@ -37,6 +37,7 @@ Ask one multi-select question. Describe each choice in one line and list its pre
 | `codegraph` | Code graph exploration guidance | `codegraph` CLI plus an MCP server entry |
 | `beads` | Issue-tracker guidance, ready/open counts in the status line, live `/beads tasks` list | `bd` CLI |
 | `process-monitor` | `/procs` dashboard for processes and ports OMP leaves running; tags bash commands with their Agent Session | `lsof`; macOS for full attribution |
+| `skill-stats` | Records every skill use and shows `/skill-stats` dashboards with delete candidates | nothing; `shared-display` is not needed (it shows no status segment) |
 | `pstack` | pstack workflows (poteto-mode, playbooks, review panel on `pstack-*` model roles) | Its own plugin, installed from `github:seenark/omp-pstack` (`@codesook/omp-pstack`), not a root feature; model roles chosen with `/pstack setup` |
 
 Recommend `shared-display` whenever the user picks any other display-producing feature (`headroom`, `ponytail`, `caveman`, `rtk`, `codegraph`, `beads`, `pstack`, `process-monitor`): without it their segments fall back to separate native status entries.
@@ -175,6 +176,7 @@ Keep selectors quoted; `[` and `]` are shell-special. Root install always includ
    | `headroom` | `/headroom health` | proxy reachable |
    | `codegraph` | `/codegraph status` | `ready` (the MCP tool may take a few seconds after start) |
    | `beads` | `/beads status` | `ready` |
+   | `skill-stats` | `/skill-stats` | a table of installed skills (all `0` before first use) |
    | `rtk` | footer segment or `rtk --version` | segment shows RTK savings |
    | `process-monitor` | `/procs` | listing opens, or plain text in a headless run |
    | `ponytail` | `/ponytail status` | mode reported |
