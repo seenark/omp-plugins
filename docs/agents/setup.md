@@ -35,7 +35,7 @@ Ask one multi-select question. Describe each choice in one line and list its pre
 | `caveman` | Terse-output instruction mode | nothing |
 | `rtk` | Rewrites shell commands to filter output | `rtk` CLI >= 0.51.0 |
 | `codegraph` | Code graph exploration guidance | `codegraph` CLI plus an MCP server entry |
-| `beads` | Issue-tracker guidance | `bd` CLI |
+| `beads` | Issue-tracker guidance, ready/open counts in the status line, live `/beads tasks` list | `bd` CLI |
 | `process-monitor` | `/procs` dashboard for processes and ports OMP leaves running; tags bash commands with their Agent Session | `lsof`; macOS for full attribution |
 | `pstack` | pstack workflows (poteto-mode, playbooks, review panel on `pstack-*` model roles) | Its own plugin, installed from `github:seenark/omp-pstack` (`@codesook/omp-pstack`), not a root feature; model roles chosen with `/pstack setup` |
 

@@ -46,5 +46,6 @@ Keep implementation details out of the map. Name only user paths, stable on-scre
 - [Headroom](./headroom.md): `/headroom` status, health, on and off against a missing proxy, and the segment.
 - [pstack](./pstack.md): `/pstack` status and doctor.
 - [Process monitor](./process-monitor.md): `/procs` overlay, leftover rows, view-only unknown rows, confirmed stop, and the `⚠ N ports` segment, driven with a tagged stand-in process.
+- [Beads](./beads.md): the Beads segment counts, `/beads tasks` live overlay, the menu entry, empty and error states, and live refresh from another terminal.
 
-Not mapped yet: `/prompt-border`, `/context-rail`, `/rtk`, `/beads`, `/codegraph`, `/pstack setup`, `/pstack preset`, `/poteto`, and the `/ponytail-review`, `/ponytail-audit` and `/ponytail-debt` helpers. The last three send an LLM prompt.
+Not mapped yet: `/prompt-border`, `/context-rail`, `/rtk`, `/codegraph`, `/pstack setup`, `/pstack preset`, `/poteto`, and the `/ponytail-review`, `/ponytail-audit` and `/ponytail-debt` helpers. The last three send an LLM prompt. `/beads init`, `status`, `auto` and `off` are not mapped either.

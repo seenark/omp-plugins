@@ -1,21 +1,27 @@
-import { lstatSync, readdirSync, realpathSync } from "node:fs";
+import { lstatSync, readdirSync, realpathSync, watch } from "node:fs";
 import * as path from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "@oh-my-pi/pi-coding-agent";
 import { matchesKey, truncateToWidth, type Component } from "@oh-my-pi/pi-tui";
 import { connectSharedDisplay, type SharedDisplayPublisher } from "@codesook/omp-shared-display/client";
 import { CODESOOK_OMP_CONFIG_CHANGED, isRecord, readCodesookOmpConfig } from "@codesook/omp-shared-display/config-store";
 import { readIntegrationSettings, resolveIntegrationProject, setProjectIntegrationPolicy, type IntegrationPolicy, type IntegrationVisibility } from "@codesook/omp-shared-display/project-integrations";
-import { inspectBeads, type BeadsInspection } from "./status";
+import { inspectBeads, renderBeadsSegment, resolveBeadsTemplate, type BeadsInspection } from "./status";
+import { loadTaskBoard, taskLines, type TaskLine } from "./tasks";
 
 const COMMAND_CHOICES = [
 	{ operation: "status", label: "Show status", description: "Open read-only workspace status; Enter or Esc closes it." },
+	{ operation: "tasks", label: "Show tasks", description: "Open a read-only live list of open issues grouped by status; Up/Down scrolls, Enter or Esc closes it." },
 	{ operation: "init", label: "Initialize project workspace", description: "Reuse a ready workspace, or continue to mode and hooks choices; standard initialization may make a Git commit." },
 	{ operation: "auto", label: "Enable project guidance", description: "Save project permission now for Beads guidance when ready; do not perform issue operations." },
 	{ operation: "off", label: "Disable project guidance", description: "Save project suppression now for this plugin's guidance; leave issue data, hooks, and other instructions unchanged." },
 ];
 
-export type BeadsOptions = { globalConfigPath?: string };
+export type BeadsTimers = { set: (callback: () => void, delayMs: number) => unknown; clear: (handle: unknown) => void };
+export type BeadsOptions = { globalConfigPath?: string; debounceMs?: number; timers?: BeadsTimers };
+// Beads rewrites these two files, by atomic rename, on every write; reads never touch them.
+const isChangeMarker = (filename: string | null): boolean => filename === "last-touched" || filename === "export-state.json";
 export type BeadsStatus = Omit<BeadsInspection, "state"> & {
+	template: string;
 	state: BeadsInspection["state"] | "suppressed";
 	workspaceState: BeadsInspection["state"];
 	integrationProject?: string;
@@ -57,23 +63,28 @@ export default function beadsExtension(pi: ExtensionAPI, options: BeadsOptions =
 	let stopped = false;
 	let lastVisibility: IntegrationVisibility | undefined;
 	let loading = false;
+	let watcher: { path: string; close: () => void } | undefined;
+	let debounceTimer: unknown;
+	const changeListeners = new Set<(current: BeadsStatus | undefined) => void>();
+	const timers = options.timers ?? { set: (callback, delayMs) => setTimeout(callback, delayMs), clear: handle => clearTimeout(handle as number) };
+	const debounceMs = options.debounceMs ?? 250;
 
 	const syncDisplay = (): void => {
 		if (!activeContext || stopped) return;
 		const checking = loading;
 		const visible = checking ? lastVisibility !== "never" : status !== undefined && (status.visibility === "always" || (status.visibility === "ready" && status.state === "ready"));
 		if (status) lastVisibility = status.visibility;
-		const text = visible ? `Beads: ${checking ? "loading" : status!.state}` : undefined;
+		const text = visible ? (checking ? "Beads: loading" : renderBeadsSegment(status!.state, status!.counts, status!.template)) : undefined;
 		publisher?.publish(text ? { frames: [[text]] } : null);
 		activeContext.ui.setStatus("beads", publisher?.hostAvailable ? undefined : text);
 	};
-	const refresh = async (ctx: ExtensionContext): Promise<BeadsStatus | undefined> => {
+	// A quiet refresh keeps showing the previous result while bd answers, so a live update never flashes "loading".
+	const refresh = async (ctx: ExtensionContext, { quiet = false } = {}): Promise<BeadsStatus | undefined> => {
 		const version = ++refreshVersion;
 		const cwd = ctx.cwd;
 		if (activeContext && activeContext !== ctx) activeContext.ui.setStatus("beads", undefined);
 		activeContext = ctx;
-		status = undefined;
-		loading = true;
+		if (!quiet) { status = undefined; loading = true; }
 		const abandon = (): undefined => {
 			// A newer refresh owns the display; otherwise stop showing "loading" for guidance that was dropped.
 			if (version === refreshVersion && !stopped) { loading = false; syncDisplay(); }
@@ -86,6 +97,7 @@ export default function beadsExtension(pi: ExtensionAPI, options: BeadsOptions =
 			const inspected = await inspectBeads((command, args, execOptions) => pi.exec(command, args, execOptions), cwd);
 			if (version !== refreshVersion || stopped || ctx.cwd !== cwd) return abandon();
 			status = {
+				template: resolveBeadsTemplate(settings.global.value.display.beads),
 				...inspected,
 				workspaceState: inspected.state,
 				state: settings.errors.length > 0 ? "error" : settings.policy === "off" ? "suppressed" : inspected.state,
@@ -100,11 +112,41 @@ export default function beadsExtension(pi: ExtensionAPI, options: BeadsOptions =
 			const global = readCodesookOmpConfig(options.globalConfigPath);
 			const display = global.valid && isRecord(global.value.display.beads) ? global.value.display.beads : undefined;
 			const visibility = display?.visibility;
-			status = { state: "error", workspaceState: "error", initialized: false, operatingDirectory: cwd, policySource: "unresolved", visibility: visibility === "always" || visibility === "never" ? visibility : "ready", errors: [], detail: error instanceof Error ? error.message : String(error) };
+			status = { template: resolveBeadsTemplate(display), state: "error", workspaceState: "error", initialized: false, operatingDirectory: cwd, policySource: "unresolved", visibility: visibility === "always" || visibility === "never" ? visibility : "ready", errors: [], detail: error instanceof Error ? error.message : String(error) };
 		}
 		loading = false;
+		syncWatch();
 		syncDisplay();
 		return status;
+	};
+	const stopWatching = (): void => {
+		watcher?.close();
+		watcher = undefined;
+		if (debounceTimer !== undefined) timers.clear(debounceTimer);
+		debounceTimer = undefined;
+	};
+	const scheduleChange = (): void => {
+		if (debounceTimer !== undefined) timers.clear(debounceTimer);
+		debounceTimer = timers.set(() => {
+			debounceTimer = undefined;
+			const ctx = activeContext;
+			if (!ctx || stopped) return;
+			void refresh(ctx, { quiet: true }).then(current => { for (const listener of [...changeListeners]) listener(current); });
+		}, debounceMs);
+	};
+	// Watch the directory, not the files: bd replaces the markers by rename, which orphans a per-file watch.
+	const syncWatch = (): void => {
+		const target = !stopped && status?.state === "ready" ? status.workspacePath : undefined;
+		if (watcher?.path === target) return;
+		stopWatching();
+		if (!target) return;
+		try {
+			const handle = watch(target, (_event, filename) => { if (isChangeMarker(filename)) scheduleChange(); });
+			handle.on("error", stopWatching);
+			watcher = { path: target, close: () => handle.close() };
+		} catch {
+			// The workspace can vanish between `bd where` and the watch; the next refresh retries.
+		}
 	};
 	const startSession = async (ctx: ExtensionContext): Promise<void> => {
 		stopped = false;
@@ -132,6 +174,66 @@ export default function beadsExtension(pi: ExtensionAPI, options: BeadsOptions =
 				render: width => [theme.fg("accent", theme.bold("Beads Status")), ...text.split("\n").map(line => truncateToWidth(line, width)), "", theme.fg("dim", "Enter/Esc close")],
 				handleInput: data => {
 					if (matchesKey(data, "enter") || matchesKey(data, "escape")) { closed = true; done(undefined); }
+				},
+				invalidate() {},
+			};
+			return component;
+		}, { overlay: true });
+	};
+	const taskView = async (ctx: ExtensionContext, current: BeadsStatus | undefined): Promise<TaskLine[]> => {
+		const note = (text: string): TaskLine[] => text.split("\n").map(line => ({ kind: "note", text: line }));
+		if (!current) return note("Project changed during inspection; run /beads tasks again.");
+		if (current.state !== "ready") return note(`Beads is ${current.state}; there is no task list to show.\n${current.detail}\n${current.errors.join("\n")}`.trim());
+		try {
+			return taskLines(await loadTaskBoard((command, args, execOptions) => pi.exec(command, args, execOptions), ctx.cwd));
+		} catch (error) {
+			return note(`Could not load tasks: ${error instanceof Error ? error.message : String(error)}`);
+		}
+	};
+	const showTasks = async (ctx: ExtensionContext): Promise<void> => {
+		if (!ctx.hasUI || typeof ctx.ui.custom !== "function") {
+			const lines = await taskView(ctx, await refresh(ctx, { quiet: true }));
+			ctx.ui.notify(lines.map(line => line.text).join("\n"), "info");
+			return;
+		}
+		await ctx.ui.custom<void>((tui, theme, _keys, done) => {
+			let lines: TaskLine[] = [{ kind: "note", text: "Loading…" }];
+			let offset = 0;
+			let closed = false;
+			let load = 0;
+			const reload = (current: BeadsStatus | undefined): void => {
+				const mine = ++load;
+				void taskView(ctx, current).then(next => {
+					if (closed || mine !== load) return;
+					lines = next;
+					tui.requestRender();
+				});
+			};
+			changeListeners.add(reload);
+			void refresh(ctx, { quiet: true }).then(reload);
+			const pageRows = (): number => Math.max(3, tui.terminal.rows - 6);
+			const component: Component = {
+				render: width => {
+					const rows = pageRows();
+					offset = Math.min(offset, Math.max(0, lines.length - rows));
+					const shown = lines.slice(offset, offset + rows);
+					const scrollable = lines.length > rows;
+					return [
+						theme.fg("accent", theme.bold("Beads Tasks")),
+						...shown.map(line => line.kind === "heading" ? theme.bold(truncateToWidth(line.text, width)) : truncateToWidth(line.text, width)),
+						"",
+						theme.fg("dim", truncateToWidth(`${scrollable ? "Up/Down scroll · " : ""}Enter/Esc close${scrollable ? ` · ${offset + 1}-${offset + shown.length} of ${lines.length}` : ""}`, width)),
+					];
+				},
+				handleInput: data => {
+					if (matchesKey(data, "enter") || matchesKey(data, "escape")) {
+						closed = true;
+						changeListeners.delete(reload);
+						done(undefined);
+					} else if (matchesKey(data, "up") || matchesKey(data, "down")) {
+						offset = Math.max(0, Math.min(offset + (matchesKey(data, "up") ? -1 : 1), lines.length - pageRows()));
+						tui.requestRender();
+					}
 				},
 				invalidate() {},
 			};
@@ -228,7 +330,7 @@ export default function beadsExtension(pi: ExtensionAPI, options: BeadsOptions =
 		}
 	};
 	pi.registerCommand("beads", {
-		description: "Choose a Beads action, or use init|status|auto|off",
+		description: "Choose a Beads action, or use init|status|tasks|auto|off",
 		getArgumentCompletions(argumentPrefix) {
 			const prefix = argumentPrefix.trim().toLowerCase();
 			return COMMAND_CHOICES.filter(choice => choice.operation !== prefix && choice.operation.startsWith(prefix)).map(choice => ({
@@ -241,7 +343,7 @@ export default function beadsExtension(pi: ExtensionAPI, options: BeadsOptions =
 			let operation = args.trim().toLowerCase();
 			if (!operation) {
 				if (!ctx.hasUI || typeof ctx.ui.select !== "function") {
-					ctx.ui.notify("Beads commands:\n/beads status — Show read-only workspace status.\n/beads init — Reuse a ready workspace, or choose initialization mode and hooks in interactive OMP; standard initialization may commit files.\n/beads auto — Enable project guidance when ready.\n/beads off — Disable only this plugin's project guidance.", "info");
+					ctx.ui.notify("Beads commands:\n/beads status — Show read-only workspace status.\n/beads tasks — List open issues grouped by status.\n/beads init — Reuse a ready workspace, or choose initialization mode and hooks in interactive OMP; standard initialization may commit files.\n/beads auto — Enable project guidance when ready.\n/beads off — Disable only this plugin's project guidance.", "info");
 					return;
 				}
 				const selected = await ctx.ui.select("Beads", COMMAND_CHOICES);
@@ -251,10 +353,11 @@ export default function beadsExtension(pi: ExtensionAPI, options: BeadsOptions =
 				operation = choice.operation;
 			}
 			if (operation === "status") { await showStatus(ctx); return; }
+			if (operation === "tasks") { await showTasks(ctx); return; }
 			if (operation === "init") { await initialize(ctx); return; }
 			if (operation !== "auto" && operation !== "off") {
 				await refresh(ctx);
-				ctx.ui.notify("Usage: /beads [init|status|auto|off].", "warning");
+				ctx.ui.notify("Usage: /beads [init|status|tasks|auto|off].", "warning");
 				return;
 			}
 			try {
@@ -287,6 +390,8 @@ export default function beadsExtension(pi: ExtensionAPI, options: BeadsOptions =
 	pi.on("session_shutdown", () => {
 		stopped = true;
 		refreshVersion += 1;
+		stopWatching();
+		changeListeners.clear();
 		unsubscribePresence?.();
 		publisher?.dispose();
 		activeContext?.ui.setStatus("beads", undefined);

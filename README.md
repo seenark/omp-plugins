@@ -26,7 +26,7 @@ Every feature except pstack and the themes lives in one plugin, `omp-plugins`. Y
 | `ponytail` | Ponytail Instruction Mode: a "lazy senior developer" who writes the smallest complete change | off | — |
 | `rtk` | Rewrites `bash` commands through rtk so shell output is filtered before the model reads it; shows RTK Savings | off | `rtk` 0.51.0 or newer |
 | `codegraph` | Tells the agent to explore code through [CodeGraph](https://github.com/colbymchenry/codegraph) in initialized projects | off | `codegraph` CLI and its MCP server |
-| `beads` | On-demand [Beads](https://github.com/gastownhall/beads) issue-tracker guidance in initialized workspaces | off | `bd` CLI |
+| `beads` | On-demand [Beads](https://github.com/gastownhall/beads) issue-tracker guidance, ready/open issue counts in the status line, and a live `/beads tasks` list in initialized workspaces | off | `bd` CLI |
 | `process-monitor` | `/procs` lists the processes OMP started with their ports and sessions, stops leftovers after a confirmation, and shows a `⚠ N ports` segment | off | `lsof` (macOS for full attribution) |
 | pstack | [pstack](https://github.com/cursor/plugins/tree/main/pstack) workflows: `/poteto` mode, playbooks, guards, a review panel on `pstack-*` model roles | separate plugin | OMP 18.11.1 or newer |
 | Catppuccin themes | Latte, Frappé, Macchiato and Mocha themes for OMP `/settings` | separate installer | A checkout of this repository |
@@ -212,7 +212,7 @@ omp plugin install "$PWD/packages/process-monitor"
 /ultracave
 /megacave
 /codegraph [init|status|auto|off]
-/beads [init|status|auto|off]
+/beads [init|status|tasks|auto|off]
 /procs
 /prompt-border [status|<style> [layout]|layout <layout>|reset|rail toggle|glyphs debug [frames|demo|on|off]]
 ```
@@ -293,7 +293,7 @@ New data belongs to the Integration Project. Linked-worktree initialization uses
 
 Global `behavior.beads.policy` (`auto`/`off`) and `display.beads.visibility` (`ready`/`always`/`never`) use the same settings envelope and staged project overrides as CodeGraph, independently. Invalid configuration fails closed and remains unchanged. Beads depends on Shared Display's 1.2.0 client/settings contracts, not on an active host or the CodeGraph plugin.
 
-Ready, permitted Beads guidance authorizes issue operations only after an explicit user request and within its scope. Availability alone never enables automatic issue tracking for unrelated work. Off removes only plugin guidance, not CLI access, data, or existing repository obligations. Status remains a read-only overlay even with hidden persistent display. Host-active display uses one shared segment; otherwise it uses the native footer. Refresh follows startup, turns, commands, settings changes, and project switches without polling.
+Ready, permitted Beads guidance authorizes issue operations only after an explicit user request and within its scope. Availability alone never enables automatic issue tracking for unrelated work. Off removes only plugin guidance, not CLI access, data, or existing repository obligations. Status remains a read-only overlay even with hidden persistent display. Host-active display uses one shared segment; otherwise it uses the native footer. With open issues the segment shows `Beads: <ready> ready · <open> open` (template `display.beads.template`, tokens `{ready}`, `{open}`, `{inProgress}`), and `/beads tasks` opens a live read-only list grouped by status. Refresh follows startup, turns, commands, settings changes, project switches, and Beads writes to the workspace (a debounced directory watch, never timer polling).
 
 See [Beads package documentation](packages/beads/README.md) for independent installation and operation.
 

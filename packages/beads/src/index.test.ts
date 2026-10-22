@@ -12,6 +12,7 @@ import beadsExtension from "./index";
 type Hook = (event: { systemPrompt?: readonly string[] }, context: ExtensionContext) => Promise<{ systemPrompt: string[] } | undefined | void> | void;
 type Command = { handler: (args: string, context: ExtensionContext) => Promise<void> };
 type Result = { code: number; stdout: string; stderr: string };
+const statusJson = (summary: Record<string, number> = {}) => JSON.stringify({ schema_version: 1, summary: { total_issues: 0, closed_issues: 0, deferred_issues: 0, in_progress_issues: 0, ready_issues: 0, ...summary } });
 const directories: string[] = [];
 const shutdowns: (() => Promise<unknown>)[] = [];
 afterEach(async () => {
@@ -52,7 +53,7 @@ function fixture() {
 	};
 	let execute = async (_command: string, args: readonly string[], _cwd: string): Promise<Result> => {
 		if (args.includes("where")) return { code: 0, stderr: "", stdout: JSON.stringify({ path: workspace, database_path: path.join(workspace, "dolt") }) };
-		return { code: 0, stderr: "", stdout: '{"count":0}' };
+		return { code: 0, stderr: "", stdout: statusJson() };
 	};
 	const pi = {
 		on: (name: string, handler: Hook) => { handlers.set(name, handler); },
@@ -119,7 +120,7 @@ test("off policy suppresses only plugin guidance and policy commands preserve ot
 	f.setExecute(async (command, args) => {
 		if (command !== "bd" || !args.includes("--readonly") || !args.includes("--sandbox")) throw new Error("Unexpected mutable CLI operation");
 		if (args[0] === "where") return { code: 0, stderr: "", stdout: JSON.stringify({ path: f.workspace }) };
-		if (args[0] === "count") return { code: 0, stderr: "", stdout: '{"count":0}' };
+		if (args[0] === "status") return { code: 0, stderr: "", stdout: statusJson() };
 		throw new Error("Unexpected CLI operation");
 	});
 	await f.hook("session_start");
@@ -213,7 +214,7 @@ test("project switch discards pending inspection and uses new policy and native 
 			if (cwd === f.project) { started.resolve(); await release.promise; }
 			return { code: 0, stderr: "", stdout: JSON.stringify({ path: cwd === f.project ? f.workspace : secondWorkspace }) };
 		}
-		return { code: 0, stderr: "", stdout: '{"count":0}' };
+		return { code: 0, stderr: "", stdout: statusJson() };
 	});
 	const oldTurn = f.hook("before_agent_start", ["Repository"]);
 	await started.promise;
@@ -254,7 +255,7 @@ test("moving cwd during an inspection without a lifecycle event cannot return st
 			await release.promise;
 			return { code: 0, stderr: "", stdout: JSON.stringify({ path: f.workspace }) };
 		}
-		return { code: 0, stderr: "", stdout: '{"count":0}' };
+		return { code: 0, stderr: "", stdout: statusJson() };
 	});
 	const turn = f.hook("before_agent_start", ["Repository"]);
 	await started.promise;
@@ -380,7 +381,7 @@ test("init refuses an unusable native workspace even when off policy masks backe
 	let mutated = false;
 	f.setExecute(async (_command, args) => {
 		if (args[0] === "where") return { code: 0, stderr: "", stdout: JSON.stringify({ path: f.workspace }) };
-		if (args[0] === "count") return { code: 1, stderr: "Error: no beads database found", stdout: "" };
+		if (args[0] === "status") return { code: 1, stderr: "Error: no beads database found", stdout: "" };
 		mutated = true;
 		throw new Error("Existing workspace must not be overwritten");
 	});
@@ -472,7 +473,7 @@ test("initializing through a directory alias reports the same project ready afte
 		if (args[0] === "init") { f.git("init", "--quiet"); initialized = true; return { code: 0, stdout: "", stderr: "" }; }
 		if (!initialized) return { code: 1, stderr: "", stdout: '{"error":"no_beads_directory"}' };
 		if (args[0] === "where") return { code: 0, stderr: "", stdout: JSON.stringify({ path: path.join(realpathSync(f.project), ".beads") }) };
-		return { code: 0, stderr: "", stdout: '{"count":0}' };
+		return { code: 0, stderr: "", stdout: statusJson() };
 	});
 	await f.command("init");
 	expect(f.notifications.at(-1)?.level).toBe("info");

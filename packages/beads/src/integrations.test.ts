@@ -42,9 +42,9 @@ function fixture(initialized: Record<Integration, boolean>) {
 			if (command !== "bd") throw new Error(`Unexpected native command: ${command}`);
 			if (!initialized.beads) return { code: 1, stderr: "", stdout: JSON.stringify({ error: "no_beads_directory", message: "No active beads workspace found." }) };
 			if (args[0] === "where") return { code: 0, stderr: "", stdout: JSON.stringify({ path: workspaces.beads, database_path: path.join(workspaces.beads, "embeddeddolt") }) };
-			if (args[0] === "count") return invalidBeads
+			if (args[0] === "status") return invalidBeads
 				? { code: 1, stderr: "Error: corrupt database", stdout: "" }
-				: { code: 0, stderr: "", stdout: JSON.stringify({ count: 0 }) };
+				: { code: 0, stderr: "", stdout: JSON.stringify({ summary: { total_issues: 0, closed_issues: 0, deferred_issues: 0, in_progress_issues: 0, ready_issues: 0 } }) };
 			throw new Error(`Unexpected Beads operation: ${args[0]}`);
 		},
 		getAllTools: () => [{ name: "mcp__codegraph_explore", sourceInfo: { source: "mcp" } }],
