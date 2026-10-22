@@ -1,7 +1,7 @@
 {
   "type": "module",
   "name": "@codesook/omp-theme-catppuccin",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "Catppuccin theme pack for oh-my-pi",
   "homepage": "https://catppuccin.com/palette/",
   "author": "Catppuccin and oh-my-pi contributors",

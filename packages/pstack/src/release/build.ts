@@ -1,9 +1,9 @@
 #!/usr/bin/env bun
 /**
- * Release build for the GitHub release branch.
+ * Release build for the npm package `@codesook/omp-pstack`.
  *
  *   bun run build:release -- --out <dir>   build the plugin tree into <dir> (emptied first)
- *   bun run build:release -- --decide      print `release`, `version`, `tag`, `reason` as key=value lines
+ *   bun run build:release -- --decide      print `release`, `version`, `reason` as key=value lines
  *
  * The tree is deterministic: same commit in, same bytes out.
  */
@@ -11,7 +11,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { parseArgs } from "node:util";
 
-export const TAG_PREFIX = "pstack-v";
+const REGISTRY = "https://registry.npmjs.org";
 export const PACKAGE_ROOT = path.resolve(import.meta.dir, "..", "..");
 
 const VERSION = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/;
@@ -23,16 +23,14 @@ const VERDICT = "src/verdict.ts";
 export interface ReleaseDecision {
 	release: boolean;
 	version: string;
-	tag: string;
 	reason: string;
 }
 
-/** A version with no `pstack-v<version>` tag yet releases; one that already has its tag does nothing. */
-export function decideRelease(version: string, tags: readonly string[]): ReleaseDecision {
+/** A version not yet on npm releases; one already published does nothing. */
+export function decideRelease(version: string, published: readonly string[]): ReleaseDecision {
 	if (!VERSION.test(version)) throw new Error(`not a semver version: ${JSON.stringify(version)}`);
-	const tag = `${TAG_PREFIX}${version}`;
-	const exists = tags.includes(tag);
-	return { release: !exists, version, tag, reason: exists ? `${tag} already exists` : `${tag} does not exist yet` };
+	const exists = published.includes(version);
+	return { release: !exists, version, reason: exists ? `${version} is already on npm` : `${version} is not on npm yet` };
 }
 
 type Manifest = Record<string, unknown>;
@@ -45,6 +43,7 @@ export function releaseManifest(source: Manifest): Manifest {
 		type: "module",
 		description: source.description,
 		license: source.license,
+		repository: source.repository,
 		peerDependencies: source.peerDependencies,
 		omp: { extensions: [`./${BUNDLE}`] },
 	};
@@ -93,17 +92,23 @@ export async function buildRelease(out: string, root = PACKAGE_ROOT): Promise<vo
 	fs.writeFileSync(path.join(out, "package.json"), `${JSON.stringify(releaseManifest(sourceManifest), null, "\t")}\n`);
 }
 
-function gitTags(): string[] {
-	const result = Bun.spawnSync(["git", "tag", "--list", `${TAG_PREFIX}*`], { cwd: PACKAGE_ROOT });
-	if (result.exitCode !== 0) throw new Error(`git tag --list failed: ${result.stderr.toString().trim()}`);
-	return result.stdout.toString().split("\n").filter(Boolean);
+/** Versions already on npm; a package that was never published has none. */
+async function publishedVersions(name: string): Promise<string[]> {
+	const response = await fetch(`${REGISTRY}/${name.replace("/", "%2f")}`);
+	if (response.status === 404) return [];
+	if (!response.ok) throw new Error(`npm registry lookup for ${name} failed: HTTP ${response.status}`);
+	const packument: unknown = await response.json();
+	if (!packument || typeof packument !== "object" || !("versions" in packument) || !packument.versions || typeof packument.versions !== "object") {
+		throw new Error(`npm registry lookup for ${name} returned no versions object`);
+	}
+	return Object.keys(packument.versions);
 }
 
 if (import.meta.main) {
 	const { values } = parseArgs({ args: Bun.argv.slice(2), options: { out: { type: "string" }, decide: { type: "boolean" } } });
 	if (values.decide) {
-		const { version } = JSON.parse(fs.readFileSync(path.join(PACKAGE_ROOT, "package.json"), "utf8")) as { version: string };
-		for (const [key, value] of Object.entries(decideRelease(version, gitTags()))) console.log(`${key}=${value}`);
+		const { name, version } = JSON.parse(fs.readFileSync(path.join(PACKAGE_ROOT, "package.json"), "utf8")) as { name: string; version: string };
+		for (const [key, value] of Object.entries(decideRelease(version, await publishedVersions(name)))) console.log(`${key}=${value}`);
 	} else if (values.out) {
 		await buildRelease(path.resolve(values.out));
 		console.log(`built ${path.resolve(values.out)}`);

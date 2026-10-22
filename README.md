@@ -12,7 +12,7 @@ Standalone [oh-my-pi](https://github.com/can1357/oh-my-pi) extensions in one Bun
 | `@codesook/omp-shared-display` | `shared-display` | no | `packages/shared-display/src/index.ts` |
 | `@codesook/omp-caveman` | `caveman` | no | `packages/caveman/src/index.ts` |
 | `@codesook/omp-ponytail` | `ponytail` | no | `packages/ponytail/src/index.ts` |
-| pstack (`@codesook/omp-pstack`) | — (install from the `release/pstack` branch; skills and agents need it) | — | `packages/pstack/src/index.ts` |
+| pstack (`@codesook/omp-pstack`) | — (separate npm install; skills and agents need it) | — | `packages/pstack/src/index.ts` |
 | `@codesook/omp-codegraph` | `codegraph` | no | `packages/codegraph/src/index.ts` |
 | `@codesook/omp-beads` | `beads` | no | `packages/beads/src/index.ts` |
 | `@codesook/omp-rtk` | `rtk` | no | `packages/rtk/src/index.ts` |
@@ -217,31 +217,18 @@ bun run pack:check
 bun run verify
 ```
 
-npm package publication is dependency ordered. pstack is not published to npm; it ships from the `release/pstack` branch (see below).
-
-```sh
-bun run publish:shared-display
-bun run publish:ponytail
-bun run publish:caveman
-bun run publish:codegraph
-bun run publish:beads
-bun run publish:headroom
-bun run publish:prompt-border-style
-bun run publish:settings
-bun run publish:theme-catppuccin
-bun run publish:all
-```
-
 ## Releasing pstack
 
-pstack installs from a GitHub release branch, not npm:
+pstack installs from npm:
 
 ```sh
-omp plugin install github:seenark/omp-plugins#release/pstack      # latest
-omp plugin install github:seenark/omp-plugins#pstack-v<version>   # pinned
+omp plugin install @codesook/omp-pstack            # latest
+omp plugin install @codesook/omp-pstack@<version>  # pinned
 ```
 
-To upgrade, reinstall from the same ref. To cut a release, bump `version` in `packages/pstack/package.json` and merge to `main`. The Release workflow (`.github/workflows/release.yml`) builds the plugin tree and commits it to `release/pstack`, a branch with no `main` history, then tags that commit `pstack-v<version>`. A version that already has its tag does nothing. Preview the decision and build the tree locally:
+It must not install from this repository as a git spec. OMP keeps one plugin per git repository: installing a second ref of `github:seenark/omp-plugins` removes the root `omp-plugins` entry from `~/.omp/plugins/package.json`, and the loader then skips it.
+
+To cut a release, bump `version` in `packages/pstack/package.json` and merge to `main`. The Release workflow (`.github/workflows/release.yml`) builds the plugin tree and runs `npm publish --provenance` on it, authenticated by the `NPM_TOKEN` repository secret. The token needs publish rights on the `@codesook` scope. A version already on npm does nothing. Preview the decision and build the tree locally:
 
 ```sh
 bun run build:release -- --decide

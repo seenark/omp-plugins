@@ -10,7 +10,7 @@ It owns the prompt editor replacement, border styles, Context Rail, prompt attac
 - `@oh-my-pi/pi-coding-agent` and `@oh-my-pi/pi-tui` `>=18.1.16`.
 
 ```sh
-omp plugin install @codesook/omp-prompt-border-style
+omp plugin install 'github:seenark/omp-plugins[prompt-border-style]'
 omp plugin install "$PWD/packages/prompt-border-style"
 ```
 

@@ -8,7 +8,7 @@ on:
 permissions:
   contents: read
 
-# One release at a time: two runs must not race on the release/pstack branch.
+# One release at a time: two runs must not race to publish the same version.
 concurrency:
   group: release-pstack
   cancel-in-progress: false
@@ -18,12 +18,15 @@ jobs:
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     permissions:
-      contents: write
+      contents: read
+      # npm provenance signs the package with this workflow's OIDC token.
+      id-token: write
     steps:
-      # Full history: the version/tag decision reads every pstack-v* tag, and release/pstack must be fetched to extend it.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          fetch-depth: 0
+          node-version: 24
+          registry-url: https://registry.npmjs.org
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version: 1.4.0
@@ -38,23 +41,8 @@ jobs:
       - name: Build
         if: steps.decide.outputs.release == 'true'
         run: bun run build:release -- --out "$RUNNER_TEMP/pstack-release"
-      - name: Publish to release/pstack
+      - name: Publish to npm
         if: steps.decide.outputs.release == 'true'
         env:
-          VERSION: ${{ steps.decide.outputs.version }}
-          TAG: ${{ steps.decide.outputs.tag }}
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          branch="$RUNNER_TEMP/release-branch"
-          if git ls-remote --exit-code --heads origin release/pstack > /dev/null; then
-            git worktree add -B release/pstack "$branch" origin/release/pstack
-          else
-            git worktree add --detach "$branch"
-            git -C "$branch" checkout --orphan release/pstack
-          fi
-          rsync -a --delete --exclude=/.git "$RUNNER_TEMP/pstack-release/" "$branch/"
-          git -C "$branch" add -A
-          git -C "$branch" commit --allow-empty -m "pstack v$VERSION" -m "Built from $GITHUB_SHA."
-          git -C "$branch" tag "$TAG"
-          git -C "$branch" push --atomic origin release/pstack "refs/tags/$TAG"
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: npm publish "$RUNNER_TEMP/pstack-release" --access public --provenance
