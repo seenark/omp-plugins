@@ -61,7 +61,7 @@ function runScenario(scenario: string): void {
 			exec: async (_command, args) => {
 				writeFileSync(nativeStartup, "native inspection reached");
 				if (args[0] === "where") return existsSync(data) ? { code: 0, stderr: "", stdout: JSON.stringify({ path: workspace, database_path: path.join(workspace, "dolt") }) } : { code: 1, stderr: "", stdout: '{"error":"no_beads_directory"}' };
-				if (args[0] === "count") return { code: 0, stderr: "", stdout: '{"count":0}' };
+				if (args[0] === "status") return { code: 0, stderr: "", stdout: '{"summary":{"total_issues":0,"closed_issues":0,"deferred_issues":0,"in_progress_issues":0,"ready_issues":0}}' };
 				mkdirSync(workspace, { recursive: true }); writeFileSync(data, "UNEXPECTED initialization"); writeFileSync(hook, "UNEXPECTED hook install");
 				return { code: 0, stdout: "", stderr: "" };
 			},
@@ -72,7 +72,7 @@ function runScenario(scenario: string): void {
 			const editor = new Editor({ borderColor: plain, symbols, selectList: { selectedPrefix: plain, selectedText: plain, description: plain, scrollInfo: plain, noMatch: plain, symbols } });
 			editor.setAutocompleteProvider(new CombinedAutocompleteProvider([{ name: commandName, ...command }], project));
 			const dropdown = () => editor.debugChildren.flatMap(child => child.render(160)).join("\\n");
-			const operations = () => [...dropdown().matchAll(/^[> ]*(status|init|auto|off)\\b/gm)].map(match => match[1]);
+			const operations = () => [...dropdown().matchAll(/^[> ]*(status|tasks|init|auto|off)\\b/gm)].map(match => match[1]);
 			const update = (input, ready, message) => {
 				const { promise, resolve, reject } = Promise.withResolvers();
 				let handlingInput = true;
@@ -105,9 +105,9 @@ function runScenario(scenario: string): void {
 			} else {
 				await update("/beads", () => editor.isShowingAutocomplete() && editor.debugChildren.some(child => child.getSelectedItem().value === commandName), "Typing must show the command-name dropdown");
 				untouched();
-				await update("\\t", () => operations().length === 4, "First Tab must chain the argument dropdown");
+				await update("\\t", () => operations().length === 5, "First Tab must chain the argument dropdown");
 				assert.equal(editor.getText(), "/beads ");
-				assert.deepEqual(operations().sort(), ["auto", "init", "off", "status"]);
+				assert.deepEqual(operations().sort(), ["auto", "init", "off", "status", "tasks"]);
 				untouched();
 				const prefix = operation === "off" ? "of" : "st";
 				await update(prefix, () => operations().length === 1 && operations()[0] === operation, "Argument prefix must filter to the chosen operation");

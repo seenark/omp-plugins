@@ -1,24 +1,49 @@
 import * as path from "node:path";
 import { isRecord } from "@codesook/omp-shared-display/config-store";
 
+export type BeadsCounts = { ready: number; open: number; inProgress: number };
 export type BeadsInspection = {
 	state: "ready" | "uninitialized" | "missing-prerequisite" | "error";
 	initialized: boolean;
 	workspacePath?: string;
 	databasePath?: string;
+	counts?: BeadsCounts;
 	detail: string;
 };
+export const DEFAULT_BEADS_TEMPLATE = "Beads: {ready} ready · {open} open";
 export type BeadsCommandResult = { code: number; stdout: string; stderr: string };
 export type BeadsExecute = (command: string, args: string[], options: { cwd: string; timeout: number }) => Promise<BeadsCommandResult>;
+
+export function resolveBeadsTemplate(display: unknown): string {
+	const template = isRecord(display) ? display.template : undefined;
+	return typeof template === "string" && template.trim() !== "" && !/[\r\n]/u.test(template) ? template : DEFAULT_BEADS_TEMPLATE;
+}
+
+/** The one place segment text is decided: counts replace the state word only for a Ready Integration with open issues. */
+export function renderBeadsSegment(state: string, counts: BeadsCounts | undefined, template: string): string {
+	if (state !== "ready" || !counts || counts.open === 0) return `Beads: ${state}`;
+	return template.replace(/\{(ready|open|inProgress)\}/g, (_match, token: keyof BeadsCounts) => String(counts[token]));
+}
+
+function parseCounts(data: unknown): BeadsCounts | undefined {
+	const summary = isRecord(data) && isRecord(data.summary) ? data.summary : undefined;
+	if (!summary) return undefined;
+	const numbers = ["total_issues", "closed_issues", "deferred_issues", "in_progress_issues", "ready_issues"].map(key => summary[key]);
+	if (!numbers.every(value => typeof value === "number" && Number.isSafeInteger(value) && value >= 0)) return undefined;
+	const [total, closed, deferred, inProgress, ready] = numbers as number[];
+	const open = total! - closed! - deferred!;
+	return open < 0 ? undefined : { ready: ready!, open, inProgress: inProgress! };
+}
 
 /** Let bd resolve ancestors, environment overrides, redirects and worktrees. */
 export async function inspectBeads(execute: BeadsExecute, cwd: string): Promise<BeadsInspection> {
 	const scope: Pick<BeadsInspection, "initialized" | "workspacePath" | "databasePath"> = { initialized: false };
-	// `info` suppresses query errors; `count` propagates them and returns no issue content.
-	for (const command of ["where", "count"]) {
+	let counts: BeadsCounts | undefined;
+	// `info` suppresses query errors; `status` propagates them and also carries every count the Status Segment needs.
+	for (const [command, ...extra] of [["where"], ["status", "--no-activity"]] as const) {
 		let result: BeadsCommandResult;
 		try {
-			result = await execute("bd", [command, "--json", "--readonly", "--sandbox"], { cwd, timeout: 10_000 });
+			result = await execute("bd", [command, "--json", ...extra, "--readonly", "--sandbox"], { cwd, timeout: 10_000 });
 		} catch (error) {
 			const missing = isRecord(error) && (error.code === "ENOENT" || error.code === "EACCES");
 			return {
@@ -51,9 +76,12 @@ export async function inspectBeads(execute: BeadsExecute, cwd: string): Promise<
 			scope.workspacePath = data.path;
 			scope.databasePath = typeof data.database_path === "string" ? data.database_path : undefined;
 			scope.initialized = Boolean(scope.databasePath);
-		} else if (!isRecord(data) || data.error !== undefined || typeof data.count !== "number" || !Number.isSafeInteger(data.count) || data.count < 0) {
-			return { ...scope, state: "error", detail: "Beads count returned an unsupported database response." };
+		} else {
+			counts = parseCounts(data);
+			if (!isRecord(data) || data.error !== undefined || !counts) {
+				return { ...scope, state: "error", detail: "Beads status returned an unsupported database response." };
+			}
 		}
 	}
-	return { ...scope, state: "ready", initialized: true, detail: "Native Beads workspace resolved and read-only database query succeeded." };
+	return { ...scope, state: "ready", initialized: true, counts, detail: "Native Beads workspace resolved and read-only database query succeeded." };
 }

@@ -24,6 +24,16 @@ test("staged root settings persist CodeGraph policy and visibility without losin
 	expect(saved.behavior.beads).toEqual({ policy: "off" });
 });
 
+test("Apply keeps a hand-written display.beads.template while changing Beads visibility", () => {
+	const file = path.join(temporary(), "global.json");
+	const root = { version: 1, display: { beads: { visibility: "ready", template: "{ready}/{open}" } }, behavior: {} };
+	writeFileSync(file, JSON.stringify(root));
+	const draft = draftFromRootConfig(root);
+	draft.display.beads.visibility = "always";
+	persistDraftToRoot(draft, file);
+	expect(JSON.parse(readFileSync(file, "utf8")).display.beads).toEqual({ visibility: "always", template: "{ready}/{open}" });
+});
+
 test("Instruction Mode settings persist Mode Levels and fail closed on removed Caveman defaultLevel", () => {
 	const file = path.join(temporary(), "global.json");
 	const root = { version: 1, display: { ponytail: { template: "{mode}", custom: 1 } }, behavior: { caveman: { defaultLevel: "full" }, ponytail: { defaultMode: "ultra" } } };

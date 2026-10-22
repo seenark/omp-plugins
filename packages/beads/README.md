@@ -1,6 +1,6 @@
 # Beads for OMP
 
-Optional, independently installable Beads integration for [oh-my-pi](https://github.com/can1357/oh-my-pi). Requires the installed `bd` CLI. Detects usable existing Beads databases and supports explicit initialization. It does not require CodeGraph or an active Shared Display host.
+Optional, independently installable Beads integration for [oh-my-pi](https://github.com/can1357/oh-my-pi). Requires the installed `bd` CLI. Detects usable existing Beads databases, shows how many issues are ready and open, lists them live with `/beads tasks`, and supports explicit initialization. It does not require CodeGraph or an active Shared Display host.
 
 ## Install
 
@@ -15,12 +15,14 @@ The package depends on `@codesook/omp-shared-display` 1.2.0 or newer for its cli
 ## Commands
 
 ```text
-/beads [init|status|auto|off]
+/beads [init|status|tasks|auto|off]
 ```
 
-Bare `/beads`: Tab after the command name inserts a trailing space and shows existing action suggestions. Choosing an action inserts command text only; press Enter to execute it. Enter on the bare command opens the native description-bearing action menu. Esc dismisses that menu without action. Each description explains whether the choice acts immediately or leads to initialization choices. Actions are Show status, Initialize project workspace, Enable project guidance, and Disable project guidance. Without interactive UI, bare `/beads` prints explicit command help and performs no action. Complete explicit commands keep their existing behavior.
+Bare `/beads`: Tab after the command name inserts a trailing space and shows existing action suggestions. Choosing an action inserts command text only; press Enter to execute it. Enter on the bare command opens the native description-bearing action menu. Esc dismisses that menu without action. Each description explains whether the choice acts immediately or leads to initialization choices. Actions are Show status, Show tasks, Initialize project workspace, Enable project guidance, and Disable project guidance. Without interactive UI, bare `/beads` prints explicit command help and performs no action. Complete explicit commands keep their existing behavior.
 
 `status` is read-only. Its focused overlay opens with `Loading…`, shows the inspection result or error, and closes with Enter/Esc. It works even when persistent status is hidden. Without interactive UI, status is reported as text.
+
+`tasks` is read-only. Its focused overlay lists open issues in three groups: **In progress**, **Ready** (open with no open blocker, as `bd ready` reports), and **Blocked** (every other open issue, including those with status `blocked`). Rows are sorted by priority, then most recently updated, and show the id, `P<priority>`, the title, and the first non-empty line of the description, truncated to the terminal width. Up and Down scroll a list longer than the screen. Enter or Esc closes it without capturing prompt input. The list re-queries `bd` whenever Beads writes data while it is open. An empty project shows `No open issues.`; an uninitialized, missing, suppressed, or failing Beads shows why there is no list. Without interactive UI, `/beads tasks` prints the same grouped list as plain text.
 
 `auto` and `off` explicitly write only Beads project policy. They do not change OMP plugin lifecycle state. Initialization never changes global or project policy: an off project remains off.
 
@@ -69,4 +71,14 @@ Permitted ready workspaces append runtime instructions while preserving prior sy
 
 `off` suppresses only this plugin's guidance. It does not remove data, prohibit independent CLI access, modify existing repository instructions, or affect CodeGraph. Existing repository Beads obligations still apply independently.
 
-Refresh occurs on startup, before turns, plugin commands, settings changes, and session/project switches. There is no idle watcher or polling; old workspace guidance is not retained when the project changes.
+Refresh occurs on startup, before turns, plugin commands, settings changes, session/project switches, and when Beads writes data (below). There is no timer polling; old workspace guidance is not retained when the project changes.
+
+## Issue counts and live refresh
+
+For a Ready Integration with at least one open issue, the Status Segment shows counts instead of the state word, for example `Beads: 5 ready · 12 open`. Here `ready` counts Ready Issues only. **Open** means every status that is not `closed` and not `deferred`, so in-progress and blocked issues count and deliberately postponed ones do not. With no open issues, and in every non-ready state, the segment keeps the integration state text (`Beads: ready`, `Beads: uninitialized`, `Beads: suppressed`, and so on). Visibility and project overrides apply to both forms unchanged.
+
+Change the wording with `display.beads.template` in the root config. Tokens are `{ready}`, `{open}` and `{inProgress}`; the default is `Beads: {ready} ready · {open} open`. A template that is empty, not a string, or spans several lines falls back to the default. The key is global only and is edited in the config file. `/omp-plugins` Apply keeps it untouched.
+
+Counts come from one read-only `bd status --json --no-activity --readonly --sandbox` per refresh (after `bd where`), the same two spawns inspection already made. `open` is `total_issues - closed_issues - deferred_issues`, `ready` is `ready_issues`, and `inProgress` is `in_progress_issues`. Pinned issues are counted as open by `bd status` but hidden from `bd list`, so a project that uses pinned issues can show a segment count one higher per pinned issue than the task list.
+
+For a Ready Integration the extension watches the Tool Workspace directory (the path `bd where` reports) and reacts only to events for `last-touched` and `export-state.json`. Beads replaces those files on every write and never on a read, so an idle session costs nothing. Events are debounced into one refresh that keeps showing the previous counts while `bd` answers. The watch is dropped on session shutdown, on project switch, and whenever the integration is not ready. The plugin never issues a write-capable `bd` command.
