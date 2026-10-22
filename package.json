@@ -12,7 +12,7 @@
     "check": "bun run scripts/check-workspace.mjs",
     "check:sync": "bun run --workspaces --if-present check:sync",
     "typecheck": "bun run --workspaces --if-present check:types",
-    "test": "bun run --workspaces --if-present test",
+    "test": "bun run --workspaces --sequential --if-present test",
     "pack:check": "bun run --workspaces --if-present pack:check",
     "build:release": "bun run --cwd packages/pstack build:release",
     "verify": "bun run typecheck && bun run test && bun run check && bun run check:sync && bun run pack:check",
