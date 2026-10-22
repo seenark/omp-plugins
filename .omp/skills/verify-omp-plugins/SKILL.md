@@ -12,7 +12,8 @@ Other surfaces are not covered here. The `packages/theme-catppuccin` installer C
 Scripts (run from the repo root):
 
 - `.omp/skills/verify-omp-plugins/scripts/verify-omp`: lifecycle (`launch`, `restart`, `doctor`, `env`, `cleanup`).
-- `.omp/skills/verify-omp-plugins/scripts/omp-pty`: PTY driver (`submit`, `send`, `key`, `wait`, `screen`, `status`, `stop`). It runs through `uv run --with pyte==0.8.2`, and the first call downloads pyte into the uv cache.
+- `.omp/skills/verify-omp-plugins/scripts/omp-pty`: PTY driver (`submit`, `send`, `key`, `wait`, `scroll-until`, `screen`, `status`, `stop`). It runs through `uv run --with pyte==0.8.2`, and the first call downloads pyte into the uv cache.
+- `.omp/skills/verify-omp-plugins/features/<feature>.sh`: one-command journeys for `process-monitor`, `skill-stats` and `beads` (see Journeys).
 
 Requirements on `PATH`: `omp` (proved on 18.12.6), `uv`, `git`, `bash`. macOS `/bin/ps` is used to check the child's environment.
 
@@ -66,9 +67,10 @@ All driving goes through `$OMP_PTY` with `$PTY` from `verify-omp env`:
 | --- | --- |
 | Run a slash command like a user | `$OMP_PTY submit $PTY "/caveman status"` |
 | Type without submitting | `$OMP_PTY send $PTY "/cav"` |
-| Press keys (each is a separate write, 0.3 s apart) | `$OMP_PTY key $PTY down enter` (also `esc tab bspace up left right ctrl-c ctrl-d ctrl-u`) |
+| Press keys (each is a separate write, 0.3 s apart) | `$OMP_PTY key $PTY down enter` (also `esc tab bspace up left right ctrl-c ctrl-d ctrl-u`, and `char:<c>` for one printable character, e.g. `key $PTY char:k`) |
 | Wait for rendered text (regex, multiline) | `$OMP_PTY wait $PTY 'Caveman off\.' --timeout 10` |
 | Wait for text to disappear | `$OMP_PTY wait $PTY '⠄⠠ caveman' --absent` |
+| Scroll a dialog until a row shows | `$OMP_PTY scroll-until $PTY '^proj-skill ' [--key down\|up] [--max 40] [--timeout 60]` |
 | Read or save the rendered screen | `$OMP_PTY screen $PTY [--out $EVID/<feature>/<step>.txt]` |
 
 `submit` does this in order:
@@ -89,6 +91,20 @@ Stable handles on screen:
 - **Dialogs:** a title line plus `Enter/Esc close` (status views), or a `╭─ Title ─╮` select box with `❯` on the highlighted row and `↑/↓ navigate  ⏎ select  ⎋ cancel`.
 
 Feature recipes live in [`features/README.md`](features/README.md). Read the index, then the matching feature file.
+
+`scroll-until` presses the key once per write, 0.3 s apart, and checks the screen before every press. It exits 0 the moment the regex matches, even with no press. It exits 1 and prints the screen after `--max` presses or `--timeout` seconds. Use it for long dashboards and lists, where the row you need starts below the fold. Anchor the regex to the row (`^name `), because headers often repeat the name.
+
+## Journeys
+
+A feature file ends in a scripted journey when its flow is long enough to be worth replaying. Each one drives an already-launched run:
+
+```sh
+.omp/skills/verify-omp-plugins/scripts/verify-omp launch r1
+.omp/skills/verify-omp-plugins/features/process-monitor.sh r1   # also skill-stats.sh, beads.sh
+.omp/skills/verify-omp-plugins/scripts/verify-omp cleanup r1
+```
+
+Each script saves every screen to `$EVID/<feature>/NN-step.txt`, prints `PASS <step>` per step, and stops with a non-zero exit at the first failed step, printing `FAIL <step> (line N)` to stderr. The journeys write into one scratch HOME, so launch a fresh run per journey. `process-monitor.sh` starts stand-in processes and kills only those, by recorded PID, after checking with `/bin/ps -wwE` that each still carries the environment marker it was started with. `process-monitor.sh` and `skill-stats.sh` restart omp once each on the same scratch HOME. `beads.sh` needs `bd` on `PATH`.
 
 ## Evidence
 
@@ -137,3 +153,5 @@ Both scripts are executable. `verify-omp` with no arguments prints its usage, an
 - **Headroom target.** The default `behavior.headroom.baseUrl` is `http://127.0.0.1:8788`. If a real Headroom proxy listens there on this machine, the scratch omp will reach it, unauthenticated because there is no token file. Otherwise the segment reads `⏹ Headroom not running`.
 - **Editor box style.** `submit` finds the editor by its `║` edges. If a journey changes `/prompt-border` style, the edges may change, and `submit` then fails with `editor never showed …`. Use `send` and `key` for steps after a style change.
 - **Fresh config on first start.** Headroom writes its default block into `config.json` when omp starts. A `config.json` that exists before your action is normal. Diff it, do not just test for its presence.
+- **`/tmp` is `/private/tmp` on macOS.** Paths derived from git (a project root, a dashboard title such as `Skill stats: Project Skills of …`) show the canonical `/private/tmp/...`, while `$PROJECT` and `$SCRATCH_HOME` are spelled `/tmp/...`. Match on the part after `/tmp/` or accept both.
+- **Background jobs inside `$(...)` die with the subshell.** To keep a helper process alive across steps, start it at the top level of the driving shell (`nohup cmd >/dev/null 2>&1 &`), wait, and find its pid with `pgrep -n -f`. `cmd & D=$!` can give a wrapper pid instead of the process you want. `features/process-monitor.sh` shows the pattern.

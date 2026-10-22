@@ -30,5 +30,4 @@ pre-push:
       run: .beads/hooks/pre-push {0}
     verify:
       priority: 2
-      # Git exports GIT_DIR to hooks in linked worktrees; tests that run git in temp repos must not inherit it.
-      run: env -u GIT_DIR -u GIT_WORK_TREE -u GIT_INDEX_FILE -u GIT_PREFIX -u GIT_COMMON_DIR bun run verify
+      run: bun run verify

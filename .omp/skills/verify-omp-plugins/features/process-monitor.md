@@ -23,24 +23,31 @@ Process monitor lists the processes OMP started, with their listening ports and 
 Preconditions:
 
 - A fresh `verify-omp launch` with `doctor` all `ok`.
-- Agent-started processes cannot be produced without a model, so start a stand-in from the driving shell. It carries the session tag that every bash tool command gets, and no omp session holds that id: `OMP_PLUGINS_SESSION=verify-demo bun -e 'Bun.serve({port:0,fetch:()=>new Response("x")});setInterval(()=>{},1e6)' & DECOY=$!`.
-- `lsof -nP -a -p $DECOY -iTCP -sTCP:LISTEN` prints one listening port. Note it as `$DECOY_PORT`.
+- Agent-started processes cannot be produced without a model, so start stand-ins from the driving shell. Launch each one like this, never inside `$(...)`, because a background job started there dies with the subshell, and never with a bare `cmd &` / `$!`, which can give a wrapper pid:
+  `OMP_PLUGINS_SESSION=verify-demo nohup bun -e 'Bun.serve({port:0,fetch:()=>new Response("x")});setInterval(()=>{},1e6)' >/dev/null 2>&1 &`, then `sleep 2; D=$(pgrep -n -f 'Bun.serve\(\{port:0')`.
+- `OMP_PLUGINS_SESSION` is the tag every bash tool command gets. No omp session holds the id `verify-demo`, so the stand-in counts as left over.
+- The listening port is `lsof -nP -a -p $D -iTCP -sTCP:LISTEN -Fn | sed -n 's/^n.*://p'`. Note it as `$DPORT`.
+- A second stand-in started without `OMP_PLUGINS_SESSION` carries no session tag, so the monitor lists it under `Unknown origin (view-only)`. Note its pid as `$U`.
 
-- **Overlay.** Run `$OMP_PTY submit $PTY "/procs"`, then `$OMP_PTY wait $PTY 'OMP processes'` and `$OMP_PTY wait $PTY 'Enter/Esc close'`. Save the screen with `$OMP_PTY screen $PTY --out $EVID/process-monitor/01-overlay.txt`.
-- **Leftover row.** `$OMP_PTY wait $PTY "$DECOY.*:$DECOY_PORT.*verify-demo.*⚠ leftover"`. The row sits in a group titled with a project path or `No project`, never under `Unknown origin (view-only)`. The scratch omp creates no `~/.omp/run/session-owners/` directory, and the header still counts the stand-in as a leftover holding a port.
-- **Internals stay collapsed.** The screen shows `▸ OMP internals` when the scratch omp has workers, and no `__omp_worker_` command text until the group is unfolded with `Tab` on its header.
-- **Unknown rows are view-only.** Press `down` until the cursor (`›`) is on a row under `Unknown origin (view-only)`, then `$OMP_PTY key $PTY bspace`. Wait for `view-only`. No confirmation dialog appears and `kill -0 $DECOY` still succeeds.
-- **Close.** `$OMP_PTY key $PTY esc` closes the overlay. The editor text is unchanged.
-- **Segment.** After at most 30 s of idle, `$OMP_PTY wait $PTY '⚠ \d+ ports' --timeout 45`. Save `02-segment.txt`.
-- **Stop with confirmation.** Reopen `/procs`, press `down` until the cursor is on the `$DECOY` row, press `bspace`, then `$OMP_PTY wait $PTY "Stop pid $DECOY"`. The dialog shows the command and `Ports: $DECOY_PORT`. Save `03-confirm.txt`, answer yes, and `$OMP_PTY wait $PTY "Stop pid $DECOY" --absent`. Then `kill -0 $DECOY` must fail, and the reopened list no longer has the row.
-- **Declined stop.** Repeat with a fresh stand-in and answer no. `kill -0` still succeeds and no row changes.
+- **One command.** `.omp/skills/verify-omp-plugins/features/process-monitor.sh <run-id>` runs every step below against a launched run. It saves screens to `$EVID/process-monitor/NN-step.txt`, prints `PASS <step>` lines, exits non-zero at the first failure, and kills only the stand-ins it started.
+- **Overlay.** Run `$OMP_PTY submit $PTY "/procs"`, then `$OMP_PTY wait $PTY 'OMP processes'` and `$OMP_PTY wait $PTY 'Enter/Esc close'`. Save `$EVID/process-monitor/01-overlay.txt` with `$OMP_PTY screen $PTY --out …`.
+- **Leftover row.** `$OMP_PTY wait $PTY "$D .*⚠ leftover$"`. The session column shows only the id tail (`…ify-demo`), so never match the full session id. A row reads `<pid>  :<port>  <command>  <session>  ⚠ leftover`, and the cursor row starts with `›`.
+- **Unknown rows are view-only.** `$OMP_PTY scroll-until $PTY "^› +$U " --max 80` puts the cursor on the unknown stand-in. Then `$OMP_PTY key $PTY bspace` and `$OMP_PTY wait $PTY 'Not started by OMP as far as can be proven: view-only\.'`. No `Stop pid` dialog appears, and `kill -0 $U` still succeeds.
+- **Close.** `$OMP_PTY key $PTY esc`, then `$OMP_PTY wait $PTY 'OMP processes' --absent`.
+- **Segment.** The count refreshes after at most 30 s of idle: `$OMP_PTY wait $PTY '⚠ \d+ ports' --timeout 45`. Save the screen.
+- **Stop with confirmation.** Reopen `/procs`, `$OMP_PTY scroll-until $PTY "^› +$D " --max 80`, `$OMP_PTY key $PTY bspace` (`char:k` also works), then `$OMP_PTY wait $PTY "Stop pid $D\?"`. The dialog shows `Ports: $DPORT` and the rows `❯ Yes` / `No`. Save the screen, press `$OMP_PTY key $PTY enter` (Yes is the default), and wait for `"Stop pid $D\?" --absent`. `kill -0 $D` then fails (poll briefly), and `$OMP_PTY wait $PTY "$D .*⚠ leftover$" --absent` shows the refreshed list without the row.
+- **Declined stop.** With a fresh stand-in `$D2`, open the same dialog and press `$OMP_PTY key $PTY down enter` (No). The dialog closes, `$D2 .*⚠ leftover$` is still listed, and `kill -0 $D2` still succeeds.
+- **Next-start notice.** With `$D2` still running, write an empty file named like its session: `mkdir -p $SCRATCH_HOME/.local/share/codesook-omp/process-monitor/ended && : > $SCRATCH_HOME/.local/share/codesook-omp/process-monitor/ended/verify-demo`. Then `verify-omp restart $RUN_ID` and `$OMP_PTY wait $PTY 'Warning: 1 process started by an earlier OMP session is still running:'`. Stop `$D2` afterwards.
+- **Previous-session prompt.** Read the live session id: `$OMP_PTY submit $PTY "/session"`, `$OMP_PTY wait $PTY 'Session Info'`, then take the uuid from `$OMP_PTY screen $PTY`. Start a stand-in tagged `OMP_PLUGINS_SESSION=<that uuid>`, run `$OMP_PTY submit $PTY "/new"`, and `$OMP_PTY wait $PTY 'The previous session left 1 process running:'`. The select shows `❯ Close all` and `Keep`. `$OMP_PTY key $PTY enter` closes all, and the stand-in's pid is gone.
 
 ## Gotchas
 
-- `lsof` is machine-wide, so the unknown-origin group lists real listeners from the user's machine. Unknown rows offer no stop, which the recipe checks; never confirm a stop on any row other than the stand-in.
-- The segment count includes any other tagged process on the machine whose session has no lock file open under the scratch HOME, which is every tagged process from outside this run. Identify the stand-in by its row, not by the number.
+- `lsof` is machine-wide, so the unknown-origin group also lists real listeners from the user's machine. Unknown rows offer no stop. Never confirm a stop on any row other than a stand-in.
+- The segment count includes any other tagged process on the machine whose session has no lock file open under the scratch HOME, which is every tagged process from outside this run. Identify a stand-in by its row, not by the number.
 - The tag is read from the process environment, so it only works for a process the current user owns and that `ps` shows an environment for. A stand-in launched through `/bin/sleep` or another hardened system binary shows no tag; use `bun`.
+- The session column is truncated to the last 8 characters of the id. Match `"$PID .*⚠ leftover$"`, not the session text.
+- A stand-in started with `cmd & D=$!` gives a wrapper pid, and one started inside `$(...)` dies with the subshell. Start it at the top level of the shell, wait 2 s, and look the pid up with `pgrep -n -f`.
 - An agent-started process, and therefore the marker added to bash tool commands, needs a model turn and cannot be driven here. Report it as unverified, not as passing through the stand-in.
-- The previous-session prompt and the next-start notice need a second session or a restart and are not part of this recipe unless a stand-in with the previous session's id is started first. Report them as unreachable when skipped.
-- `omp-pty key` has no letter keys, so `k` cannot be sent; `bspace` is the equivalent. Do not type `k` through `submit`, which closes dialogs first.
-- Stop the stand-in yourself if a step fails: `kill $DECOY`.
+- The `OMP internals` group stays collapsed (`▸ OMP internals`) when the scratch omp has workers. The journey does not assert it because a fresh scratch omp may have none.
+- Do not type `k` through `submit`, which closes dialogs first. Use `key bspace` or `key char:k`.
+- If a step fails, stop the stand-ins yourself: `kill $D $U` (the journey script does this on exit through its trap).

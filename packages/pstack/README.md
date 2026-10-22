@@ -102,7 +102,7 @@ After compaction the model gets a short hidden reminder of the playbook and step
 
 ## Status Segment
 
-pstack is a Shared Display producer (source `pstack`, needs `@codesook/omp-shared-display` 1.3.0 or newer). While active it publishes one segment, for example `pstack · feature · 3/7 · panel 3/4`: playbook, todo progress, panel attendance once a seat has run, and a dropout count when a seat fell back. It publishes a tombstone when the session is not active, and nothing is shown in a session that never started pstack.
+pstack is a Shared Display producer (source `pstack`, needs `@codesook/omp-shared-display` 1.5.1 or newer). While active it publishes one segment, for example `pstack · feature · 3/7 · panel 3/4`: playbook, todo progress, panel attendance once a seat has run, and a dropout count when a seat fell back. It publishes a tombstone when the session is not active, and nothing is shown in a session that never started pstack.
 
 ## Instruction Mode suspension
 

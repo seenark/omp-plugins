@@ -1,6 +1,7 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "@oh-my-pi/pi-coding-agent";
+import { canonicalPath } from "@codesook/omp-shared-display/project-integrations";
 import { SUSPENDABLE_INSTRUCTION_MODES } from "@codesook/omp-shared-display/instruction-mode";
 import { suspendsMode, type PstackBehavior } from "./behavior.ts";
 import { resolveSeats } from "./panel.ts";
@@ -28,14 +29,6 @@ export interface DoctorInput {
 	skillsRoot: string;
 	displayHostAvailable: boolean;
 }
-
-const realpath = (target: string): string => {
-	try {
-		return fs.realpathSync(target);
-	} catch {
-		return path.resolve(target);
-	}
-};
 
 function listFiles(directory: string): string[] {
 	return fs.readdirSync(directory, { recursive: true, withFileTypes: true }).flatMap(entry => (entry.isFile() ? [path.join(entry.parentPath, entry.name)] : []));
@@ -97,12 +90,12 @@ function checkSkills({ commands, skillsRoot }: Pick<DoctorInput, "commands" | "s
 	if (skillCommands.size === 0) {
 		return [{ check: "skills", severity: "warning", message: "OMP lists no skill commands (skills.enableSkillCommands off?), so ownership of the workflow-called skills cannot be checked." }];
 	}
-	const root = realpath(skillsRoot) + path.sep;
+	const root = canonicalPath(skillsRoot) + path.sep;
 	const findings: Finding[] = [];
 	for (const name of called) {
 		const owner = skillCommands.get(`skill:${name}`);
 		if (!owner) findings.push({ check: "skills", severity: "error", message: `Skill ${name} is called by a workflow but OMP does not list it. Check the package is installed and the skill is not disabled.` });
-		else if (!owner.path || !realpath(owner.path).startsWith(root)) {
+		else if (!owner.path || !canonicalPath(owner.path).startsWith(root)) {
 			findings.push({ check: "skills", severity: "error", message: `Skill ${name} resolves to ${owner.path ?? "another source"}, not pstack's copy, so workflows load that one instead.` });
 		}
 	}

@@ -1,5 +1,6 @@
 import { isRecord } from "@codesook/omp-shared-display/config-store";
-import { readFileSync, realpathSync, statSync } from "node:fs";
+import { canonicalPath } from "@codesook/omp-shared-display/project-integrations";
+import { readFileSync, statSync } from "node:fs";
 import * as path from "node:path";
 import type { Origin, Scope, SkillInfo } from "./types.ts";
 
@@ -9,16 +10,6 @@ const PROJECT_SKILL_DIRECTORIES: readonly (readonly [string, string])[] = [
 	[".claude", "skills"],
 ];
 const GLOBAL: Scope = { kind: "global" };
-
-/** `git rev-parse --show-toplevel` and a symlinked directory give different spellings of one folder; compare and store only under the real one. */
-function canonicalPath(target: string): string {
-	const resolved = path.resolve(target);
-	try {
-		return realpathSync.native(resolved);
-	} catch {
-		return resolved;
-	}
-}
 
 /** The only constructor of a Project Scope, so a root from any source (skill path, Integration Project) is canonical. */
 export function projectScope(root: string): Extract<Scope, { kind: "project" }> {

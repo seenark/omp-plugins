@@ -1,6 +1,6 @@
 # @codesook/omp-ponytail
 
-Ponytail, the "lazy senior developer" [Instruction Mode](../../GLOSSARY.md), for [oh-my-pi](https://github.com/can1357/oh-my-pi). The package adds the pinned `skills/ponytail/SKILL.md` rules to every request of an Agent Session until you turn them off, and publishes its status as a Shared Display source when that opt-in host is loaded. It replaces the third-party plugin `@dietrichgebert/ponytail` in this setup; do not load both.
+Ponytail, the "lazy senior developer" [Instruction Mode](../../CONTEXT.md), for [oh-my-pi](https://github.com/can1357/oh-my-pi). The package adds the pinned `skills/ponytail/SKILL.md` rules to every request of an Agent Session until you turn them off, and publishes its status as a Shared Display source when that opt-in host is loaded. It replaces the third-party plugin `@dietrichgebert/ponytail` in this setup; do not load both.
 
 ## Install
 

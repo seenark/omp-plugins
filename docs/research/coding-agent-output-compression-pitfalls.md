@@ -155,7 +155,7 @@ Applicability labels: **applies**, **not applicable**, **unclear**.
 
 - **Symptom.** `rtk gain` reports large savings that did not reduce the bill.
 - **Cause.** rtk is credited with filtering the agent already did: 2.1M tokens claimed for a ~195-token saving ([#2805](https://github.com/rtk-ai/rtk/issues/2805)). `head -N`/`tail -N` rewrites are booked as a `cat` of the whole file ([#4366](https://github.com/rtk-ai/rtk/issues/4366)). Negative savings floor to zero ([#3702](https://github.com/rtk-ai/rtk/issues/3702)). Filters that never engage are invisible: `curl` passed 34M tokens at 0% in two months ([#4390](https://github.com/rtk-ai/rtk/issues/4390)) and JSON reads leaked 2.9M at 3% ([#4393](https://github.com/rtk-ai/rtk/issues/4393)). One independent eval reported rtk defaults at **16% higher cost per passing run** than no rtk, on an August build ([#3492](https://github.com/rtk-ai/rtk/issues/3492)). A commenter could not reproduce the exit-code root cause on `develop` at 0.48.0 across 35 cases, so treat that number as a caution, not a measurement of 0.51.0.
-- **Applies.** Yes, because the plugin displays "RTK Savings" ([GLOSSARY.md](../../GLOSSARY.md)) and the goal is total bill.
+- **Applies.** Yes, because the plugin displays "RTK Savings" ([CONTEXT.md](../../CONTEXT.md)) and the goal is total bill.
 - **Guard.** Label the display as an estimate. Judge changes by provider `usage` (`input_tokens`, `cache_read_input_tokens`, `cache_creation_input_tokens`, `output_tokens`) over a fixed task set, not by `rtk gain`.
 
 ### R11. `cat`, `head`, `tail` rewritten to `rtk read`

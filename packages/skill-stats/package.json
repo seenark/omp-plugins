@@ -1,6 +1,6 @@
 {
 	"name": "@codesook/omp-skill-stats",
-	"version": "1.0.0",
+	"version": "1.0.1",
 	"type": "module",
 	"description": "Skill Use recording and /skill-stats dashboards for oh-my-pi",
 	"license": "MIT",
@@ -11,7 +11,7 @@
 		"pack:check": "bun ../../scripts/check-package-files.ts"
 	},
 	"exports": { ".": "./src/index.ts" },
-	"dependencies": { "@codesook/omp-shared-display": "^1.5.0" },
+	"dependencies": { "@codesook/omp-shared-display": "^1.5.1" },
 	"peerDependencies": {
 		"@oh-my-pi/pi-coding-agent": ">=18.3.1",
 		"@oh-my-pi/pi-tui": ">=18.3.1"

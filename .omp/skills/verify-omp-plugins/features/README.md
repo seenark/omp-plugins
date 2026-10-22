@@ -49,4 +49,6 @@ Keep implementation details out of the map. Name only user paths, stable on-scre
 - [Process monitor](./process-monitor.md): `/procs` overlay, leftover rows, view-only unknown rows, confirmed stop, and the `⚠ N ports` segment, driven with a tagged stand-in process.
 - [Beads](./beads.md): the Beads segment counts, `/beads tasks` live overlay, the menu entry, empty and error states, and live refresh from another terminal.
 
-Not mapped yet: `/prompt-border`, `/context-rail`, `/rtk`, `/codegraph`, `/pstack setup`, `/pstack preset`, `/poteto`, and the `/ponytail-review`, `/ponytail-audit` and `/ponytail-debt` helpers. The last three send an LLM prompt. `/beads init`, `status`, `auto` and `off` are not mapped either.
+Skill stats, Process monitor and Beads also ship a journey script, `features/<name>.sh RUN_ID`, that drives the whole recipe against a launched run and prints `PASS`/`FAIL` per step.
+
+Not mapped yet: `/prompt-border`, `/context-rail`, `/rtk`, `/codegraph`, `/pstack setup`, `/pstack preset`, `/poteto`, and the `/ponytail-audit` and `/ponytail-debt` helpers, which send an LLM prompt. `/ponytail-review` is exercised only as the Skill stats recording path, not as a review. `/beads init`, `status`, `auto` and `off` are not mapped either.
