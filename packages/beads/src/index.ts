@@ -1,4 +1,4 @@
-import { lstatSync, readdirSync, realpathSync, watch } from "node:fs";
+import { lstatSync, readdirSync, watch } from "node:fs";
 import * as path from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "@oh-my-pi/pi-coding-agent";
 import { matchesKey, truncateToWidth, type Component } from "@oh-my-pi/pi-tui";
@@ -246,7 +246,7 @@ export default function beadsExtension(pi: ExtensionAPI, options: BeadsOptions =
 			let current = await refresh(ctx);
 			if (!current) throw new Error("Project changed during inspection; run /beads init again.");
 			if (!current.integrationProject || current.errors.length || (current.workspaceState !== "ready" && current.workspaceState !== "uninitialized")) throw new Error(formatBeadsStatus(current));
-			const project = realpathSync(current.integrationProject);
+			const project = current.integrationProject;
 			let stealth = false;
 			let installHooks = false;
 			if (current.workspaceState === "uninitialized") {
@@ -276,7 +276,7 @@ export default function beadsExtension(pi: ExtensionAPI, options: BeadsOptions =
 				installHooks = !stealth && hooks === hookChoices[1]!.label;
 				if (ctx.cwd !== cwd) throw new Error("Project changed during initialization choices; run /beads init again.");
 				current = await refresh(ctx);
-				if (!current || !current.integrationProject || realpathSync(current.integrationProject) !== project || current.errors.length || (current.workspaceState !== "ready" && current.workspaceState !== "uninitialized")) throw new Error(current ? formatBeadsStatus(current) : "Project changed during inspection; run /beads init again.");
+				if (!current || !current.integrationProject || current.integrationProject !== project || current.errors.length || (current.workspaceState !== "ready" && current.workspaceState !== "uninitialized")) throw new Error(current ? formatBeadsStatus(current) : "Project changed during inspection; run /beads init again.");
 				if (current.workspaceState === "uninitialized") ensureEmpty();
 			}
 			if (current.workspaceState === "ready") {
@@ -322,7 +322,7 @@ export default function beadsExtension(pi: ExtensionAPI, options: BeadsOptions =
 			const after = await refresh(ctx);
 			const diagnostic = [result.stdout, result.stderr].filter(text => text.trim()).join("\n").trim();
 			if (result.code !== 0) throw new Error(`bd init refused or failed (exit ${result.code}). ${diagnostic}\n${after ? formatBeadsStatus(after) : "Project changed; run /beads status."}`);
-			if (!after || !after.integrationProject || realpathSync(after.integrationProject) !== project || after.workspaceState !== "ready" || after.errors.length) throw new Error(`bd init completed, but resulting workspace is not ready. ${diagnostic}\n${after ? formatBeadsStatus(after) : "Project changed; run /beads status."}`);
+			if (!after || !after.integrationProject || after.integrationProject !== project || after.workspaceState !== "ready" || after.errors.length) throw new Error(`bd init completed, but resulting workspace is not ready. ${diagnostic}\n${after ? formatBeadsStatus(after) : "Project changed; run /beads status."}`);
 			ctx.ui.notify(`Beads workspace initialized; project policy unchanged. Issue operations still require an explicit request.\n${formatBeadsStatus(after)}${result.stderr.trim() ? `\nNative diagnostics:\n${result.stderr.trim()}` : ""}`, result.stderr.trim() ? "warning" : "info");
 		} catch (error) {
 			await refresh(ctx);

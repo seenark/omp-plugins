@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from "bun:test";
-import { mkdtempSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { execFileSync } from "node:child_process";
@@ -35,11 +35,23 @@ test("Git working trees own policy, including nested repositories; outside Git u
 	expect(await resolveIntegrationProject(child)).toBe(await resolveIntegrationProject(repository));
 	execFileSync("git", ["init", "-q", nested]);
 	expect(await resolveIntegrationProject(nested)).not.toBe(await resolveIntegrationProject(repository));
-	expect(await resolveIntegrationProject(outside)).toBe(outside);
+	expect(await resolveIntegrationProject(outside)).toBe(realpathSync(outside));
 	const spacedRepository = path.join(outside, "workspace ");
 	mkdirSync(spacedRepository);
 	execFileSync("git", ["init", "-q", spacedRepository]);
 	expect(await resolveIntegrationProject(spacedRepository)).toBe(realpathSync(spacedRepository));
+});
+
+test("a project reached through a symlink resolves to one canonical path with and without Git", async () => {
+	const parent = temporary();
+	const real = path.join(parent, "real");
+	const alias = path.join(parent, "alias");
+	mkdirSync(real);
+	symlinkSync(real, alias, "dir");
+	const expected = realpathSync(real);
+	expect(await resolveIntegrationProject(alias)).toBe(expected);
+	execFileSync("git", ["init", "-q", real]);
+	expect(await resolveIntegrationProject(alias)).toBe(expected);
 });
 
 test("Git inspection failures cannot bypass a repository's shared off policy", () => {

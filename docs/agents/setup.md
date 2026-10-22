@@ -2,7 +2,7 @@
 
 Procedure for an AI agent that is asked to install or set up `omp-plugins` for a user. Follow the phases in order. **Never install, uninstall, or overwrite anything before the user confirms that step.** Use the `ask` tool for every question; batch related questions into one call; put the recommended option first.
 
-Vocabulary: see `GLOSSARY.md`. Feature names: `headroom`, `prompt-border-style`, `shared-display`, `ponytail`, `caveman`, `codegraph`, `beads`, `rtk`, `process-monitor`, `skill-stats`. `pstack` is offered alongside them but installs as its own package. The root package also installs the unified `/omp-plugins` settings command.
+Vocabulary: see `CONTEXT.md`. Feature names: `headroom`, `prompt-border-style`, `shared-display`, `ponytail`, `caveman`, `codegraph`, `beads`, `rtk`, `process-monitor`, `skill-stats`. `pstack` is offered alongside them but installs as its own package. The root package also installs the unified `/omp-plugins` settings command.
 
 ## Phase 0: inspect, change nothing
 

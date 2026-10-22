@@ -1,6 +1,6 @@
 {
 	"name": "@codesook/omp-pstack",
-	"version": "1.1.2",
+	"version": "1.1.3",
 	"type": "module",
 	"description": "pstack workflows (poteto-mode, playbooks, principles) for oh-my-pi",
 	"license": "MIT",
@@ -31,7 +31,7 @@
 		".": "./src/index.ts"
 	},
 	"dependencies": {
-		"@codesook/omp-shared-display": "^1.3.0"
+		"@codesook/omp-shared-display": "^1.5.1"
 	},
 	"peerDependencies": {
 		"@oh-my-pi/pi-ai": ">=18.11.1",

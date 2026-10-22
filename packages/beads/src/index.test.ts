@@ -172,7 +172,7 @@ test("visibility never hides persistent display but not ready guidance or read-o
 	const command = f.command("status");
 	expect(f.render()).toContain("Loading");
 	await rendered;
-	expect(f.render()).toContain(`Integration Project: ${f.project}`);
+	expect(f.render()).toContain(`Integration Project: ${realpathSync(f.project)}`);
 	expect(f.render()).toContain(`Tool Workspace: ${f.workspace}`);
 	expect(f.render()).toContain(`Database: ${path.join(f.workspace, "dolt")}`);
 	f.input("\u001b");

@@ -1,4 +1,5 @@
 import { execFile } from "node:child_process";
+import { realpathSync } from "node:fs";
 import * as path from "node:path";
 import { promisify } from "node:util";
 import {
@@ -16,18 +17,28 @@ export type IntegrationVisibility = "ready" | "always" | "never";
 type SettingsSource = "project" | "global" | "default";
 const git = promisify(execFile);
 
+/** The one spelling of a folder to compare or key on: `git rev-parse --show-toplevel` and `/tmp` or `/var` style symlinks name the same folder differently. */
+export function canonicalPath(target: string): string {
+	const resolved = path.resolve(target);
+	try {
+		return realpathSync.native(resolved);
+	} catch {
+		return resolved;
+	}
+}
+
 export async function resolveIntegrationProject(cwd: string): Promise<string> {
 	try {
 		const result = await git("git", ["rev-parse", "--show-toplevel"], { cwd, timeout: 5000, env: { ...process.env, LC_ALL: "C", LANG: "C" } });
 		const project = result.stdout.replace(/\r?\n$/u, "");
 		if (!path.isAbsolute(project)) throw new Error("Git did not return an absolute working-tree root.");
-		return project;
+		return canonicalPath(project);
 	} catch (error) {
 		const diagnostic = (isRecord(error) && typeof error.stderr === "string" ? error.stderr.trim() : "") || (error instanceof Error ? error.message : String(error));
 		if (isRecord(error) && error.code === 128 && (
 			/^fatal: not a git repository \(or any of the parent directories\): \.git$/u.test(diagnostic) ||
 			/^fatal: not a git repository \(or any parent up to mount point [^\r\n]+\)\r?\nStopping at filesystem boundary \(GIT_DISCOVERY_ACROSS_FILESYSTEM not set\)\.$/u.test(diagnostic)
-		)) return path.resolve(cwd);
+		)) return canonicalPath(cwd);
 		throw new Error(`Cannot resolve Integration Project for ${cwd}: ${diagnostic}. Check Git availability, permissions, and repository ownership before enabling integration guidance.`);
 	}
 }

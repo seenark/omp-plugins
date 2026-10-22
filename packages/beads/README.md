@@ -10,7 +10,7 @@ omp plugin install 'github:seenark/omp-plugins[beads]'
 omp plugin install "$PWD/packages/beads"
 ```
 
-The package depends on `@codesook/omp-shared-display` 1.2.0 or newer for its client and settings contracts. Installing that dependency does not activate its display host. Beads is off by default in the root package's optional feature selection; standalone installation loads only the Beads extension.
+The package depends on `@codesook/omp-shared-display` 1.5.1 or newer for its client and settings contracts. Installing that dependency does not activate its display host. Beads is off by default in the root package's optional feature selection; standalone installation loads only the Beads extension.
 
 ## Commands
 

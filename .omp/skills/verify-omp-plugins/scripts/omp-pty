@@ -4,8 +4,10 @@
   omp-pty start  RUN_DIR [--cols N] [--rows N] [--cwd DIR] -- CMD...
   omp-pty submit RUN_DIR TEXT            close any dialog, clear editor, type TEXT, dismiss autocomplete, Enter
   omp-pty send   RUN_DIR TEXT            literal text, no Enter
-  omp-pty key    RUN_DIR KEY...          enter esc tab bspace up down left right ctrl-c ctrl-d
+  omp-pty key    RUN_DIR KEY...          enter esc tab bspace up down left right ctrl-c ctrl-d ctrl-u, or char:<c> for one printable character
   omp-pty wait   RUN_DIR REGEX [--timeout S] [--absent]
+  omp-pty scroll-until RUN_DIR REGEX [--key down|up] [--max N] [--timeout S]
+                                         press KEY (default down), one write per press, until the screen matches REGEX; exit 1 and print the screen otherwise
   omp-pty screen RUN_DIR [--out FILE]
   omp-pty status RUN_DIR
   omp-pty stop   RUN_DIR
@@ -43,9 +45,21 @@ def request(run_dir, payload, timeout=5):
     return json.loads(data or b"{}")
 
 
+def key_data(key):
+    if key.startswith("char:"):
+        return key[5:]
+    return KEYS[key]
+
+
+def key_arg(key):
+    if key in KEYS or (key.startswith("char:") and len(key) == 6 and key[5].isprintable()):
+        return key
+    raise argparse.ArgumentTypeError(f"{key!r}: use one of {', '.join(sorted(KEYS))} or char:<one printable character>")
+
+
 def press(run_dir, *keys):
     for key in keys:
-        request(run_dir, {"op": "write", "data": KEYS[key]})
+        request(run_dir, {"op": "write", "data": key_data(key)})
         time.sleep(0.3)
 
 
@@ -145,9 +159,12 @@ def main():
     p.add_argument("--rows", type=int, default=40); p.add_argument("--cwd")
     p = sub.add_parser("send"); p.add_argument("run_dir"); p.add_argument("text")
     p = sub.add_parser("submit"); p.add_argument("run_dir"); p.add_argument("text")
-    p = sub.add_parser("key"); p.add_argument("run_dir"); p.add_argument("keys", nargs="+", choices=sorted(KEYS))
+    p = sub.add_parser("key"); p.add_argument("run_dir"); p.add_argument("keys", nargs="+", type=key_arg)
     p = sub.add_parser("wait"); p.add_argument("run_dir"); p.add_argument("pattern")
     p.add_argument("--timeout", type=float, default=20); p.add_argument("--absent", action="store_true")
+    p = sub.add_parser("scroll-until"); p.add_argument("run_dir"); p.add_argument("pattern")
+    p.add_argument("--key", choices=["down", "up"], default="down"); p.add_argument("--max", type=int, default=40)
+    p.add_argument("--timeout", type=float, default=60)
     p = sub.add_parser("screen"); p.add_argument("run_dir"); p.add_argument("--out")
     for name in ("status", "stop"):
         sub.add_parser(name).add_argument("run_dir")
@@ -198,6 +215,19 @@ def main():
         request(run_dir, {"op": "write", "data": KEYS["enter"]})
     elif args.op == "key":
         press(run_dir, *args.keys)
+    elif args.op == "scroll-until":
+        regex = re.compile(args.pattern, re.MULTILINE)
+        deadline = time.time() + args.timeout
+        presses = 0
+        while True:
+            reply = request(run_dir, {"op": "screen"})
+            if regex.search(reply["screen"]):
+                return
+            if reply["exited"] is not None or presses >= args.max or time.time() > deadline:
+                print(reply["screen"])
+                sys.exit(f"omp-pty scroll-until: not found after {presses} {args.key} presses: {args.pattern!r}")
+            press(run_dir, args.key)
+            presses += 1
     elif args.op == "wait":
         regex = re.compile(args.pattern, re.MULTILINE)
         deadline = time.time() + args.timeout

@@ -1,6 +1,6 @@
 {
 	"name": "@codesook/omp-ponytail",
-	"version": "1.2.0",
+	"version": "1.2.1",
 	"type": "module",
 	"description": "Ponytail mode and Shared Display producer for oh-my-pi",
 	"license": "MIT",

@@ -1,6 +1,6 @@
 # Agent Instructions
 
-`omp-plugins`: Bun monorepo of oh-my-pi plugins (`packages/*`). Vocabulary in `GLOSSARY.md` and `CONTEXT.md`. This file is a router: read the doc a task names before acting on it.
+`omp-plugins`: Bun monorepo of oh-my-pi plugins (`packages/*`). Vocabulary in `CONTEXT.md`. This file is a router: read the doc a task names before acting on it.
 
 ## Always
 
@@ -18,5 +18,6 @@
 - **Issues, specs, tickets, `bd` commands, session close** → `docs/agents/issue-tracker.md`. Run `bd prime` when Beads context is missing.
 - **Triage, role labels** → `docs/agents/triage-labels.md`.
 - **Exploring the codebase, domain terms, ADRs** → `docs/agents/domain.md` first.
+- **Reviewing a diff** → `CODING_STANDARDS.md`.
 - **Updating Caveman, Ponytail, pstack, the Headroom server, or the RTK binary upstream** → `docs/agents/upstream-sync.md`.
 - **Installing or setting up these plugins for a user** → `docs/agents/setup.md`. Ask before every install, removal, or Headroom provisioning step.
