@@ -85,7 +85,7 @@ test("Git inspection failures cannot bypass a repository's shared off policy", (
 			assert.equal(process.exitCode, 0, process.stderr.toString());
 			const result = JSON.parse(process.stdout.toString());
 			if (scenario.failure) {
-				assert.ok(result.error, "Git failure fell back to " + result.project + " and enabled policy " + result.policy);
+				assert.ok(result.error, "Git failure (" + JSON.stringify(scenario.extra) + ") fell back to " + result.project + " and enabled policy " + result.policy);
 			} else {
 				assert.equal(result.project, outside);
 				assert.equal(result.policy, "auto");
@@ -101,6 +101,8 @@ test("Git inspection failures cannot bypass a repository's shared off policy", (
 		XDG_CONFIG_HOME: path.join(home, ".config"),
 		PATH: "/usr/bin:/bin",
 		LC_ALL: "C",
+		// A host /etc/gitconfig (CI runners) may trust every directory, which would defeat the ownership scenario.
+		GIT_CONFIG_NOSYSTEM: "1",
 	};
 	const child = Bun.spawnSync([process.execPath, "-e", `const processEnvironment = ${JSON.stringify(processEnvironment)};${source}`], {
 		cwd: root,
