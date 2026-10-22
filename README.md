@@ -1,81 +1,171 @@
+<p align="center">
+  <img src="docs/assets/cover.jpg" alt="omp-plugins cover: a layered paper-cut Japanese landscape in Catppuccin Mocha colors" width="100%">
+</p>
+
 # omp-plugins
 
-Standalone [oh-my-pi](https://github.com/can1357/oh-my-pi) extensions in one Bun workspace.
+Plugins for [oh-my-pi (OMP)](https://github.com/can1357/oh-my-pi), the terminal coding agent. They cut token spend, show what the agent is doing, and add engineering workflows:
 
-## Packages and features
+- **Spend fewer tokens.** Large tool results go through a [Headroom](https://github.com/headroomlabs-ai/headroom) proxy and shell output goes through [rtk](https://github.com/rtk-ai/rtk) before the model reads them. Both show how many tokens they saved.
+- **Steer the agent.** Caveman makes answers terse. Ponytail makes the agent write the smallest complete change.
+- **See it at a glance.** One shared status line carries every plugin's state, and the prompt box gets border styles and a context-usage rail.
+- **Use your tools.** CodeGraph and Beads integrations tell the agent when a project has a code graph or an issue tracker it can use.
+- **Work in playbooks.** pstack adds `/poteto` mode, playbooks, guards and a multi-model review panel.
 
-| Package | Feature | Default | Entry |
+Every feature except pstack and the themes lives in one plugin, `omp-plugins`. You choose which features it loads; the rest stay off.
+
+## Features
+
+| Feature | What it does | Default | Needs |
 | --- | --- | --- | --- |
-| `@codesook/omp-plugin-settings` | root settings command | yes with root install | `packages/codesook-omp-plugin/index.ts` |
-| `@codesook/omp-headroom` | `headroom` | yes | `packages/headroom/index.ts` |
-| `@codesook/omp-prompt-border-style` | `prompt-border-style` | yes | `packages/prompt-border-style/src/main.ts` |
-| `@codesook/omp-shared-display` | `shared-display` | no | `packages/shared-display/src/index.ts` |
-| `@codesook/omp-caveman` | `caveman` | no | `packages/caveman/src/index.ts` |
-| `@codesook/omp-ponytail` | `ponytail` | no | `packages/ponytail/src/index.ts` |
-| pstack (`@codesook/omp-pstack`) | — (separate install from `github:seenark/omp-pstack`; skills and agents need it) | — | `packages/pstack/src/index.ts` |
-| `@codesook/omp-codegraph` | `codegraph` | no | `packages/codegraph/src/index.ts` |
-| `@codesook/omp-beads` | `beads` | no | `packages/beads/src/index.ts` |
-| `@codesook/omp-rtk` | `rtk` | no | `packages/rtk/src/index.ts` |
-| `@codesook/omp-theme-catppuccin` | theme package | — | `packages/theme-catppuccin/bin/install.js` |
+| Settings | `/omp-plugins` dialog that edits every plugin's settings in `~/.config/codesook-omp/config.json` | always on | — |
+| `headroom` | Compresses large tool results before provider requests without breaking the provider prompt cache; shows Headroom Savings | on | A running Headroom proxy |
+| `prompt-border-style` | Prompt editor border styles, the Context Rail (context usage beside the prompt), the attachment band and spinner glyphs | on | — |
+| `shared-display` | One animated status line that the other features publish their Status Segments into | off | — |
+| `caveman` | Caveman Instruction Mode: terse answers in `caveman`, `ultracave` or `megacave` level | off | — |
+| `ponytail` | Ponytail Instruction Mode: a "lazy senior developer" who writes the smallest complete change | off | — |
+| `rtk` | Rewrites `bash` commands through rtk so shell output is filtered before the model reads it; shows RTK Savings | off | `rtk` 0.51.0 or newer |
+| `codegraph` | Tells the agent to explore code through [CodeGraph](https://github.com/colbymchenry/codegraph) in initialized projects | off | `codegraph` CLI and its MCP server |
+| `beads` | On-demand [Beads](https://github.com/gastownhall/beads) issue-tracker guidance in initialized workspaces | off | `bd` CLI |
+| pstack | [pstack](https://github.com/cursor/plugins/tree/main/pstack) workflows: `/poteto` mode, playbooks, guards, a review panel on `pstack-*` model roles | separate plugin | OMP 18.11.1 or newer |
+| Catppuccin themes | Latte, Frappé, Macchiato and Mocha themes for OMP `/settings` | separate installer | A checkout of this repository |
 
-Root install loads unified settings plus default Headroom and Prompt Border features. Shared Display, Ponytail, Caveman, CodeGraph, Beads, and RTK remain opt-in.
+Each package documents its own behavior in `packages/<name>/README.md`.
 
-## Requirements
+## Quick start
 
-- Bun 1.4.0 or newer
-- OMP 18.3.1 or newer
-
-```sh
-bun --version
-omp --version
-```
-
-## Install from GitHub
-
-```sh
-omp plugin install github:seenark/omp-plugins
-omp plugin install 'github:seenark/omp-plugins[headroom,prompt-border-style]'
-omp plugin install 'github:seenark/omp-plugins[shared-display,ponytail,caveman]'
-omp plugin install 'github:seenark/omp-plugins[codegraph]'
-omp plugin install 'github:seenark/omp-plugins[beads]'
-omp plugin install 'github:seenark/omp-plugins[rtk]'
-omp plugin install 'github:seenark/omp-plugins[*]'
-```
-
-### All features
+Install every feature and pstack, then restart OMP:
 
 ```sh
 omp plugin install 'github:seenark/omp-plugins[headroom,prompt-border-style,shared-display,ponytail,caveman,codegraph,beads,rtk]'
+omp plugin install github:seenark/omp-pstack
+omp plugin list
 ```
 
-The `ponytail` and `rtk` features replace the third-party `@dietrichgebert/ponytail` and `pi-rtk-optimizer` plugins. Remove those first so instructions and command rewrites are not applied twice:
+`omp plugin list` should show both `omp-plugins` and `@codesook/omp-pstack`. In OMP, run `/omp-plugins` to review settings and `/pstack setup` to choose pstack's models. A feature whose CLI or proxy is missing loads anyway and reports the missing prerequisite in its status; install it from [Prerequisites](#prerequisites).
+
+Prefer a guided install? Ask your OMP agent to follow [`docs/agents/setup.md`](docs/agents/setup.md). It asks which features you want, checks conflicts and prerequisites, and confirms every step before it runs.
+
+## Requirements
+
+- OMP 18.3.1 or newer; pstack needs 18.11.1 or newer.
+- Bun 1.4.0 or newer.
+
+```sh
+omp --version
+bun --version
+```
+
+## Install
+
+### The `omp-plugins` plugin
+
+The default install loads Settings, `headroom` and `prompt-border-style`:
+
+```sh
+omp plugin install github:seenark/omp-plugins
+```
+
+Choose features with a selector. Keep the quotes: `[` and `]` are special in most shells. Selectors are feature names, not directories.
+
+```sh
+omp plugin install 'github:seenark/omp-plugins[headroom,prompt-border-style]'
+omp plugin install 'github:seenark/omp-plugins[shared-display,ponytail,caveman]'
+omp plugin install 'github:seenark/omp-plugins[rtk]'
+omp plugin install 'github:seenark/omp-plugins[*]'   # every feature
+```
+
+Turn features on or off later without reinstalling:
+
+```sh
+omp plugin features omp-plugins --enable=codegraph,beads
+omp plugin features omp-plugins --disable=headroom
+```
+
+Settings is always loaded. `shared-display` is recommended with any other status-producing feature; without it each one falls back to its own native status entry.
+
+### pstack
+
+pstack is its own plugin, published as built releases in [`seenark/omp-pstack`](https://github.com/seenark/omp-pstack):
+
+```sh
+omp plugin install github:seenark/omp-pstack              # latest release
+omp plugin install 'github:seenark/omp-pstack#v<version>' # pinned release
+```
+
+Run the same command again to upgrade. Shared Display, Caveman and Ponytail come from `omp-plugins`; pstack works without them, but then shows no Status Segment and cannot suspend Caveman and Ponytail while it runs.
+
+Do not install pstack from `github:seenark/omp-plugins#<ref>`. OMP keeps one plugin per git repository, so that install evicts the root `omp-plugins` plugin.
+
+After installing, run `/pstack setup` to pick the models for each `pstack-*` role, then start a task with `/poteto <task>`. See the [pstack README](packages/pstack/README.md) for commands, presets and the review panel.
+
+### Catppuccin themes
+
+The themes install from a checkout. The installer copies four JSON files into OMP's custom theme directory:
+
+```sh
+git clone https://github.com/seenark/omp-plugins.git
+cd omp-plugins
+bun packages/theme-catppuccin/bin/install.js
+```
+
+In OMP, open `/settings` and pick `catppuccin-latte` as the light theme and `catppuccin-mocha`, `catppuccin-macchiato` or `catppuccin-frappe` as the dark theme.
+
+### Prerequisites
+
+| Feature | Check | Install |
+| --- | --- | --- |
+| `rtk` | `rtk --version` (0.51.0 or newer) | `brew install rtk`, or see [rtk](https://github.com/rtk-ai/rtk) |
+| `codegraph` | `codegraph status --json .` | `npm install -g @colbymchenry/codegraph` |
+| `beads` | `bd --version` | See [Beads releases](https://github.com/gastownhall/beads) |
+| `headroom` | `/headroom health` in OMP | Run the proxy with this repository's [`compose.yaml`](compose.yaml); steps in [`docs/agents/setup.md`](docs/agents/setup.md#phase-3-headroom-only-if-headroom-was-selected) |
+
+CodeGraph also needs its MCP server in `~/.omp/agent/mcp.json`. Merge this entry into the file; do not replace it:
+
+```json
+{ "mcpServers": { "codegraph": { "type": "stdio", "command": "codegraph", "args": ["serve", "--mcp"] } } }
+```
+
+Then run `/codegraph init` or `/beads init` in a project to create its data. Detection alone never initializes anything.
+
+Headroom never starts the proxy itself. After the proxy is up, save its token with `/headroom token` and check it with `/headroom health`.
+
+### Replacing third-party plugins
+
+`ponytail`, `rtk` and pstack replace `@dietrichgebert/ponytail`, `pi-rtk-optimizer` and the marketplace `pstack@omp-pstack`. Remove those first, so instructions and command rewrites are not applied twice:
 
 ```sh
 omp plugin uninstall @dietrichgebert/ponytail
 omp plugin uninstall pi-rtk-optimizer
+omp plugin uninstall pstack@omp-pstack
 ```
 
-The `rtk` feature needs the RTK CLI 0.51.0 or newer on `PATH`:
+### Update and uninstall
+
+Update by running the install commands again. Uninstall with:
 
 ```sh
-brew install rtk    # or: brew upgrade rtk
-rtk --version
+omp plugin uninstall omp-plugins
+omp plugin uninstall @codesook/omp-pstack
 ```
 
-All features from a local checkout (links the repo, so edits load on the next OMP start):
+`omp plugin uninstall` reinstalls the remaining plugins from `~/.omp/plugins/package.json`.
+
+### From a local checkout
+
+Link the checkout so edits load on the next OMP start:
 
 ```sh
 bun install
 omp plugin link "$PWD"
 omp plugin features omp-plugins --enable=headroom,prompt-border-style,shared-display,ponytail,caveman,codegraph,beads,rtk
+omp plugin link ./packages/pstack
 readlink ~/.omp/plugins/node_modules/omp-plugins   # should print this checkout's path
 ```
 
-`omp plugin uninstall` of any other plugin reinstalls the remaining plugins from `~/.omp/plugins/package.json`, which replaces the link with the GitHub copy and resets enabled features. Run the three commands above again afterwards.
+Uninstalling any other plugin replaces the link with the GitHub copy and resets enabled features. Run the link commands again afterwards.
 
-Feature selectors are package names, not directories. Keep selectors quoted because `[` and `]` are special in many shells.
-
-Install one package from a checkout:
+Install a single package from a checkout:
 
 ```sh
 bun install
@@ -89,11 +179,21 @@ omp plugin install "$PWD/packages/beads"
 omp plugin install "$PWD/packages/rtk"
 ```
 
-Install Catppuccin themes:
+### Packages
 
-```sh
-bun packages/theme-catppuccin/bin/install.js
-```
+| Package | Feature | Entry |
+| --- | --- | --- |
+| `@codesook/omp-plugin-settings` | Settings | `packages/codesook-omp-plugin/index.ts` |
+| `@codesook/omp-headroom` | `headroom` | `packages/headroom/index.ts` |
+| `@codesook/omp-prompt-border-style` | `prompt-border-style` | `packages/prompt-border-style/src/main.ts` |
+| `@codesook/omp-shared-display` | `shared-display` | `packages/shared-display/src/index.ts` |
+| `@codesook/omp-caveman` | `caveman` | `packages/caveman/src/index.ts` |
+| `@codesook/omp-ponytail` | `ponytail` | `packages/ponytail/src/index.ts` |
+| `@codesook/omp-codegraph` | `codegraph` | `packages/codegraph/src/index.ts` |
+| `@codesook/omp-beads` | `beads` | `packages/beads/src/index.ts` |
+| `@codesook/omp-rtk` | `rtk` | `packages/rtk/src/index.ts` |
+| `@codesook/omp-pstack` | separate plugin | `packages/pstack/src/index.ts` |
+| `@codesook/omp-theme-catppuccin` | theme installer | `packages/theme-catppuccin/bin/install.js` |
 
 ## Command tree
 
@@ -219,14 +319,7 @@ bun run verify
 
 ## Releasing pstack
 
-pstack installs from its dist repository, [`seenark/omp-pstack`](https://github.com/seenark/omp-pstack):
-
-```sh
-omp plugin install github:seenark/omp-pstack             # latest
-omp plugin install 'github:seenark/omp-pstack#v<version>' # pinned
-```
-
-It must not install from this repository as a git spec. OMP keeps one plugin per git repository: installing a second ref of `github:seenark/omp-plugins` removes the root `omp-plugins` entry from `~/.omp/plugins/package.json`, and the loader then skips it.
+Users install pstack from the dist repository [`seenark/omp-pstack`](https://github.com/seenark/omp-pstack) (see [pstack](#pstack) above). That repository holds only built releases.
 
 To cut a release, bump `version` in `packages/pstack/package.json` and merge to `main`. The Release workflow (`.github/workflows/release.yml`) builds the plugin tree, commits it to `main` of `seenark/omp-pstack`, and tags it `v<version>`. It pushes with the `PSTACK_DIST_DEPLOY_KEY` repository secret, the private half of a write deploy key on `seenark/omp-pstack`. A version already tagged there does nothing. Preview the decision and build the tree locally:
 
