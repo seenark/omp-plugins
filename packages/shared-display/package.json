@@ -1,11 +1,12 @@
 {
   "name": "@codesook/omp-shared-display",
-  "version": "1.5.1",
+  "version": "1.6.0",
   "type": "module",
   "description": "Opt-in shared status display host and EventBus client for oh-my-pi",
   "license": "MIT",
   "files": [
     "src/index.ts",
+    "src/palettes.ts",
     "src/client.ts",
     "src/instruction-mode.ts",
     "src/config-store.ts",

@@ -38,6 +38,7 @@ import {
 	validateSharedDisplayConfig,
 	type SharedDisplayConfig,
 	type SharedDisplayLayout,
+	type SharedDisplayPalette,
 	type SharedDisplayStyle,
 	type SharedDisplayPlacement,
 } from "@codesook/omp-shared-display";
@@ -176,7 +177,8 @@ function pstackDraft(raw: unknown): PstackDraft {
 }
 
 const SHARED_LAYOUTS = ["horizontal", "vertical"] as const satisfies readonly SharedDisplayLayout[];
-const SHARED_STYLES = ["plain", "powerline"] as const satisfies readonly SharedDisplayStyle[];
+const SHARED_STYLES = ["plain", "bracketed", "powerline", "rounded"] as const satisfies readonly SharedDisplayStyle[];
+const SHARED_PALETTES = ["none", "theme", "gruvbox", "catppuccin", "pastel", "tokyo-night"] as const satisfies readonly SharedDisplayPalette[];
 const SHARED_PLACEMENTS = ["aboveEditor", "belowEditor"] as const satisfies readonly SharedDisplayPlacement[];
 const RAIL_PLACEMENTS = ["inside", "above", "below"] as const satisfies readonly ContextRailPlacement[];
 const RAIL_VISIBILITIES = ["always", "toggle", "collapse-while-typing"] as const satisfies readonly ContextRailVisibility[];
@@ -511,6 +513,7 @@ export function draftToRootSections(draft: UnifiedSettingsDraft): {
 				enabled: shared.enabled,
 				layout: shared.layout,
 				style: shared.style,
+				palette: shared.palette,
 				order: [...shared.order],
 				widgetPlacement: shared.widgetPlacement,
 				horizontalSeparator: shared.horizontalSeparator,
@@ -999,6 +1002,7 @@ function validateDraft(draft: UnifiedSettingsDraft): string | undefined {
 	const shared = draft.display.sharedDisplay;
 	if (!SHARED_LAYOUTS.includes(shared.layout) || !SHARED_PLACEMENTS.includes(shared.widgetPlacement)) return "Shared Display layout or placement is invalid.";
 	if (!SHARED_STYLES.includes(shared.style)) return "Shared Display style is invalid.";
+	if (!SHARED_PALETTES.includes(shared.palette)) return "Shared Display palette is invalid.";
 	if (!Number.isSafeInteger(shared.verticalGapRows) || shared.verticalGapRows < 0 || shared.verticalGapRows > 10) return "Shared Display gap must be an integer from 0 through 10.";
 	if (/\r|\n/u.test(shared.horizontalSeparator)) return "Shared Display separator must be single-line.";
 	return undefined;
@@ -1128,7 +1132,8 @@ function settingsItems(
 		{ id: "section:shared", label: "Shared Display", currentValue: "", heading: true },
 		boolItem("shared.enabled", "Enabled", shared.enabled, "Enable shared host composition and widget.", sharedWarning),
 		selectItem("shared.layout", "Layout", shared.layout, SHARED_LAYOUTS, "Horizontal or vertical source composition.", sharedWarning),
-		selectItem("shared.style", "Style", shared.style, SHARED_STYLES, "Plain text or theme-colored Starship-style powerline segments (needs a Nerd Font).", sharedWarning),
+		selectItem("shared.style", "Style", shared.style, SHARED_STYLES, "Shape of the Shared Display: plain, [bracketed], powerline, or rounded (Tokyo Night). powerline and rounded need a Nerd Font. Colors come from Palette.", sharedWarning),
+		selectItem("shared.palette", "Palette", shared.palette, SHARED_PALETTES, "Colors for the Display Style: OMP theme, a fixed Starship palette, or none.", sharedWarning),
 		textItem("shared.order", "Source order", shared.order.join(","), "Comma-separated ponytail,caveman,headroom,rtk,codegraph,beads,pstack,process-monitor order.", sharedWarning),
 		selectItem("shared.placement", "Placement", shared.widgetPlacement, SHARED_PLACEMENTS, "Widget placement relative to editor.", sharedWarning),
 		textItem("shared.separator", "Separator", shared.horizontalSeparator, "One-line separator for horizontal layout.", sharedWarning),
@@ -1137,7 +1142,7 @@ function settingsItems(
 		selectItem("ponytail.defaultMode", "Default mode", behavior.ponytail.defaultMode, PONYTAIL_RUNTIME_MODES, "Mode Level new Agent Sessions start at; session entries and /ponytail override per session. Unparseable config fails closed to off.", ponytailWarning),
 		boolItem("ponytail.nativeVisible", "Native status", ponytail.nativeVisible, "Show Ponytail in OMP native footer status.", ponytailWarning),
 		boolItem("ponytail.visible", "Display visible", ponytail.display.visible, "Include Ponytail frames in Shared Display. Independent of native footer status.", ponytailWarning),
-		textItem("ponytail.template", "Display template", ponytail.display.template, "Tokens: {activity}, {glyph}, {mode}, {modeIcon}.", ponytailWarning),
+		textItem("ponytail.template", "Display template", ponytail.display.template, "Tokens: {activity}, {glyph}. Put Mode Level text or icons in the glyph files.", ponytailWarning),
 		textItem("ponytail.glyphDirectory", "Glyph directory", ponytail.display.glyphDirectory, "External Ponytail glyph directory; frame contents stay in files.", ponytailWarning),
 		{ id: "section:caveman", label: "Caveman", currentValue: "", heading: true },
 		selectItem("caveman.defaultMode", "Default mode", behavior.caveman.defaultMode, CAVEMAN_MODES, "Caveman Mode Level a new Agent Session starts at; off sends no Caveman instructions.", cavemanWarning),
@@ -1229,6 +1234,7 @@ function updateDraft(draft: UnifiedSettingsDraft, id: string, value: string): vo
 		case "shared.enabled": draft.display.sharedDisplay.enabled = bool; return;
 		case "shared.layout": if (SHARED_LAYOUTS.includes(value as SharedDisplayLayout)) draft.display.sharedDisplay.layout = value as SharedDisplayLayout; return;
 		case "shared.style": if (SHARED_STYLES.includes(value as SharedDisplayStyle)) draft.display.sharedDisplay.style = value as SharedDisplayStyle; return;
+		case "shared.palette": if (SHARED_PALETTES.includes(value as SharedDisplayPalette)) draft.display.sharedDisplay.palette = value as SharedDisplayPalette; return;
 		case "shared.order": draft.display.sharedDisplay.order = value.split(",").map(item => item.trim()).filter(isDisplaySource); return;
 		case "shared.placement": if (SHARED_PLACEMENTS.includes(value as SharedDisplayPlacement)) draft.display.sharedDisplay.widgetPlacement = value as SharedDisplayPlacement; return;
 		case "shared.separator": draft.display.sharedDisplay.horizontalSeparator = value; return;
