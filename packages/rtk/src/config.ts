@@ -1,6 +1,6 @@
 import { CODESOOK_OMP_CONFIG_PATH, isRecord, readCodesookOmpConfig } from "@codesook/omp-shared-display/config-store";
 
-export const DEFAULT_RTK_TEMPLATE = "{glyph} rtk {percent}% ({tokensSaved} saved)";
+export const DEFAULT_RTK_TEMPLATE = "{glyph} rtk {tokensSaved} saved · {commands} cmds";
 export const DEFAULT_RTK_GLYPH_DIRECTORY = "~/.config/codesook-omp/rtk";
 
 export type RtkConfig = {

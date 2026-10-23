@@ -57,7 +57,7 @@ function fixture(rtkVersion: string | null = "rtk 0.51.0") {
 test("rewrites bash commands with the session databases and publishes RTK Savings", async () => {
 	const { sessionsRoot, snapshots, fire, startSession } = fixture();
 	await startSession();
-	expect(snapshots.at(-1)).toBe("✂ rtk 0% (0 saved)");
+	expect(snapshots.at(-1)).toBe("✂ rtk 0 saved · 0 cmds");
 
 	const call = { type: "tool_call", toolName: "bash", toolCallId: "c1", input: { command: "git status" } };
 	await fire("tool_call", call);
@@ -69,11 +69,11 @@ test("rewrites bash commands with the session databases and publishes RTK Saving
 	db.run("INSERT INTO commands (input_tokens, saved_tokens) VALUES (1000, 800)");
 	db.close();
 	await fire("tool_execution_end", { toolCallId: "c1", toolName: "bash" });
-	expect(snapshots.at(-1)).toBe("✂ rtk 80% (800 saved)");
+	expect(snapshots.at(-1)).toBe("✂ rtk 800 saved · 1 cmds");
 
 	await fire("tool_call", { type: "tool_call", toolName: "bash", toolCallId: "c2", input: { command: "git diff" } });
 	await fire("tool_execution_end", { toolCallId: "c2", toolName: "bash" });
-	expect(snapshots.at(-1)).toBe("✂ rtk 80% (800 saved)");
+	expect(snapshots.at(-1)).toBe("✂ rtk 800 saved · 1 cmds");
 
 	const prompt = (await fire("before_agent_start", { systemPrompt: ["base"] })) as { systemPrompt: string[] };
 	expect(prompt.systemPrompt[0]).toBe("base");
