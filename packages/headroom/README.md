@@ -5,7 +5,7 @@ Headroom context-compression producer for [oh-my-pi](https://github.com/can1357/
 - compresses large `toolResult` messages before provider requests, in Headroom session mode (`config.session_id` = the OMP session id);
 - keeps every result it forwarded compressed byte-identical on later requests, so the provider prompt cache is not broken;
 - never offers failed tool results or RTK-processed bash results to Headroom;
-- shows Headroom Savings per Agent Session from the first request;
+- shows Headroom Savings per Agent Session once Headroom has saved tokens;
 - uses externally managed Headroom proxy; session start performs health check only and never starts Docker/Cloudflare/proxy processes;
 - publishes one complete Headroom display sequence through `@codesook/omp-shared-display`;
 - never mounts a widget, installs a timer, or captures another producer's `setStatus` output.
@@ -91,7 +91,7 @@ Example:
         "unavailable": "{glyph} Headroom unavailable ({reason})",
         "idle": "{glyph} Headroom idle",
         "online": "{glyph} Headroom",
-        "compressed": "{glyph} Headroom -{compressionPercent}% ({tokensSaved} saved)"
+        "compressed": "{glyph} Headroom {tokensSaved} saved"
       }
     }
   },
@@ -164,7 +164,7 @@ Headroom Savings is the share of the whole request (system prompt, tools, and me
 - before = the request size without Headroom. The base is OMP's context estimate (`ctx.getContextUsage()`, the same value that gates `minContextTokens`). That estimate is hybrid: up to the last response with provider-reported usage it counts results as the provider saw them (already compressed), and after it it counts original text. So only savings at or before that response are added back; savings on results first compressed in this request are already excluded from the base. Without such a response, or when OMP reports no usage, the base is the original text and no add-back applies. If OMP gives no usage at all, the estimate of the message payload is used instead;
 - Headroom Savings = Σ saved / Σ before over every request that reached the model, including requests that removed nothing.
 
-Template placeholders: `{compressionPercent}` and `{tokensSaved}` (session, so existing templates keep working), `{tokensBefore}`, `{tokensAfter}` (session), `{lastPercent}`, `{lastSaved}` (latest request), `{reason}`, `{error}`, `{proxyStatus}`, `{glyph}`, `{state}`, `{label}`. Token counts are compact (950, 1.2k, 3.4M); percentages are integers. The compressed state shows from session start at 0%.
+Template placeholders: `{compressionPercent}` and `{tokensSaved}` (session, so existing templates keep working), `{tokensBefore}`, `{tokensAfter}` (session), `{lastPercent}`, `{lastSaved}` (latest request), `{reason}`, `{error}`, `{proxyStatus}`, `{glyph}`, `{state}`, `{label}`. Token counts are compact (950, 1.2k, 3.4M); percentages are integers. With the proxy online and nothing saved in the Agent Session the state is `online` and shows `Headroom` without numbers. Numbers appear only after Headroom has saved tokens in the Agent Session: the state is then `compressed` and the default template shows compact tokens saved. The percent placeholders stay available for custom templates.
 
 Agent Session = one OMP conversation. Stats and memo reset on `session_start` and `session_switch`, not on `session_branch`. `/headroom status` shows session savings, memo size, last error or reason, server session block, and the next health retry.
 
