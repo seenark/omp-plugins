@@ -11,12 +11,14 @@ Caveman lets a user switch the terse-output Mode Level for the current session, 
 - `caveman-standalone` runs `/ultracave` and `/megacave` as their own commands.
 - `caveman-off` stops Caveman for the session and removes its segment.
 - `caveman-invalid` rejects unknown arguments with usage text.
+- `caveman-phrase` turns Caveman off when a whole message is `stop caveman` or `normal mode`.
 
 ## How to get to it (user POV)
 
 - Type `/caveman` with no argument to get the menu.
 - Type `/caveman <status|off|caveman|ultracave|megacave|ultra|wenyan>`.
 - Type `/ultracave` or `/megacave`.
+- Send `stop caveman` or `normal mode` as a message (case-insensitive, trailing `.`, `!` or `?` ignored).
 - Use `/omp-plugins` → Caveman section → `Default mode` to change the saved default.
 
 ## Driving it with omp-pty
@@ -32,7 +34,8 @@ Preconditions:
 - **Standalone.** Run `$OMP_PTY submit $PTY "/ultracave"`. The segment returns to `ultracave`. Assert it with `$OMP_PTY wait $PTY '○ \S+ ultracave'`.
 - **Off.** Run `$OMP_PTY submit $PTY "/caveman off"`, then `$OMP_PTY wait $PTY 'Caveman off\.'`. The caveman segment is gone: `$OMP_PTY wait $PTY 'ultracave|megacave|○ \S+ caveman' --absent`. Save `03-off.txt`.
 - **Invalid.** Run `$OMP_PTY submit $PTY "/caveman bogus"`, then `$OMP_PTY wait $PTY 'Error: Unknown Caveman command: bogus\. Usage: /caveman'`.
-- **Default untouched.** Run `jq -r '.behavior.caveman.defaultMode // "unset"' $SCRATCH_HOME/.config/codesook-omp/config.json`. It prints `unset`. Reopen `/caveman status`; it shows `Default: caveman`.
+- **Default untouched.** Run `jq -r '.behavior.caveman.defaultMode // "unset"' $SCRATCH_HOME/.config/codesook-omp/config.json`. It prints `unset`. Reopen `/caveman status`; it shows `Mode: off` and `Default: caveman (overridden by session mode)`.
+- **Phrase.** Run `$OMP_PTY submit $PTY "/caveman caveman"` and wait for `○ \S+ caveman`. Then `$OMP_PTY submit $PTY "stop caveman"`. The plugin answers `Caveman off.` and the segment disappears (`wait '○ \S+ caveman' --absent`) before omp reports `Error: No model selected.` for the message itself.
 
 ## Gotchas
 

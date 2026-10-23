@@ -42,7 +42,7 @@ Preconditions:
 
 ## Gotchas
 
-- `lsof` is machine-wide, so the unknown-origin group also lists real listeners from the user's machine. Unknown rows offer no stop. Never confirm a stop on any row other than a stand-in.
+- `lsof` is machine-wide, so the unknown-origin group also lists real listeners from the user's machine. Unknown rows offer no stop. Processes started by the user's real omp sessions also show, grouped under their own project paths and marked `⚠ leftover`, and those rows do offer a stop. Never confirm a stop on any row other than a stand-in.
 - The segment count includes any other tagged process on the machine whose session has no lock file open under the scratch HOME, which is every tagged process from outside this run. Identify a stand-in by its row, not by the number.
 - The tag is read from the process environment, so it only works for a process the current user owns and that `ps` shows an environment for. A stand-in launched through `/bin/sleep` or another hardened system binary shows no tag; use `bun`.
 - The session column is truncated to the last 8 characters of the id. Match `"$PID .*⚠ leftover$"`, not the session text.
@@ -51,3 +51,4 @@ Preconditions:
 - The `OMP internals` group stays collapsed (`▸ OMP internals`) when the scratch omp has workers. The journey does not assert it because a fresh scratch omp may have none.
 - Do not type `k` through `submit`, which closes dialogs first. Use `key bspace` or `key char:k`.
 - If a step fails, stop the stand-ins yourself: `kill $D $U` (the journey script does this on exit through its trap).
+- `procs-plain` runs only when omp has no UI. The PTY always has one, so report it as unreachable here and prove it with the unit tests.
