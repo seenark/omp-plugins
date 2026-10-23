@@ -20,11 +20,11 @@ Headroom shows whether context compression is on and whether its external proxy 
 Preconditions:
 
 - A fresh `verify-omp launch` with `doctor` all `ok`.
-- Nothing listens on `127.0.0.1:8788`. `curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8788/readyz` prints `000`.
+- Nothing listens on `127.0.0.1:8788`. `curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8788/health` prints `000`. The plugin probes `/health`.
 - The status line shows `⏹ Headroom not running`.
 
 - **Health.** Run `$OMP_PTY submit $PTY "/headroom health"`. Then `$OMP_PTY wait $PTY 'Headroom proxy is not running: http://127\.0\.0\.1:8788'` and `$OMP_PTY wait $PTY 'headroom proxy --host 127\.0\.0\.1 --port 8788'`. Save `$EVID/headroom/01-health.txt` and close with `$OMP_PTY key $PTY esc`.
-- **Status.** Run `$OMP_PTY submit $PTY "/headroom status"`. Then `$OMP_PTY wait $PTY 'Proxy: http://127\.0\.0\.1:8788 \(not running\)'` and `$OMP_PTY wait $PTY 'Headroom Savings: 0%'`. The dialog also shows `Remote: local-only` and `Config: $SCRATCH_HOME/.config/codesook-omp/config.json`. Save `02-status.txt` and close with `esc`.
+- **Status.** Run `$OMP_PTY submit $PTY "/headroom status"`. Then `$OMP_PTY wait $PTY 'Proxy: +http://127\.0\.0\.1:8788 \(not running\)'` and `$OMP_PTY wait $PTY 'Headroom Savings: 0%'`. The dialog also shows `Remote: +local-only` and `Config: $SCRATCH_HOME/.config/codesook-omp/config.json`. Labels are padded (`Proxy:   `, `Remote:  `), so match the gap with ` +`. Save `02-status.txt` and close with `esc`.
 - **Off.** Copy `config.json` to `$EVID/headroom/config-before.json`. Run `$OMP_PTY submit $PTY "/headroom off"`. Then `$OMP_PTY wait $PTY 'Headroom compression disabled for this Pi session\. The proxy process is left running\.'` and `$OMP_PTY wait $PTY '⦸ Headroom off'`. Save `03-off.txt`. `cmp` against the copy exits 0, because the change is session-only.
 - **On.** Run `$OMP_PTY submit $PTY "/headroom on"`. Then `$OMP_PTY wait $PTY 'Warning: Headroom proxy is not running'` and `$OMP_PTY wait $PTY '⏹ Headroom not running'`. Save `04-on.txt`.
 

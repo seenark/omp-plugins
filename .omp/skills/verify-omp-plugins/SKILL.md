@@ -30,7 +30,7 @@ What `launch` does, from an empty directory, in about 7 s:
 2. Runs `git init` in `project/`, which is the cwd omp starts in.
 3. With `HOME=/tmp/omp-verify/r1/home`, runs the documented developer install (`docs/agents/setup.md` Phase 6):
    - `omp plugin link <repo>`
-   - `omp plugin features omp-plugins --enable=headroom,prompt-border-style,shared-display,ponytail,caveman,codegraph,beads,rtk`
+   - `omp plugin features omp-plugins --enable=<every key of omp.features in the root package.json>` (10 today: headroom, prompt-border-style, shared-display, ponytail, caveman, codegraph, beads, rtk, process-monitor, skill-stats)
    - `omp plugin link <repo>/packages/pstack`
 4. Starts `omp --no-session` in a 120x50 PTY. The child env drops `PI_CODING_AGENT_DIR`, `PI_SESSION_*`, `OMP_PROFILE` and `XDG_*`.
 5. Ready in two steps. First the status line must show `ponytail: … caveman … Headroom … rtk`. Then `/ponytail status` is submitted and must answer `Ponytail: current <mode> • default <mode>`, which proves extension commands round-trip.
@@ -54,7 +54,7 @@ Every line must be `ok`, and the exit code must be 0. It checks:
 - the PTY server pid and omp child pid are alive;
 - the child's environment has `HOME=$SCRATCH_HOME` and no `PI_SESSION_FILE`/`PI_SESSION_ID`;
 - `omp-plugins` and `@codesook/omp-pstack` in the scratch HOME are symlinks to this checkout;
-- all 8 features are enabled;
+- every feature declared in the root `package.json` is enabled (`all 10 features enabled` today);
 - the screen is past onboarding and shows the editor (`π >`).
 
 It ends with an `info` line giving the omp version and the checkout rev. A dead or foreign run prints `FAIL` lines and exits 1.
@@ -86,7 +86,7 @@ A failed `wait` prints the full screen and exits 1. Treat that as a failed step.
 Stable handles on screen:
 
 - **Editor box:** `╔══ π > ⬢ no-model > 🗑 omp-verify/<run>/project > ⑂ main …`, then `║` rows, then `╚═…`.
-- **Status line:** the row under `╚`. Segments show with the default config: `🐴 ponytail: ⚡ FULL`, a caveman spinner plus mode name (`caveman`, `ultracave` or `megacave`; gone when off), `⏹ Headroom not running` or `⦸ Headroom off`, and `✂ rtk 0% (0 saved)`.
+- **Status line:** the row under `╚`. Segments show with the default config: `🐴 ponytail: ⚡ FULL`, a caveman spinner plus mode name (`caveman`, `ultracave` or `megacave`; gone when off), `⏹ Headroom not running` or `⦸ Headroom off`, and `✂ rtk 0% (0 saved)`. A `⚠ N ports` segment can show on a fresh launch: process-monitor sees the whole machine, so leftover processes from the user's real omp sessions count.
 - **Notifications:** single lines above the editor, for example `Caveman ultracave.`, `Ponytail mode set to ultra.` or `Error: Unknown Caveman command: …`.
 - **Dialogs:** a title line plus `Enter/Esc close` (status views), or a `╭─ Title ─╮` select box with `❯` on the highlighted row and `↑/↓ navigate  ⏎ select  ⎋ cancel`.
 
@@ -148,7 +148,7 @@ Both scripts are executable. `verify-omp` with no arguments prints its usage, an
 - **The screen keeps old notifications.** Earlier lines stay above the editor until they scroll off. Assert text that only the current step produces. Where wording repeats, assert the status-line segment or use `wait --absent` on the prior state first.
 - **Autocomplete eats Enter.** Typing `/caveman ultra` and pressing Enter accepts the highlighted completion (`ultracave`). It does not submit. `submit` handles this. If you use `send` plus `key enter`, press `esc` before `enter`.
 - **ESC chords.** ESC followed by another byte in the same write is read as Meta+key. `omp-pty key` sends each key separately. Do not build raw escape strings yourself.
-- **`--enable` replaces the set.** `omp plugin features omp-plugins --enable=<list>` disables every feature not in the list, including the defaults headroom and prompt-border-style. `launch` names all eight.
+- **`--enable` replaces the set.** `omp plugin features omp-plugins --enable=<list>` disables every feature not in the list, including the defaults headroom and prompt-border-style. `launch` reads the full list from the root `package.json`.
 - **Shell inheritance.** When run inside an omp session, the shell exports `PI_SESSION_FILE` and `PI_SESSION_ID` for the parent session. `launch` strips them. Doctor's `child has no parent session vars` line proves it.
 - **Headroom target.** The default `behavior.headroom.baseUrl` is `http://127.0.0.1:8788`. If a real Headroom proxy listens there on this machine, the scratch omp will reach it, unauthenticated because there is no token file. Otherwise the segment reads `⏹ Headroom not running`.
 - **Editor box style.** `submit` finds the editor by its `║` edges. If a journey changes `/prompt-border` style, the edges may change, and `submit` then fails with `editor never showed …`. Use `send` and `key` for steps after a style change.

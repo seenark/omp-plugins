@@ -4,13 +4,13 @@ Beads shows how much work is left in the status-line segment, for example `Beads
 
 ## Sub-features
 
-- `beads-segment-state` shows `Beads: ready` while the project has no open issues, and the other state words (`uninitialized`, `error`, `suppressed`) when the integration is not usable.
+- `beads-segment-state` shows `Beads: ready` while the project has no open issues. Under the default `ready` visibility the segment is hidden in every other state. The other state words (`uninitialized`, `suppressed`, `error`, `missing-prerequisite`) show only with `display.beads.visibility` set to `always`.
 - `beads-segment-counts` shows `Beads: <ready> ready · <open> open` once open issues exist. Open means not closed and not deferred.
 - `beads-live-refresh` updates the segment shortly after an issue changes from another terminal, with no command or turn.
 - `beads-tasks-view` opens `/beads tasks`, a scrollable overlay grouped as In progress, Ready, Blocked, sorted by priority then most recent update.
 - `beads-tasks-live` updates that overlay in place when issues change while it is open.
-- `beads-tasks-menu` offers `Show tasks` in the bare `/beads` menu and `tasks` in argument completion.
-- `beads-tasks-states` shows `No open issues.` for an empty project and an explanatory message when Beads is uninitialized, suppressed, or failing.
+- `beads-tasks-menu` offers `Show tasks` in the bare `/beads` menu and `tasks: Show tasks` in argument completion.
+- `beads-tasks-states` shows `No open issues.` for an empty project, and `Beads is <state>; there is no task list to show.` plus a detail line when Beads is uninitialized, suppressed, or failing.
 
 ## How to get to it (user POV)
 
@@ -29,7 +29,8 @@ Preconditions:
 - The scratch project is a plain Git repository with no `.beads` directory yet. Beads is not initialized, so the segment is hidden under the default `ready` visibility.
 - Every `bd` command below runs as `(cd $PROJECT && HOME=$SCRATCH_HOME BD_NON_INTERACTIVE=1 bd …)`. Write that as `bd_p` in your shell.
 
-- **One command.** `.omp/skills/verify-omp-plugins/features/beads.sh <run-id>` runs every step below against a launched run. It saves screens to `$EVID/beads/NN-step.txt`, prints `PASS <step>` lines, and exits non-zero at the first failure.
+- **One command.** `.omp/skills/verify-omp-plugins/features/beads.sh <run-id>` runs every step below except the Uninitialized and Suppressed notes against a launched run. It saves screens to `$EVID/beads/NN-step.txt`, prints `PASS <step>` lines, and exits non-zero at the first failure. Drive the Uninitialized note by hand before the journey seeds the project, and the Suppressed note after it finishes.
+- **Uninitialized note.** Before seeding, run `$OMP_PTY submit $PTY "/beads tasks"`, then `$OMP_PTY wait $PTY 'Beads is uninitialized; there is no task list to show\.'`. Close with `esc`. Type `$OMP_PTY send $PTY "/beads t"` and `$OMP_PTY wait $PTY 'tasks: Show tasks'`, then `$OMP_PTY key $PTY esc ctrl-u`.
 - **Seed the project.** `(cd $PROJECT && HOME=$SCRATCH_HOME BD_NON_INTERACTIVE=1 bd init --non-interactive --stealth --skip-agents --skip-hooks -p vrf --quiet)`. Stealth mode makes no Git commit. Then create three issues and read each id from the JSON: `A=$(bd_p create "Ready task" -p 1 -d "First line of the description" --json | jq -r .id)`, `B=$(bd_p create "Active task" -p 0 --json | jq -r .id)`, `C=$(bd_p create "Blocked task" -p 2 --json | jq -r .id)`. Then `bd_p update $B --status in_progress` and `bd_p dep add $C $A`.
 - **Refresh once.** An external initialization is picked up on the next refresh. Run `$OMP_PTY submit $PTY "/beads status"`, then `$OMP_PTY wait $PTY 'Beads: ready'`, press `esc`, and `$OMP_PTY wait $PTY 'Beads: 1 ready · 3 open'`. Save `$EVID/beads/01-counts.txt`.
 - **Tasks overlay.** Run `$OMP_PTY submit $PTY "/beads tasks"`, then `$OMP_PTY wait $PTY '(?s)In progress \(1\).*P0  Active task.*Ready \(1\).*P1  Ready task - First line of the description.*Blocked \(1\).*P2  Blocked task'`. The leading `(?s)` lets one regex check both the group headings and their order. Save `02-tasks.txt`.
@@ -38,6 +39,7 @@ Preconditions:
 - **Segment tracks changes with no command.** The segment reads `Beads: 2 ready · 4 open`. Run `bd_p update $A --status deferred`, then `$OMP_PTY wait $PTY 'Beads: 1 ready · 3 open'` with no command: the deferred issue leaves the open count. Save `05-deferred.txt`.
 - **Menu path.** Run `$OMP_PTY submit $PTY "/beads"`, wait for `Show tasks`, choose it with `$OMP_PTY key $PTY down enter`, and wait for `Beads Tasks`. Close with `esc`.
 - **Empty state.** Close every open issue: `bd_p close --force $B`, `bd_p close --force $ADDED`, `bd_p close --force $C`. `--force` is required for the blocked one. The deferred issue stays deferred. Run `$OMP_PTY submit $PTY "/beads tasks"` and wait for `No open issues\.`, then `esc` and `$OMP_PTY wait $PTY 'Beads: ready'`.
+- **Suppressed note.** Run `$OMP_PTY submit $PTY "/beads off"` and `$OMP_PTY wait $PTY 'Beads project policy: off\. '`. `jq -r .behavior.beads.policy $PROJECT/.omp/codesook-omp.json` prints `off`, and the segment is hidden. `/beads tasks` shows `Beads is suppressed; there is no task list to show.` Close with `esc`. Run `$OMP_PTY submit $PTY "/beads auto"`, then `$OMP_PTY wait $PTY 'Beads project policy: auto\. '` and `$OMP_PTY wait $PTY 'Beads: ready'`.
 
 ## Gotchas
 
