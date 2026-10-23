@@ -399,20 +399,30 @@ describe("Ponytail display", () => {
 	it("publishes a Shared Display snapshot per Mode Level and clears it for off", async () => {
 		const harness = createHarness();
 		await harness.fire("session_start");
-		expect(frameText(harness.snapshots.at(-1))).toEqual(["○ 🐴 ponytail: ⚡ FULL"]);
+		expect(frameText(harness.snapshots.at(-1))).toEqual(["○ 🐴⚡ ponytail"]);
 		await harness.fire("agent_start");
-		expect(frameText(harness.snapshots.at(-1))).toEqual(["● 🐴 ponytail: ⚡ FULL"]);
+		expect(frameText(harness.snapshots.at(-1))).toEqual(["● 🐴⚡ ponytail"]);
 		await harness.fire("agent_end", { willContinue: true });
-		expect(frameText(harness.snapshots.at(-1))).toEqual(["● 🐴 ponytail: ⚡ FULL"]);
+		expect(frameText(harness.snapshots.at(-1))).toEqual(["● 🐴⚡ ponytail"]);
 		await harness.fire("agent_end", { willContinue: false });
-		expect(frameText(harness.snapshots.at(-1))).toEqual(["○ 🐴 ponytail: ⚡ FULL"]);
+		expect(frameText(harness.snapshots.at(-1))).toEqual(["○ 🐴⚡ ponytail"]);
 		await harness.command("ponytail", "ultra");
-		expect(frameText(harness.snapshots.at(-1))).toEqual(["○ 🐴 ponytail: 🔥 ULTRA"]);
+		expect(frameText(harness.snapshots.at(-1))).toEqual(["○ 🐴🔥 ponytail"]);
 		await harness.command("ponytail", "off");
 		expect(harness.snapshots.at(-1)!.sequence).toBeNull();
 		harness.entries.push(upstreamEntry("review"));
 		await harness.fire("session_branch");
-		expect(frameText(harness.snapshots.at(-1))).toEqual(["○ 🐴 ponytail: REVIEW"]);
+		expect(frameText(harness.snapshots.at(-1))).toEqual(["○ 🐴 ponytail"]);
+	});
+
+	it("shows a different packaged glyph for lite, full and ultra", async () => {
+		const harness = createHarness();
+		const published: Record<string, string[]> = {};
+		for (const mode of ["lite", "full", "ultra"]) {
+			await harness.command("ponytail", mode);
+			published[mode] = frameText(harness.snapshots.at(-1));
+		}
+		expect(published).toEqual({ lite: ["○ 🐴🌿 ponytail"], full: ["○ 🐴⚡ ponytail"], ultra: ["○ 🐴🔥 ponytail"] });
 	});
 
 	it("uses the configured template, user glyphs, and visibility", async () => {
@@ -423,8 +433,8 @@ describe("Ponytail display", () => {
 		fs.writeFileSync(path.join(home, "glyphs", "full.txt"), "fps=4\nAA\nBB\n");
 		const harness = createHarness({ home });
 		await harness.fire("session_start");
-		expect(harness.snapshots.at(-1)!.sequence).toEqual({ frames: [["FULL/⚡ /○/AA"], ["FULL/⚡ /○/BB"]], fps: 4 });
-		expect(harness.statuses.at(-1)).toBe("FULL/⚡ /○/AA");
+		expect(harness.snapshots.at(-1)!.sequence).toEqual({ frames: [["{mode}/{modeIcon}/○/AA"], ["{mode}/{modeIcon}/○/BB"]], fps: 4 });
+		expect(harness.statuses.at(-1)).toBe("{mode}/{modeIcon}/○/AA");
 		writeRootConfig(home, rootDoc({}, { ponytail: { visible: false } }));
 		await harness.fire("session_switch");
 		expect(harness.snapshots.at(-1)!.sequence).toBeNull();
@@ -437,7 +447,7 @@ describe("Ponytail display", () => {
 		expect(harness.statuses.at(-1)).toBeUndefined();
 		const native = createHarness({ home: makeHome(rootDoc({}, { ponytail: { nativeVisible: true } })) });
 		await native.fire("session_start");
-		expect(native.statuses.at(-1)).toBe("○ 🐴 ponytail: ⚡ FULL");
+		expect(native.statuses.at(-1)).toBe("○ 🐴⚡ ponytail");
 		await native.fire("session_shutdown");
 		expect(native.statuses.at(-1)).toBeUndefined();
 		expect(native.snapshots.at(-1)!.sequence).toBeNull();
