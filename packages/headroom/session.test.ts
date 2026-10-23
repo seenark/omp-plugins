@@ -198,12 +198,13 @@ async function createHarness(options: { healthDelayMs?: number; timeoutMs?: numb
 }
 
 describe("Headroom Agent Session compression", () => {
-	it("sends a stable session id and real tool calls, and shows cumulative Headroom Savings from the first call", async () => {
+	it("sends a stable session id and real tool calls, and shows Headroom Savings once tokens are saved", async () => {
 		const h = await createHarness();
 		await h.start();
 		expect(await h.status()).toContain("Headroom Savings: 0%");
 		await h.command("health");
-		expect(h.widget()).toContain("Headroom -0% (0 saved)");
+		expect(h.widget()).toContain("Headroom");
+		expect(h.widget()).not.toContain("saved");
 
 		// 3.8k-token request (system prompt and tools included); 4000 chars = 1000 tokens shrink to 2.
 		h.setContextTokens(3800);
@@ -217,7 +218,7 @@ describe("Headroom Agent Session compression", () => {
 		const status = await h.status();
 		expect(status).toContain("Headroom Savings: 26% (998 of 3.8k tokens saved over 1 calls)");
 		expect(status).toContain("Server session: agent-session-1");
-		expect(h.widget()).toContain("Headroom -26% (998 saved)");
+		expect(h.widget()).toContain("Headroom 998 saved");
 
 		// Second call: the assistant after c1 carries provider usage (anchor), so OMP's estimate already counts
 		// c1 compressed (2810 = prior prompt) plus c2 at original size (1000). c1's 998 saved are added back.
@@ -226,7 +227,7 @@ describe("Headroom Agent Session compression", () => {
 		expect(texts(await h.context(second))).toEqual({ c1: "small", c2: "small" });
 		// before = 3810 + 998 = 4808, saved = 998 (replay) + 999 (new, aggregate rounding: 1997); cumulative 2995 of 8608.
 		expect(await h.status()).toContain("Headroom Savings: 35% (3k of 8.6k tokens saved over 2 calls)");
-		expect(h.widget()).toContain("Headroom -35% (3k saved)");
+		expect(h.widget()).toContain("Headroom 3k saved");
 		expect(await h.status()).toContain("2k of 4.8k tokens saved (42%)");
 	});
 
@@ -353,7 +354,7 @@ describe("Headroom Agent Session compression", () => {
 		setSystemTime(new Date(Date.now() + 31_000));
 		expect(texts(await h.context(history))).toEqual({ c1: "small", c2: "small" });
 		expect(h.requests.health).toBe(health + 1);
-		expect(h.widget()).toContain("Headroom -");
+		expect(h.widget()).toMatch(/Headroom \d+ saved/);
 		expect(h.widget()).not.toContain("unavailable");
 	});
 
@@ -377,7 +378,7 @@ describe("Headroom Agent Session compression", () => {
 		h.restartProxy();
 		setSystemTime(new Date(Date.now() + 61_000));
 		expect(texts(await h.context(history))).toEqual({ c1: "small", c2: "small" });
-		expect(h.widget()).toContain("Headroom -");
+		expect(h.widget()).toMatch(/Headroom \d+ saved/);
 	});
 
 	it("waits for the in-flight startup health check before the first call", async () => {

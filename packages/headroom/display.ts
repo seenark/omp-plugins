@@ -62,7 +62,7 @@ export const DEFAULT_TEMPLATES: Record<DisplayState, string> = {
 	unavailable: "{glyph} Headroom unavailable ({reason})",
 	idle: "{glyph} Headroom idle",
 	online: "{glyph} Headroom",
-	compressed: "{glyph} Headroom -{compressionPercent}% ({tokensSaved} saved)",
+	compressed: "{glyph} Headroom {tokensSaved} saved",
 };
 
 export const DEFAULT_GLYPHS: Record<DisplayState, string> = {
@@ -195,21 +195,25 @@ export function renderDisplayFrames(
 	return asset.fps === undefined ? { frames: rendered } : { frames: rendered, fps: asset.fps };
 }
 
-export function widgetState(
-	enabled: boolean,
-	blocked: boolean,
-	starting: boolean,
-	online: boolean | null,
-	unavailable: boolean,
-	checking = false,
-): DisplayState {
+export interface WidgetStateInput {
+	enabled: boolean;
+	blocked: boolean;
+	starting: boolean;
+	online: boolean | null;
+	unavailable: boolean;
+	checking?: boolean;
+	saved: boolean;
+}
+
+export function widgetState({ enabled, blocked, starting, online, unavailable, checking = false, saved }: WidgetStateInput): DisplayState {
 	if (!enabled) return "off";
 	if (blocked) return "remote-blocked";
 	if (starting) return "starting";
 	if (online === false) return "offline";
 	if (unavailable) return "unavailable";
 	if (online === null && checking) return "loading";
-	return online === true ? "compressed" : "idle";
+	if (online === true) return saved ? "compressed" : "online";
+	return "idle";
 }
 
 const TEMPLATE_KEY = /\{(status|glyph|state|label|compressionPercent|tokensSaved|tokensBefore|tokensAfter|lastPercent|lastSaved|proxyStatus|error|reason)\}/g;

@@ -24,7 +24,7 @@ export interface PonytailConfig {
 }
 
 export const DEFAULT_PONYTAIL_GLYPH_DIRECTORY = "~/.config/codesook-omp/ponytail";
-export const DEFAULT_PONYTAIL_TEMPLATE = "{activity} {glyph} ponytail: {modeIcon}{mode}";
+export const DEFAULT_PONYTAIL_TEMPLATE = "{activity} {glyph} ponytail";
 export const DEFAULT_PONYTAIL_CONFIG: Readonly<PonytailConfig> = {
 	defaultMode: "full",
 	nativeVisible: false,

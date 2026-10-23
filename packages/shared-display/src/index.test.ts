@@ -8,19 +8,45 @@ import sharedDisplayExtension, {
 	composeDisplayRows,
 	DEFAULT_SHARED_DISPLAY_CONFIG,
 	normalizeSharedDisplayConfig,
+	validateSharedDisplayConfig,
 	parseSharedDisplayMessage,
 	writeSharedDisplayConfig,
 } from "./index.ts";
-import type { FrameSequence, SharedDisplayConfig } from "./index.ts";
+import type {
+	FrameSequence,
+	SharedDisplayConfig,
+	SharedDisplayLayout,
+	SharedDisplayPalette,
+	SharedDisplayStyle,
+	ResolvedPalette,
+} from "./index.ts";
+
+type HarnessTheme = { getColorHex(name: string): string; getBgHex(name: string): string };
 
 function makeHostHarness(
 	enabled = true,
 	hasUI = true,
 	order = DEFAULT_SHARED_DISPLAY_CONFIG.order,
+	display: {
+		style?: SharedDisplayStyle;
+		palette?: SharedDisplayPalette;
+		layout?: SharedDisplayLayout;
+		theme?: HarnessTheme;
+	} = {},
 ) {
 	const root = fs.mkdtempSync(path.join(os.tmpdir(), "omp-display-host-"));
 	const configPath = path.join(root, "config.json");
-	writeSharedDisplayConfig({ ...DEFAULT_SHARED_DISPLAY_CONFIG, enabled, order }, configPath);
+	writeSharedDisplayConfig(
+		{
+			...DEFAULT_SHARED_DISPLAY_CONFIG,
+			enabled,
+			order,
+			...(display.style === undefined ? {} : { style: display.style }),
+			...(display.palette === undefined ? {} : { palette: display.palette }),
+			...(display.layout === undefined ? {} : { layout: display.layout }),
+		},
+		configPath,
+	);
 	const listeners = new Map<string, Set<(data: unknown) => void>>();
 	const messages: unknown[] = [];
 	const events = {
@@ -45,6 +71,7 @@ function makeHostHarness(
 			},
 			setStatus(_key: string, _text: string | undefined) {},
 			notify() {},
+			theme: display.theme,
 		},
 		sessionManager: { getBranch() { return [{ type: "custom", customType: "ponytail-mode", data: { mode: "ultra" } }]; } },
 		setInterval() { throw new Error("Static sources must not start a timer"); },
@@ -146,6 +173,287 @@ describe("Shared Display host presence", () => {
 			}
 		});
 	}
+});
+
+describe("Shared Display powerline style", () => {
+	const theme: HarnessTheme = {
+		getColorHex: name =>
+			({
+				statusLineModel: "#ff0000",
+				statusLinePath: "#00ff00",
+				statusLineGitClean: "#0000ff",
+				statusLineContext: "#ffff00",
+				statusLineSpend: "#ff00ff",
+				statusLineDirty: "#00ffff",
+			})[name] ?? "#000000",
+		getBgHex: () => "#101010",
+	};
+	const FG = "\x1b[38;2;16;16;16m";
+
+	function publishHeadroomAndRtk(host: { load(): void; start(): void; events: Parameters<typeof connectSharedDisplay>[0] }) {
+		host.load();
+		host.start();
+		const headroom = connectSharedDisplay(host.events, "headroom");
+		const rtk = connectSharedDisplay(host.events, "rtk");
+		headroom.publish({ frames: [["\x1b[31mH\x1b[0m"]] });
+		rtk.publish({ frames: [["R"]] });
+		return () => { headroom.dispose(); rtk.dispose(); };
+	}
+
+	it("renders themed segments with cap, arrow and end cap, stripping producer colors", () => {
+		const host = makeHostHarness(true, true, ["headroom", "rtk"], { style: "powerline", theme });
+		try {
+			const dispose = publishHeadroomAndRtk(host);
+			expect(host.rows()).toEqual([
+				"\x1b[38;2;255;0;0m\ue0b6" +
+					`\x1b[48;2;255;0;0m${FG} H ` +
+					"\x1b[48;2;0;255;0m\x1b[38;2;255;0;0m\ue0b0" +
+					`\x1b[48;2;0;255;0m${FG} R ` +
+					"\x1b[0m\x1b[38;2;0;255;0m\ue0b4\x1b[0m",
+			]);
+			dispose();
+		} finally {
+			host.close();
+		}
+	});
+
+	it("renders the plain separator-joined row when the theme lacks true colors", () => {
+		const host = makeHostHarness(true, true, ["headroom", "rtk"], {
+			style: "powerline",
+			theme: { getColorHex: () => "ansi-256", getBgHex: () => "ansi-256" },
+		});
+		try {
+			const dispose = publishHeadroomAndRtk(host);
+			expect(host.rows()).toEqual(["\x1b[31mH\x1b[0m  R"]);
+			dispose();
+		} finally {
+			host.close();
+		}
+	});
+
+	it("renders one capped segment per row in vertical layout, cycling colors per block", () => {
+		const host = makeHostHarness(true, true, ["headroom", "rtk"], { style: "powerline", layout: "vertical", theme });
+		try {
+			const dispose = publishHeadroomAndRtk(host);
+			expect(host.rows()).toEqual([
+				`\x1b[38;2;255;0;0m\ue0b6\x1b[48;2;255;0;0m${FG} H \x1b[0m\x1b[38;2;255;0;0m\ue0b4\x1b[0m`,
+				`\x1b[38;2;0;255;0m\ue0b6\x1b[48;2;0;255;0m${FG} R \x1b[0m\x1b[38;2;0;255;0m\ue0b4\x1b[0m`,
+			]);
+			dispose();
+		} finally {
+			host.close();
+		}
+	});
+});
+
+describe("Shared Display palettes", () => {
+	const theme: HarnessTheme = {
+		getColorHex: name =>
+			({
+				statusLineModel: "#ff0000",
+				statusLinePath: "#00ff00",
+				statusLineGitClean: "#0000ff",
+				statusLineContext: "#ffff00",
+				statusLineSpend: "#ff00ff",
+				statusLineDirty: "#00ffff",
+			})[name] ?? "#000000",
+		getBgHex: () => "#101010",
+	};
+	const RESET = "\x1b[0m";
+	const fg = (r: number, g: number, b: number) => `\x1b[38;2;${r};${g};${b}m`;
+	const bg = (r: number, g: number, b: number) => `\x1b[48;2;${r};${g};${b}m`;
+
+	function publishHeadroomAndRtk(host: { load(): void; start(): void; events: Parameters<typeof connectSharedDisplay>[0] }) {
+		host.load();
+		host.start();
+		const headroom = connectSharedDisplay(host.events, "headroom");
+		const rtk = connectSharedDisplay(host.events, "rtk");
+		headroom.publish({ frames: [["\x1b[31mH\x1b[0m"]] });
+		rtk.publish({ frames: [["R"]] });
+		return () => { headroom.dispose(); rtk.dispose(); };
+	}
+
+	function rowsFor(display: Parameters<typeof makeHostHarness>[3]): string[] {
+		const host = makeHostHarness(true, true, ["headroom", "rtk"], display);
+		try {
+			const dispose = publishHeadroomAndRtk(host);
+			const rows = host.rows();
+			dispose();
+			return rows;
+		} finally {
+			host.close();
+		}
+	}
+
+	const POWERLINE_FIRST_TWO_BACKGROUNDS: readonly (readonly [Exclude<SharedDisplayPalette, "none" | "theme">, string, string])[] = [
+		["gruvbox", bg(214, 93, 14), bg(215, 153, 33)],
+		["catppuccin", bg(243, 139, 168), bg(250, 179, 135)],
+		["pastel", bg(154, 52, 142), bg(218, 98, 125)],
+		["tokyo-night", bg(163, 174, 210), bg(118, 159, 240)],
+	];
+
+	for (const [palette, first, second] of POWERLINE_FIRST_TWO_BACKGROUNDS) {
+		it(`paints powerline segments with the ${palette} backgrounds`, () => {
+			const [row] = rowsFor({ style: "powerline", palette });
+			expect(row).toContain(first);
+			expect(row).toContain(second);
+			expect(row!.indexOf(first)).toBeLessThan(row!.indexOf(second));
+		});
+	}
+
+	it("shows each tokyo-night segment foreground", () => {
+		const [row] = rowsFor({ style: "powerline", palette: "tokyo-night" });
+		const first = fg(9, 12, 12);
+		const second = fg(227, 229, 229);
+		expect(row).toContain(first);
+		expect(row).toContain(second);
+		expect(row!.indexOf(first)).toBeLessThan(row!.indexOf(second));
+	});
+
+	it("leaves the pastel foreground at the terminal default", () => {
+		const [row] = rowsFor({ style: "powerline", palette: "pastel" });
+		expect(row).toContain(`${bg(154, 52, 142)}\x1b[39m H `);
+	});
+
+	it("colors plain text with gruvbox, leaving the separator uncolored and stripping producer colors", () => {
+		expect(rowsFor({ style: "plain", palette: "gruvbox" })).toEqual([
+			`${fg(214, 93, 14)}H${RESET}  ${fg(215, 153, 33)}R${RESET}`,
+		]);
+	});
+
+	it("colors each vertical plain row by its block index", () => {
+		expect(rowsFor({ style: "plain", palette: "gruvbox", layout: "vertical" })).toEqual([
+			`${fg(214, 93, 14)}H${RESET}`,
+			`${fg(215, 153, 33)}R${RESET}`,
+		]);
+	});
+
+	it("renders plain with palette none exactly as the producers' text joined by the separator", () => {
+		expect(rowsFor({ style: "plain", palette: "none", theme })).toEqual(["\x1b[31mH\x1b[0m  R"]);
+	});
+
+	it("renders powerline with palette none in the plain shape", () => {
+		expect(rowsFor({ style: "powerline", palette: "none", theme })).toEqual(["\x1b[31mH\x1b[0m  R"]);
+	});
+
+	it("colors plain text from the OMP theme by default", () => {
+		expect(rowsFor({ theme })).toEqual([`${fg(255, 0, 0)}H${RESET}  ${fg(0, 255, 0)}R${RESET}`]);
+	});
+
+	it("renders uncolored plain by default when the theme lacks true colors", () => {
+		expect(
+			rowsFor({ theme: { getColorHex: () => "ansi-256", getBgHex: () => "ansi-256" } }),
+		).toEqual(["\x1b[31mH\x1b[0m  R"]);
+	});
+
+	it("normalizes an unknown palette to theme and keeps known palettes", () => {
+		expect(normalizeSharedDisplayConfig({ palette: "neon" }).palette).toBe("theme");
+		expect(normalizeSharedDisplayConfig({}).palette).toBe("theme");
+		for (const palette of ["none", "theme", "gruvbox", "catppuccin", "pastel", "tokyo-night"] as const) {
+			expect(normalizeSharedDisplayConfig({ palette }).palette).toBe(palette);
+		}
+	});
+
+	it("rejects an unknown palette when validating", () => {
+		expect(validateSharedDisplayConfig({ ...DEFAULT_SHARED_DISPLAY_CONFIG, palette: "neon" })).toEqual(["palette is invalid"]);
+		expect(validateSharedDisplayConfig({ ...DEFAULT_SHARED_DISPLAY_CONFIG, palette: "gruvbox" })).toEqual([]);
+	});
+
+	it("renders bracketed gruvbox cells through the host with brackets outside the color codes", () => {
+		expect(rowsFor({ style: "bracketed", palette: "gruvbox" })).toEqual([
+			`[${fg(214, 93, 14)}H${RESET}][${fg(215, 153, 33)}R${RESET}]`,
+		]);
+	});
+
+	it("renders rounded tokyo-night segments through the host without powerline glyphs", () => {
+		const [row] = rowsFor({ style: "rounded", palette: "tokyo-night" });
+		expect(row!.startsWith(`${fg(163, 174, 210)}░▒▓`)).toBe(true);
+		expect(row!.endsWith(`${RESET}${fg(118, 159, 240)}\ue0b4${RESET}`)).toBe(true);
+		expect(row!.split("\ue0b4")).toHaveLength(3);
+		expect(row).toContain(fg(9, 12, 12));
+		expect(row).toContain(fg(227, 229, 229));
+		expect(row!.indexOf(fg(9, 12, 12))).toBeLessThan(row!.indexOf(fg(227, 229, 229)));
+		expect(row).not.toContain("\ue0b0");
+		expect(row).not.toContain("\ue0b6");
+	});
+});
+
+describe("Shared Display bracketed and rounded styles", () => {
+	const RESET = "\x1b[0m";
+	const fg = (r: number, g: number, b: number) => `\x1b[38;2;${r};${g};${b}m`;
+	const bg = (r: number, g: number, b: number) => `\x1b[48;2;${r};${g};${b}m`;
+	const palette: ResolvedPalette = {
+		segments: [{ bg: "#112233", fg: "#aabbcc" }, { bg: "#445566" }],
+		text: ["#d65d0e", "#d79921"],
+	};
+	const two = new Map<"headroom" | "rtk", FrameSequence>([
+		["headroom", { frames: [["\x1b[31mA\x1b[0m"]] }],
+		["rtk", { frames: [["B"]] }],
+	]);
+	const compose = (
+		snapshots: ReadonlyMap<"headroom" | "rtk", FrameSequence>,
+		options: Partial<Parameters<typeof composeDisplayRows>[1]>,
+	) =>
+		composeDisplayRows(snapshots, { layout: "horizontal", order: ["headroom", "rtk"], width: 80, ...options }).map(row =>
+			row.replace(/^ +/u, ""),
+		);
+
+	it("renders bracketed cells adjacent with producer colors kept and the separator ignored without a palette", () => {
+		expect(compose(two, { style: "bracketed", horizontalSeparator: " | " })).toEqual(["[\x1b[31mA\x1b[0m][B]"]);
+	});
+
+	it("colors only the bracketed inner text and strips producer colors", () => {
+		expect(compose(two, { style: "bracketed", palette })).toEqual([
+			`[${fg(214, 93, 14)}A${RESET}][${fg(215, 153, 33)}B${RESET}]`,
+		]);
+	});
+
+	it("renders one unpadded bracketed row per block row in vertical layout, colored by block index", () => {
+		const snapshots = new Map<"headroom" | "rtk", FrameSequence>([
+			["headroom", { frames: [["A1", "A22"]] }],
+			["rtk", { frames: [["B"]] }],
+		]);
+		expect(compose(snapshots, { style: "bracketed", layout: "vertical", palette })).toEqual([
+			`[${fg(214, 93, 14)}A1${RESET}]`,
+			`[${fg(214, 93, 14)}A22${RESET}]`,
+			`[${fg(215, 153, 33)}B${RESET}]`,
+		]);
+	});
+
+	it("renders rounded segments with the gradient start, rounded joint and end cap, ignoring the separator", () => {
+		expect(compose(two, { style: "rounded", palette, horizontalSeparator: " | " })).toEqual([
+			`${fg(17, 34, 51)}░▒▓` +
+				`${bg(17, 34, 51)}${fg(170, 187, 204)} A ` +
+				`${bg(68, 85, 102)}${fg(17, 34, 51)}\ue0b4` +
+				`${bg(68, 85, 102)}\x1b[39m B ` +
+				`${RESET}${fg(68, 85, 102)}\ue0b4${RESET}`,
+		]);
+	});
+
+	it("renders rounded with no palette as the plain separator-joined row", () => {
+		expect(compose(two, { style: "rounded", horizontalSeparator: " | " })).toEqual(["\x1b[31mA\x1b[0m | B"]);
+	});
+
+	it("renders one padded rounded row per block row in vertical layout, cycling colors per block", () => {
+		const snapshots = new Map<"headroom" | "rtk", FrameSequence>([
+			["headroom", { frames: [["A", "AA"]] }],
+			["rtk", { frames: [["B"]] }],
+		]);
+		expect(compose(snapshots, { style: "rounded", layout: "vertical", palette })).toEqual([
+			`${fg(17, 34, 51)}░▒▓${bg(17, 34, 51)}${fg(170, 187, 204)} A  ${RESET}${fg(17, 34, 51)}\ue0b4${RESET}`,
+			`${fg(17, 34, 51)}░▒▓${bg(17, 34, 51)}${fg(170, 187, 204)} AA ${RESET}${fg(17, 34, 51)}\ue0b4${RESET}`,
+			`${fg(68, 85, 102)}░▒▓${bg(68, 85, 102)}\x1b[39m B ${RESET}${fg(68, 85, 102)}\ue0b4${RESET}`,
+		]);
+	});
+
+	it("keeps bracketed and rounded when normalizing and sends unknown styles to plain", () => {
+		for (const style of ["plain", "bracketed", "powerline", "rounded"] as const) {
+			expect(normalizeSharedDisplayConfig({ style }).style).toBe(style);
+			expect(validateSharedDisplayConfig({ ...DEFAULT_SHARED_DISPLAY_CONFIG, style })).toEqual([]);
+		}
+		expect(normalizeSharedDisplayConfig({ style: "fancy" }).style).toBe("plain");
+		expect(validateSharedDisplayConfig({ ...DEFAULT_SHARED_DISPLAY_CONFIG, style: "fancy" })).toEqual(["style is invalid"]);
+	});
 });
 
 describe("Shared Display source composition", () => {

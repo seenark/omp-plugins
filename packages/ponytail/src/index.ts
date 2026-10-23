@@ -111,8 +111,8 @@ export default function ponytailExtension(pi: ExtensionAPI, options: PonytailExt
 		try {
 			const asset = await loadPonytailSequence(mode, config, { homeDirectory: options.homeDirectory, packageAssetDirectory });
 			if (version !== syncVersion || disposed) return;
-			publisher.publish(renderPonytailFrameSequence(mode, asset, config, active));
-			ctx.ui.setStatus("ponytail", renderNativePonytailStatus(mode, asset, config, active));
+			publisher.publish(renderPonytailFrameSequence(asset, config, active));
+			ctx.ui.setStatus("ponytail", renderNativePonytailStatus(asset, config, active));
 		} catch (error) {
 			if (version !== syncVersion || disposed) return;
 			warn(`Unable to render Ponytail display: ${String(error)}`, ctx);

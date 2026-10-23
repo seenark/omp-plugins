@@ -33,7 +33,7 @@ What `launch` does, from an empty directory, in about 7 s:
    - `omp plugin features omp-plugins --enable=<every key of omp.features in the root package.json>` (10 today: headroom, prompt-border-style, shared-display, ponytail, caveman, codegraph, beads, rtk, process-monitor, skill-stats)
    - `omp plugin link <repo>/packages/pstack`
 4. Starts `omp --no-session` in a 120x50 PTY. The child env drops `PI_CODING_AGENT_DIR`, `PI_SESSION_*`, `OMP_PROFILE` and `XDG_*`.
-5. Ready in two steps. First the status line must show `ponytail: … caveman … Headroom … rtk`. Then `/ponytail status` is submitted and must answer `Ponytail: current <mode> • default <mode>`, which proves extension commands round-trip.
+5. Ready in two steps. First the status line must show `ponytail … caveman … Headroom … rtk`. Then `/ponytail status` is submitted and must answer `Ponytail: current <mode> • default <mode>`, which proves extension commands round-trip.
 6. Writes `$EVID/run.txt` with the run id, checkout path, git rev, omp version and launch time. The rev gets `+dirty` when tracked files differ from HEAD. Untracked files do not count.
 
 Plugins load from the checkout at omp start. After editing plugin source, or to check that persisted settings apply to a new session, run `verify-omp restart r1`. It stops omp and starts a new session on the same scratch HOME. Readiness is the editor plus a `/ponytail status` round-trip, because persisted modes can hide status-line segments. A running instance never picks up edits.
@@ -86,7 +86,7 @@ A failed `wait` prints the full screen and exits 1. Treat that as a failed step.
 Stable handles on screen:
 
 - **Editor box:** `╔══ π > ⬢ no-model > 🗑 omp-verify/<run>/project > ⑂ main …`, then `║` rows, then `╚═…`.
-- **Status line:** the row under `╚`. Segments show with the default config: `🐴 ponytail: ⚡ FULL`, a caveman spinner plus mode name (`caveman`, `ultracave` or `megacave`; gone when off), `⏹ Headroom not running` or `⦸ Headroom off`, and `✂ rtk 0% (0 saved)`. A `⚠ N ports` segment can show on a fresh launch: process-monitor sees the whole machine, so leftover processes from the user's real omp sessions count.
+- **Status line:** the row under `╚`. Segments show with the default config: `○ 🐴⚡ ponytail` (the Mode Level shows only through its glyph; absent when off), a caveman spinner plus mode name (`caveman`, `ultracave` or `megacave`; gone when off), `⏹ Headroom not running` or `⦸ Headroom off`, and `✂ rtk 0 saved · 0 cmds`. A `⚠ N ports` segment can show on a fresh launch: process-monitor sees the whole machine, so leftover processes from the user's real omp sessions count.
 - **Notifications:** single lines above the editor, for example `Caveman ultracave.`, `Ponytail mode set to ultra.` or `Error: Unknown Caveman command: …`.
 - **Dialogs:** a title line plus `Enter/Esc close` (status views), or a `╭─ Title ─╮` select box with `❯` on the highlighted row and `↑/↓ navigate  ⏎ select  ⎋ cancel`.
 

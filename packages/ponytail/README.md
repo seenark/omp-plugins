@@ -64,7 +64,7 @@ All settings persist in the root envelope `~/.config/codesook-omp/config.json`, 
     "ponytail": {
       "visible": true,
       "nativeVisible": false,
-      "template": "{activity} {glyph} ponytail: {modeIcon}{mode}",
+      "template": "{activity} {glyph} ponytail",
       "glyphDirectory": "~/.config/codesook-omp/ponytail"
     }
   },
@@ -83,9 +83,9 @@ All settings persist in the root envelope `~/.config/codesook-omp/config.json`, 
 
 When the Shared Display host is loaded, Ponytail publishes complete frame sequences on source `ponytail`; `display.ponytail.visible: false` publishes `null`. `nativeVisible` independently controls the static `ctx.ui.setStatus("ponytail", ...)` footer text, which uses only the first row of frame zero. Both are cleared when the level is `off` and on shutdown. Without the host, the publisher is a no-op and no private widget or timer exists.
 
-Template placeholders: `{activity}` (`●` while the agent runs, `○` otherwise), `{glyph}` (current frame), `{mode}` (upper-case level) and `{modeIcon}` (`🌿 ` lite, `⚡ ` full, `🔥 ` ultra, empty for review). The glyph is not themed.
+Template placeholders: `{activity}` (`●` while the agent runs, `○` otherwise) and `{glyph}` (current frame). Nothing else is substituted: `{mode}` and `{modeIcon}` render literally. The glyph is not themed.
 
-The package ships `assets/off.txt`, `lite.txt`, `full.txt`, `ultra.txt` and `review.txt` (one `🐴` frame each). A file `<level>.txt` in `display.ponytail.glyphDirectory` overrides its packaged asset when the Shared Display parser accepts it (optional `fps=` header, then frames); otherwise the packaged asset, then a single `🐴`. `seedMissingPonytailGlyphs` copies only the files a directory lacks.
+The Mode Level shows only through its glyph. The package ships `assets/off.txt` and `review.txt` (`🐴`), `lite.txt` (`🐴🌿`), `full.txt` (`🐴⚡`) and `ultra.txt` (`🐴🔥`), one static frame each. To show any Mode Level text, put it in your own `<level>.txt` glyph files. A file `<level>.txt` in `display.ponytail.glyphDirectory` overrides its packaged asset when the Shared Display parser accepts it (optional `fps=` header, then frames); otherwise the packaged asset, then a single `🐴`. `seedMissingPonytailGlyphs` copies only the files a directory lacks.
 
 ## Pinned Revision and Vendored Content
 

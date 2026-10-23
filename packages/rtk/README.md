@@ -59,13 +59,15 @@ Edited through `/omp-plugins` (RTK section) in `~/.config/codesook-omp/config.js
     "rtk": {
       "visible": true,
       "glyphDirectory": "~/.config/codesook-omp/rtk",
-      "template": "{glyph} rtk {percent}% ({tokensSaved} saved)"
+      "template": "{glyph} rtk {tokensSaved} saved · {commands} cmds"
     }
   }
 }
 ```
 
 Template placeholders: `{glyph}`, `{percent}`, `{tokensSaved}`, `{tokensInput}`, `{commands}`. Numbers use compact form (950, 1.2k, 3.4M). The `off` and `missing` states use fixed templates (`{glyph} rtk off`, `{glyph} rtk missing`). Glyph frames load from `<glyphDirectory>/<state>.txt` (`active`, `off`, `missing`) and fall back to built-in glyphs.
+
+`{commands}` counts commands that went through rtk in this Agent Session, so `0 cmds` means nothing was rewritten yet. Most piped commands are skipped by design (ADR-0007). `{percent}` and `{tokensInput}` remain available for custom templates.
 
 ## Install
 

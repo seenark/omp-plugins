@@ -28,6 +28,14 @@ _Avoid_: Widget producer, status renderer
 One named feature's current visual contribution to Shared Display, represented by a Frame Sequence or an intentional absence.
 _Avoid_: Status line, widget
 
+**Display Style**:
+The shape of Shared Display around and between Status Segments: caps, separators, brackets, and padding. It never changes a segment's own icons or text, and it carries no colors.
+_Avoid_: Theme, preset, skin
+
+**Display Palette**:
+The named set of colors a Display Style paints Status Segments with, chosen independently of the Display Style. It may follow the OMP theme or be a fixed named palette.
+_Avoid_: Theme, color scheme
+
 **Session Override**:
 A session-only setting that takes precedence over persisted configuration until the session boundary resets it.
 _Avoid_: Runtime default, temporary configuration

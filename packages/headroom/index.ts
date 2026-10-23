@@ -783,14 +783,15 @@ function publishDisplay(runtime: HeadroomRuntime, ctx: ExtensionContext): void {
 		runtime.publisher.publish(null);
 		return;
 	}
-	const state = widgetState(
-		runtime.state.enabled,
-		isRemoteBlocked(runtime.config),
-		runtime.state.proxyStarting,
-		runtime.state.proxyOnline,
-		runtime.state.compressionAvailable === false,
-		runtime.state.pendingHealth !== undefined,
-	);
+	const state = widgetState({
+		enabled: runtime.state.enabled,
+		blocked: isRemoteBlocked(runtime.config),
+		starting: runtime.state.proxyStarting,
+		online: runtime.state.proxyOnline,
+		unavailable: runtime.state.compressionAvailable === false,
+		checking: runtime.state.pendingHealth !== undefined,
+		saved: runtime.state.stats.savedTokens > 0,
+	});
 	const fallback = resolveThemeGlyph(ctx.ui.theme, state) || DEFAULT_GLYPHS[state];
 	try {
 		const stats = runtime.state.stats;

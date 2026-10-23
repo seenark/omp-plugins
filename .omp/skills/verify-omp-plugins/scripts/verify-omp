@@ -54,7 +54,7 @@ launch)
 	# --enable replaces the feature set; name every root feature or the defaults (headroom, prompt-border-style) drop out.
 	scratch omp plugin features omp-plugins --enable="$FEATURES" >/dev/null
 	scratch omp plugin link "$REPO/packages/pstack" >/dev/null
-	start_omp 'ponytail: .*caveman.*Headroom.*rtk' # every default segment painted
+	start_omp 'ponytail .*caveman.*Headroom.*rtk' # every default segment painted
 	{
 		echo "run_id=$run_id"
 		echo "checkout=$REPO"

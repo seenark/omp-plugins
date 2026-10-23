@@ -114,9 +114,9 @@ describe("Ponytail glyphs", () => {
 	it("prefers a valid user glyph, then the packaged one, then a single horse", async () => {
 		const directory = tempDirectory();
 		const config = { ...DEFAULT_PONYTAIL_CONFIG, display: { ...DEFAULT_PONYTAIL_CONFIG.display, glyphDirectory: directory } };
-		expect(await loadPonytailSequence("full", config)).toEqual({ frames: [["🐴"]] });
+		expect(await loadPonytailSequence("full", config)).toEqual({ frames: [["🐴⚡"]] });
 		fs.writeFileSync(path.join(directory, "full.txt"), "   \n");
-		expect(await loadPonytailSequence("full", config)).toEqual({ frames: [["🐴"]] });
+		expect(await loadPonytailSequence("full", config)).toEqual({ frames: [["🐴⚡"]] });
 		fs.writeFileSync(path.join(directory, "full.txt"), "X\n");
 		expect(await loadPonytailSequence("full", config)).toEqual({ frames: [["X"]] });
 		expect(await loadPonytailSequence("full", config, { packageAssetDirectory: directory, homeDirectory: directory })).toEqual({ frames: [["X"]] });

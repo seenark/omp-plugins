@@ -25,17 +25,17 @@ Preconditions:
 
 - A fresh `verify-omp launch` with `doctor` all `ok`.
 - `PONYTAIL_DEFAULT_MODE` is unset in the launching shell.
-- The status line shows `🐴 ponytail: ⚡ FULL`.
+- The status line shows `○ 🐴⚡ ponytail`. The segment has no Mode Level text, only the glyph: lite `🐴🌿`, full `🐴⚡`, ultra `🐴🔥`. The scratch HOME seeds these packaged glyphs into `$SCRATCH_HOME/.config/codesook-omp/ponytail/`, so every launch renders them.
 
 - **Baseline.** Read the status. Run `$OMP_PTY submit $PTY "/ponytail status"`, then `$OMP_PTY wait $PTY 'Ponytail: current full • default full'`. Save the screen with `$OMP_PTY screen $PTY --out $EVID/ponytail/01-baseline.txt`. Copy the config with `cp $SCRATCH_HOME/.config/codesook-omp/config.json $EVID/ponytail/config-before.json`.
-- **Session mode.** Switch to ultra. Run `$OMP_PTY submit $PTY "/ponytail ultra"`, then `$OMP_PTY wait $PTY 'Ponytail mode set to ultra\.'` and `$OMP_PTY wait $PTY 'ponytail: 🔥 ULTRA'`. Save `02-ultra.txt`.
+- **Session mode.** Switch to ultra. Run `$OMP_PTY submit $PTY "/ponytail ultra"`, then `$OMP_PTY wait $PTY 'Ponytail mode set to ultra\.'` and `$OMP_PTY wait $PTY '🐴🔥 ponytail'`. Save `02-ultra.txt`.
 - **Session mode is not persisted.** Run `cmp $EVID/ponytail/config-before.json $SCRATCH_HOME/.config/codesook-omp/config.json`. It must exit 0, and `jq -r '.behavior.ponytail.defaultMode // "unset"'` on the file prints `unset`.
-- **Save default.** Run `$OMP_PTY submit $PTY "/ponytail default lite"`, then `$OMP_PTY wait $PTY 'Default Ponytail mode set to lite\.'`. The segment still reads `ponytail: 🔥 ULTRA`, because the session mode is unchanged. Save `03-default-lite.txt`.
+- **Save default.** Run `$OMP_PTY submit $PTY "/ponytail default lite"`, then `$OMP_PTY wait $PTY 'Default Ponytail mode set to lite\.'`. The segment still reads `🐴🔥 ponytail`, because the session mode is unchanged. Save `03-default-lite.txt`.
 - **Second view.** Run `$OMP_PTY submit $PTY "/ponytail status"`, then `$OMP_PTY wait $PTY 'Ponytail: current ultra • default lite'`. Save `04-status.txt`. Then run `jq -r .behavior.ponytail.defaultMode $SCRATCH_HOME/.config/codesook-omp/config.json`, which prints `lite`. Copy the file to `$EVID/ponytail/config-after.json`.
 - **Invalid mode.** Run `$OMP_PTY submit $PTY "/ponytail review"`, then `$OMP_PTY wait $PTY 'Unknown or unsupported /ponytail mode\. Usage: /ponytail'`. The segment is unchanged.
-- **Off and back on.** Run `$OMP_PTY submit $PTY "/ponytail off"`, then `$OMP_PTY wait $PTY 'Ponytail mode set to off\.'` and `$OMP_PTY wait $PTY 'ponytail: ' --absent`. Run `$OMP_PTY submit $PTY "/ponytail"`; the segment returns at the saved default (`$OMP_PTY wait $PTY 'ponytail: 🌿 LITE'` after the default step above).
+- **Off and back on.** Run `$OMP_PTY submit $PTY "/ponytail off"`, then `$OMP_PTY wait $PTY 'Ponytail mode set to off\.'` and `$OMP_PTY wait $PTY '[●○] \S+ ponytail' --absent`. Run `$OMP_PTY submit $PTY "/ponytail"`; the segment returns at the saved default (`$OMP_PTY wait $PTY '🐴🌿 ponytail'` after the default step above).
 - **Phrase.** Run `$OMP_PTY submit $PTY "stop ponytail"`. The plugin answers `Ponytail mode set to off.` and the segment disappears before omp reports `Error: No model selected.` for the message itself.
-- **Default applies to a new session.** Run `.omp/skills/verify-omp-plugins/scripts/verify-omp restart $RUN_ID`. The run keeps its scratch HOME and starts a new omp session. Then `$OMP_PTY submit $PTY "/ponytail status"` and `$OMP_PTY wait $PTY 'Ponytail: current lite • default lite'`. The segment reads `ponytail: \S+ LITE`. Save `05-restart.txt`.
+- **Default applies to a new session.** Run `.omp/skills/verify-omp-plugins/scripts/verify-omp restart $RUN_ID`. The run keeps its scratch HOME and starts a new omp session. Then `$OMP_PTY submit $PTY "/ponytail status"` and `$OMP_PTY wait $PTY 'Ponytail: current lite • default lite'`. The segment reads `🐴🌿 ponytail`. Save `05-restart.txt`.
 
 ## Gotchas
 

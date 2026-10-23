@@ -19,11 +19,28 @@ Legacy `~/.config/codesook-omp/shared-display/config.json` migrates once when ro
 
 Effective source order appends every known source (`ponytail`, `caveman`, `headroom`, `rtk`, `codegraph`, `beads`, `pstack`, `process-monitor`) that a persisted order omits, including orders saved before a source existed. Sources present keep their configured relative order; unknown names and duplicates are dropped. Each integration's visibility controls whether its segment appears; removing it from source order does not hide it. The side-effect-free client never loads the display host or another integration.
 
-## Style
+## Style and Palette
 
-`display.sharedDisplay.style` is `plain` (default) or `powerline`. `powerline` renders each visible source as a segment in the Starship catppuccin-powerline shape: a rounded cap (U+E0B6), then segments joined by arrows (U+E0B0). Both glyphs need a Nerd Font.
+`display.sharedDisplay.style` sets the shape and `display.sharedDisplay.palette` sets the colors. They are chosen independently, and every palette applies to every style.
 
-Colors come from the active OMP theme at every render, so a theme switch applies immediately. Segment backgrounds cycle through `statusLineModel`, `statusLinePath`, `statusLineGitClean`, `statusLineContext`, `statusLineSpend`, and `statusLineDirty`; text uses the `statusLineBg` color. Producer ANSI colors are stripped inside powerline segments so text stays readable. `horizontalSeparator` is ignored in powerline style. If the theme does not resolve `#rrggbb` colors, the host renders `plain`. Change it in `/omp-plugins` → Shared Display → Style.
+`style` is `plain` (default), `bracketed`, `powerline`, or `rounded`. The table lists the Starship presets each shape covers.
+
+| Style | Shape | Starship presets | Nerd Font |
+| --- | --- | --- | --- |
+| `plain` | Sources joined by `horizontalSeparator`. | Pure, Jetpack | No |
+| `bracketed` | Each source wrapped as `[source]`, adjacent with no separator. Brackets stay uncolored and the palette colors only the inner text. | Bracketed Segments | No |
+| `powerline` | A rounded cap (U+E0B6), then segments joined by arrows (U+E0B0), closed by a rounded end (U+E0B4). | Gruvbox Rainbow, Catppuccin Powerline, Pastel Powerline | Yes |
+| `rounded` | A `░▒▓` gradient start in the first segment's color, segments joined by rounded joints (U+E0B4), closed by U+E0B4. | Tokyo Night | Yes |
+
+`horizontalSeparator` applies only to `plain`; `bracketed`, `powerline`, and `rounded` ignore it. In vertical layout every source row renders as its own `[row]`, powerline segment, or rounded segment.
+
+`palette` is one of:
+
+- `theme` (default). Colors come from the active OMP theme at every render, so a theme switch applies immediately. Segment backgrounds cycle through `statusLineModel`, `statusLinePath`, `statusLineGitClean`, `statusLineContext`, `statusLineSpend`, and `statusLineDirty`; segment text uses the `statusLineBg` color; `plain` and `bracketed` text take the same six colors. If the theme does not resolve `#rrggbb` colors, the host renders uncolored `plain`, or `bracketed` without text color.
+- `gruvbox`, `catppuccin` (Mocha), `pastel`, `tokyo-night`. Fixed colors from the Starship preset TOMLs. `powerline` and `rounded` paint each segment with the palette's background and foreground pair (`pastel` leaves the foreground at the terminal default). `plain` and `bracketed` color each source's text with the palette's text-only accents, which stay readable on a dark terminal. Segments and text cycle through the palette in source order.
+- `none`. No color is added and the host renders the `plain` shape, even when `style` is `powerline` or `rounded`. `bracketed` keeps its brackets and leaves the text untouched.
+
+Producer ANSI colors are replaced whenever a palette applies, so text stays readable on the segment background and the palette stays consistent. With `none`, or with `theme` falling back to uncolored `plain`, producer output is untouched. Change both settings in `/omp-plugins` → Shared Display → Style and Palette.
 
 ## Ponytail
 

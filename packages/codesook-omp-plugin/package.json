@@ -1,6 +1,6 @@
 {
   "name": "@codesook/omp-plugin-settings",
-  "version": "1.4.0",
+  "version": "1.5.0",
   "type": "module",
   "description": "Unified Codesook OMP plugin settings for oh-my-pi",
   "license": "MIT",
@@ -20,10 +20,10 @@
   "dependencies": {
     "@codesook/omp-caveman": "^1.0.0",
     "@codesook/omp-headroom": "^2.0.0",
-    "@codesook/omp-ponytail": "^1.0.0",
+    "@codesook/omp-ponytail": "^2.0.0",
     "@codesook/omp-prompt-border-style": "^2.0.0",
     "@codesook/omp-rtk": "^1.0.0",
-    "@codesook/omp-shared-display": "^1.4.0"
+    "@codesook/omp-shared-display": "^1.6.0"
   },
   "peerDependencies": {
     "@oh-my-pi/pi-coding-agent": ">=18.3.1",

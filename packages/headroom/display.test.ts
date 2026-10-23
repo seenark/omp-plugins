@@ -41,7 +41,7 @@ describe("Headroom display producer", () => {
 				DEFAULT_GLYPHS.compressed,
 				asset,
 			);
-			expect(sequence).toEqual({ frames: [["A", "B Headroom -32% (1.2k saved)"], ["C Headroom -32% (1.2k saved)"]], fps: 8 });
+			expect(sequence).toEqual({ frames: [["A", "B Headroom 1.2k saved"], ["C Headroom 1.2k saved"]], fps: 8 });
 			expect(renderDisplay("compressed", {
 				label: "Headroom",
 				compressionPercent: 32,
@@ -53,7 +53,7 @@ describe("Headroom display producer", () => {
 				proxyStatus: "online",
 				error: "",
 				reason: "",
-			}, config, DEFAULT_GLYPHS.compressed, 1, asset.frames)).toBe("C Headroom -32% (1.2k saved)");
+			}, config, DEFAULT_GLYPHS.compressed, 1, asset.frames)).toBe("C Headroom 1.2k saved");
 		} finally {
 			fs.rmSync(directory, { recursive: true, force: true });
 		}
@@ -63,12 +63,28 @@ describe("Headroom display producer", () => {
 		expect(DEFAULT_DISPLAY_CONFIG.visible).toBe(true);
 		expect(isDisplayVisible(DEFAULT_DISPLAY_CONFIG)).toBe(true);
 		expect(isDisplayVisible({ display: { ...DEFAULT_DISPLAY_CONFIG, visible: false } })).toBe(false);
-		expect(widgetState(false, false, false, null, false)).toBe("off");
-		expect(widgetState(true, true, false, null, false)).toBe("remote-blocked");
-		expect(widgetState(true, false, false, true, false)).toBe("compressed");
-		expect(widgetState(true, false, false, true, true)).toBe("unavailable");
-		expect(widgetState(true, false, false, false, true)).toBe("offline");
-		expect(widgetState(true, false, false, null, false)).toBe("idle");
+		const base = { enabled: true, blocked: false, starting: false, online: null, unavailable: false, saved: false };
+		expect(widgetState({ ...base, enabled: false })).toBe("off");
+		expect(widgetState({ ...base, blocked: true })).toBe("remote-blocked");
+		expect(widgetState({ ...base, starting: true, online: true, saved: true })).toBe("starting");
+		expect(widgetState({ ...base, online: true })).toBe("online");
+		expect(widgetState({ ...base, online: true, saved: true })).toBe("compressed");
+		expect(widgetState({ ...base, online: true, unavailable: true, saved: true })).toBe("unavailable");
+		expect(widgetState({ ...base, online: false, unavailable: true })).toBe("offline");
+		expect(widgetState({ ...base, checking: true })).toBe("loading");
+		expect(widgetState(base)).toBe("idle");
+	});
+
+	it("shows no numbers until tokens are saved, then compact tokens saved", () => {
+		const values = { label: "Headroom", compressionPercent: 0, tokensSaved: 0, tokensBefore: 40_000, tokensAfter: 40_000, lastPercent: 0, lastSaved: 0, proxyStatus: "online", error: "", reason: "" };
+		const config = normalizeDisplayConfig({});
+		const online = { enabled: true, blocked: false, starting: false, online: true, unavailable: false };
+		const idleState = widgetState({ ...online, saved: false });
+		expect(idleState).toBe("online");
+		expect(renderDisplay(idleState, values, config, "G", 0, [["G"]])).toBe("G Headroom");
+		const savedState = widgetState({ ...online, saved: true });
+		expect(savedState).toBe("compressed");
+		expect(renderDisplay(savedState, { ...values, tokensSaved: 12_400, compressionPercent: 31 }, config, "G", 0, [["G"]])).toBe("G Headroom 12.4k saved");
 	});
 
 	it("renders Headroom Savings, last-call, and reason placeholders with compact numbers", () => {
@@ -88,7 +104,7 @@ describe("Headroom display producer", () => {
 		const render = (state: "compressed" | "unavailable", template?: string) =>
 			renderDisplay(state, values, template ? { ...config, template } : config, "G", 0, [["G"]]);
 
-		expect(render("compressed")).toBe("G Headroom -12% (3.4M saved)");
+		expect(render("compressed")).toBe("G Headroom 3.4M saved");
 		expect(render("compressed", "{lastPercent}% {lastSaved} {tokensBefore} {tokensAfter}")).toBe("7% 950 29M 25.6M");
 		expect(render("unavailable")).toBe("G Headroom unavailable (401)");
 	});
