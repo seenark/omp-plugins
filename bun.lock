@@ -69,14 +69,14 @@
     },
     "packages/codesook-omp-plugin": {
       "name": "@codesook/omp-plugin-settings",
-      "version": "1.4.0",
+      "version": "1.5.0",
       "dependencies": {
         "@codesook/omp-caveman": "^1.0.0",
         "@codesook/omp-headroom": "^2.0.0",
-        "@codesook/omp-ponytail": "^1.0.0",
+        "@codesook/omp-ponytail": "^2.0.0",
         "@codesook/omp-prompt-border-style": "^2.0.0",
         "@codesook/omp-rtk": "^1.0.0",
-        "@codesook/omp-shared-display": "^1.4.0",
+        "@codesook/omp-shared-display": "^1.6.0",
       },
       "devDependencies": {
         "@codesook/omp-caveman": "workspace:*",
@@ -97,7 +97,7 @@
     },
     "packages/headroom": {
       "name": "@codesook/omp-headroom",
-      "version": "2.0.1",
+      "version": "2.1.0",
       "dependencies": {
         "@codesook/omp-shared-display": "^1.1.0",
       },
@@ -117,7 +117,7 @@
     },
     "packages/ponytail": {
       "name": "@codesook/omp-ponytail",
-      "version": "1.2.1",
+      "version": "2.0.0",
       "dependencies": {
         "@codesook/omp-shared-display": "^1.5.0",
       },
@@ -190,7 +190,7 @@
     },
     "packages/rtk": {
       "name": "@codesook/omp-rtk",
-      "version": "1.0.2",
+      "version": "1.1.0",
       "dependencies": {
         "@codesook/omp-shared-display": "^1.2.0",
       },
@@ -208,7 +208,7 @@
     },
     "packages/shared-display": {
       "name": "@codesook/omp-shared-display",
-      "version": "1.5.1",
+      "version": "1.6.0",
       "devDependencies": {
         "@oh-my-pi/pi-coding-agent": "18.2.8",
         "@oh-my-pi/pi-tui": "18.2.8",
