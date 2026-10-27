@@ -178,6 +178,10 @@ _Avoid_: Personal preference, global default
 Issue tracking through Beads for work that the user explicitly asks to track. Availability alone does not authorize the agent to create or modify issues for unrelated work.
 _Avoid_: Automatic issue tracking, mandatory task tracking
 
+**Matt Pocock Workflow**:
+A project set up for the `mattpocock/skills` engineering skills with a team Beads workspace as its issue tracker, the default triage labels, and the default single-context domain docs, all recorded in `AGENTS.md`. Setting it up does not authorize issue operations beyond the On-demand Beads Workflow.
+_Avoid_: Skills setup, matt setup
+
 **Ready Issue**:
 A Beads issue that is open and has no open blocker. Distinct from a Ready Integration, which says the Beads tool is usable at all.
 _Avoid_: Ready task, ready (unqualified)

@@ -1,8 +1,9 @@
 import { afterEach, expect, test } from "bun:test";
-import { mkdtempSync, mkdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import * as os from "node:os";
 import * as path from "node:path";
+import { fileURLToPath } from "node:url";
 import type { ExtensionAPI, ExtensionContext } from "@oh-my-pi/pi-coding-agent";
 import type { Component } from "@oh-my-pi/pi-tui";
 import { CHANNEL, type SharedDisplayEvents } from "@codesook/omp-shared-display/client";
@@ -41,6 +42,9 @@ function fixture() {
 	const footer = new Map<string, string | undefined>();
 	const statusWaiters = new Set<(text: string | undefined) => void>();
 	const notifications: { text: string; level: string }[] = [];
+	const messages: string[] = [];
+	const calls: string[][] = [];
+	const home = path.join(root, "home");
 	const eventHandlers = new Map<string, Set<(data: unknown) => void>>();
 	const events: SharedDisplayEvents = {
 		on: (channel, handler) => {
@@ -59,7 +63,9 @@ function fixture() {
 		on: (name: string, handler: Hook) => { handlers.set(name, handler); },
 		registerCommand: (name: string, command: Command) => { commands.set(name, command); },
 		events,
+		sendUserMessage: (content: string) => { messages.push(content); },
 		exec: (command: string, args: readonly string[], options: { cwd: string }) => {
+			calls.push([command, ...args]);
 			if (command === "env") {
 				const executable = args.findIndex(value => value === "git" || value === "bd");
 				return execute(args[executable]!, args.slice(executable + 1), options.cwd);
@@ -85,7 +91,7 @@ function fixture() {
 			}),
 		},
 	} as unknown as ExtensionContext;
-	beadsExtension(pi, { globalConfigPath: path.join(root, "global.json") });
+	beadsExtension(pi, { globalConfigPath: path.join(root, "global.json"), homeDir: home });
 	const hook = (name: string, prompt: readonly string[] = []) => Promise.resolve(handlers.get(name)!({ systemPrompt: prompt }, context));
 	shutdowns.push(() => hook("session_shutdown"));
 	const settings = (value: unknown, target = project) => {
@@ -93,8 +99,15 @@ function fixture() {
 		writeFileSync(path.join(target, ".omp", "codesook-omp.json"), JSON.stringify(value));
 	};
 	return {
-		root, project, workspace, context, events, footer, notifications, hook, settings, git,
+		root, project, workspace, context, events, footer, notifications, hook, settings, git, messages, calls,
 		command: (args: string) => commands.get("beads")!.handler(args, context),
+		workflow: () => commands.get("use-matt-pocock-workflow")!.handler("", context),
+		installSetupSkill: (base = path.join(home, ".agents", "skills")) => {
+			const file = path.join(base, "setup-matt-pocock-skills", "SKILL.md");
+			mkdirSync(path.dirname(file), { recursive: true });
+			writeFileSync(file, "---\nname: setup-matt-pocock-skills\n---\n");
+			return file;
+		},
 		setExecute: (replacement: typeof execute) => { execute = replacement; },
 		setSelect: (replacement: typeof select) => { select = replacement; },
 		render: () => overlay!.render(200).join("\n"),
@@ -328,7 +341,7 @@ test("missing Git keeps global visibility while refusing guessed project policy 
 			} };
 			const pi = {
 				on(name, handler) { hooks.set(name, handler); },
-				registerCommand(_name, value) { command = value; },
+				registerCommand(name, value) { if (name === "beads") command = value; },
 				events, exec() { throw new Error("Beads inspection must not run without a resolved Integration Project"); },
 			};
 			beadsExtension(pi);
@@ -523,4 +536,124 @@ test("native init exit zero with an unusable resulting backend reports failure a
 	expect(f.notifications.at(-1)?.level).toBe("error");
 	expect(readFileSync(policy)).toEqual(before);
 	expect(await f.hook("before_agent_start", ["Repository"])).toBeUndefined();
+});
+
+const SEED_TEMPLATE = fileURLToPath(new URL("../templates/issue-tracker-beads.md", import.meta.url));
+
+function uninitializedWorkspace(f: ReturnType<typeof fixture>, onInit: () => Result | undefined = () => undefined) {
+	let initialized = false;
+	f.setExecute(async (command, args) => {
+		if (command === "git") return { code: 128, stdout: "", stderr: "fatal: not a git repository (or any of the parent directories): .git" };
+		if (args[0] === "init") {
+			const refused = onInit();
+			if (refused) return refused;
+			initialized = true;
+			return { code: 0, stdout: "Native init completed", stderr: "" };
+		}
+		if (args[0] === "where") return initialized
+			? { code: 0, stderr: "", stdout: JSON.stringify({ path: f.workspace, database_path: path.join(f.workspace, "dolt") }) }
+			: { code: 1, stderr: "", stdout: '{"error":"no_beads_directory"}' };
+		return { code: 0, stderr: "", stdout: statusJson() };
+	});
+}
+
+test("the Matt Pocock Workflow command without the setup skill reports how to install it and touches nothing", async () => {
+	const f = fixture();
+	f.settings({ version: 1, display: {}, behavior: { beads: { policy: "off" } } });
+	await f.workflow();
+	expect(f.notifications.at(-1)?.level).toBe("error");
+	expect(f.notifications.at(-1)?.text).toContain("npx skills@latest add mattpocock/skills");
+	expect(f.calls).toEqual([]);
+	expect(f.messages).toEqual([]);
+});
+
+for (const layout of ["project-local", "redirected"] as const) {
+	test(`the Matt Pocock Workflow command hands off once on a ready ${layout} workspace without initializing`, async () => {
+		const f = fixture();
+		f.settings({ version: 1, display: {}, behavior: { beads: { policy: "off" } } });
+		const policy = path.join(f.project, ".omp", "codesook-omp.json");
+		const before = readFileSync(policy);
+		const skill = f.installSetupSkill();
+		const workspace = layout === "project-local" ? path.join(f.project, ".beads") : f.workspace;
+		mkdirSync(workspace, { recursive: true });
+		f.setExecute(async (_command, args) => args[0] === "where"
+			? { code: 0, stderr: "", stdout: JSON.stringify({ path: workspace, database_path: path.join(workspace, "dolt") }) }
+			: { code: 0, stderr: "", stdout: statusJson() });
+		f.setSelect(async () => { throw new Error("A ready workspace needs no choices"); });
+		await f.workflow();
+		expect(f.calls.some(call => call.includes("init"))).toBe(false);
+		expect(f.messages).toHaveLength(1);
+		const [message] = f.messages;
+		expect(message).toContain(skill);
+		expect(message).toContain(SEED_TEMPLATE);
+		expect(existsSync(SEED_TEMPLATE)).toBe(true);
+		for (const answer of ["Beads", "single-context", "AGENTS.md"]) expect(message).toContain(answer);
+		expect(readFileSync(policy)).toEqual(before);
+	});
+}
+
+test("the Matt Pocock Workflow command finds the setup skill installed in the project", async () => {
+	const f = fixture();
+	const skill = f.installSetupSkill(path.join(f.project, ".omp", "skills"));
+	await f.workflow();
+	expect(f.messages).toHaveLength(1);
+	expect(f.messages[0]).toContain(skill);
+});
+
+test("the Matt Pocock Workflow command initializes a team workspace without a mode choice, then hands off", async () => {
+	const f = fixture();
+	f.settings({ version: 1, display: {}, behavior: { beads: { policy: "off" } } });
+	const policy = path.join(f.project, ".omp", "codesook-omp.json");
+	const before = readFileSync(policy);
+	const skill = f.installSetupSkill();
+	const titles: string[] = [];
+	const hookChoices: string[][] = [];
+	let messagesAtInit = -1;
+	uninitializedWorkspace(f, () => { messagesAtInit = f.messages.length; return undefined; });
+	f.setSelect(async (title, choices) => { titles.push(title); hookChoices.push([...choices]); return choices[0]; });
+	await f.workflow();
+	expect(titles).toEqual(["Beads Git hooks (Esc cancels initialization)"]);
+	expect(hookChoices[0]![0]).toBe("No hooks");
+	const init = f.calls.find(call => call.includes("init"))!;
+	expect(init).not.toContain("--stealth");
+	expect(init).toContain("--skip-hooks");
+	expect(messagesAtInit).toBe(0);
+	expect(f.messages).toHaveLength(1);
+	expect(f.messages[0]).toContain(skill);
+	expect(readFileSync(policy)).toEqual(before);
+});
+
+test("the Matt Pocock Workflow command stops without a message when initialization does not produce a ready workspace", async () => {
+	const cases: { name: string; arrange: (f: ReturnType<typeof fixture>) => void; level: string }[] = [
+		{ name: "Esc at the hooks choice", level: "info", arrange: f => { uninitializedWorkspace(f); f.setSelect(async () => undefined); } },
+		{ name: "refused init", level: "error", arrange: f => { uninitializedWorkspace(f, () => ({ code: 1, stdout: "", stderr: "Error: refused" })); f.setSelect(async (_title, choices) => choices[0]); } },
+		{
+			name: "unusable result",
+			level: "error",
+			arrange: f => {
+				let attempted = false;
+				f.setSelect(async (_title, choices) => choices[0]);
+				f.setExecute(async (command, args) => {
+					if (command === "git") return { code: 128, stdout: "", stderr: "fatal: not a git repository (or any of the parent directories): .git" };
+					if (args[0] === "where") return attempted
+						? { code: 0, stderr: "", stdout: JSON.stringify({ path: f.workspace, database_path: path.join(f.workspace, "dolt") }) }
+						: { code: 1, stderr: "", stdout: '{"error":"no_beads_directory"}' };
+					if (args[0] === "init") { attempted = true; return { code: 0, stdout: "Native init completed", stderr: "" }; }
+					return { code: 1, stdout: "", stderr: "Error: query failed: table issues not found" };
+				});
+			},
+		},
+	];
+	for (const { name, arrange, level } of cases) {
+		const f = fixture();
+		f.settings({ version: 1, display: {}, behavior: { beads: { policy: "off" } } });
+		const policy = path.join(f.project, ".omp", "codesook-omp.json");
+		const before = readFileSync(policy);
+		f.installSetupSkill();
+		arrange(f);
+		await f.workflow();
+		expect(f.messages, name).toEqual([]);
+		expect(f.notifications.at(-1)?.level, name).toBe(level);
+		expect(readFileSync(policy), name).toEqual(before);
+	}
 });

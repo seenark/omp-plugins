@@ -1,6 +1,6 @@
 {
   "name": "omp-plugins",
-  "version": "0.2.2",
+  "version": "0.3.0",
   "private": true,
   "description": "Monorepo for standalone oh-my-pi plugins installable from GitHub or publishable as separate packages.",
   "workspaces": [
@@ -17,7 +17,8 @@
     "pack:check": "bun run --workspaces --if-present pack:check",
     "build:release": "bun run --cwd packages/pstack build:release",
     "verify": "bun run typecheck && bun run test && bun run check && bun run check:versions && bun run check:sync && bun run pack:check",
-    "hooks:install": "lefthook install"
+    "hooks:install": "lefthook install",
+    "readme:images": "bun run scripts/readme-images.ts"
   },
   "peerDependencies": {
     "@oh-my-pi/pi-ai": ">=18.2.8",

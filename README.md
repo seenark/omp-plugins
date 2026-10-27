@@ -14,6 +14,224 @@ Plugins for [oh-my-pi (OMP)](https://github.com/can1357/oh-my-pi), the terminal 
 
 Every feature except pstack and the themes lives in one plugin, `omp-plugins`. You choose which features it loads; the rest stay off.
 
+## What it looks like
+
+Each package hooks one part of OMP. This section shows where, before the install reference below.
+
+### Architecture
+
+Each package attaches to OMP through the extension entry in its `package.json` `omp` field. The diagram groups the packages by role and names the OMP surface each group touches. The table lists every package.
+
+```mermaid
+flowchart LR
+  IM["<b>Instruction Modes</b><br/>caveman<br/>ponytail"]
+  TS["<b>Token savings</b><br/>headroom<br/>rtk"]
+  PI["<b>Project integrations</b><br/>codegraph<br/>beads"]
+  WT["<b>Workflow and tooling</b><br/>pstack<br/>process-monitor<br/>skill-stats"]
+  DS["<b>Display</b><br/>shared-display<br/>prompt-border-style"]
+  ST["<b>Settings and themes</b><br/>codesook-omp-plugin<br/>theme-catppuccin"]
+
+  OMP(("OMP"))
+
+  IM -->|"system prompt"| OMP
+  PI -->|"system prompt"| OMP
+  TS -->|"context event,<br/>bash calls"| OMP
+  WT -->|"tool-call hooks,<br/>slash commands"| OMP
+  DS -->|"status line,<br/>prompt box"| OMP
+  ST -->|"/omp-plugins,<br/>themes"| OMP
+```
+
+| Package | Attaches to | What you see |
+| --- | --- | --- |
+| `caveman` | System prompt | Terse answers, `/caveman`, a Status Segment |
+| `ponytail` | System prompt | The smallest complete change, `/ponytail`, a Status Segment |
+| `codegraph` | System prompt | Runtime Integration Instructions for CodeGraph, `/codegraph`, a Status Segment |
+| `beads` | System prompt | Runtime Integration Instructions for Beads, `/beads`, `/use-matt-pocock-workflow`, a Status Segment |
+| `headroom` | `context` event | Large tool results compressed through the Headroom proxy, a Headroom Savings segment |
+| `rtk` | `bash` tool calls and system prompt | Filtered shell output, one prompt line about `RTK_DISABLED` and `rtk recall`, an RTK Savings segment |
+| `process-monitor` | `bash` tool calls | Commands tagged with the session, `/procs`, a Status Segment |
+| `pstack` | Tool calls and subagent spawns | Guards on both, `/poteto`, `/pstack`, a Status Segment |
+| `skill-stats` | Tool calls | Skill Uses recorded, `/skill-stats` |
+| `shared-display` | Shared Display widget | One status line that composes every Status Segment |
+| `prompt-border-style` | Prompt box | Border styles, the Context Rail, the attachment band |
+| `codesook-omp-plugin` | Slash commands | `/omp-plugins` |
+| `theme-catppuccin` | Themes in `/settings` | Latte, Frappé, Macchiato and Mocha |
+
+A Display Producer publishes a Status Segment to the Shared Display, and the Display Host (`shared-display`) composes the segments into one widget. `headroom`, `rtk`, `caveman`, `ponytail`, `codegraph`, `beads`, `process-monitor` and `pstack` are Display Producers. Without a Display Host, `caveman`, `ponytail`, `codegraph`, `beads` and `process-monitor` fall back to a native status entry.
+
+`codesook-omp-plugin` is the Settings feature. `headroom`, `rtk`, `caveman`, `ponytail`, `codegraph` and `beads` also register their own slash commands.
+
+### Headroom
+
+Headroom sits between OMP and the model provider. On each `context` event it sends large tool results to an External Proxy for compression. It then forwards the compressed text to the provider and publishes Headroom Savings as a Status Segment.
+
+```mermaid
+sequenceDiagram
+  participant OMP
+  participant HR as headroom extension
+  participant Proxy as Headroom proxy
+  participant Provider as Model provider
+  participant SD as Shared Display
+
+  OMP->>HR: context event with the messages of the next request
+  HR->>HR: pick tool results of at least minMessageChars that are not errors and not run through rtk
+  alt a new candidate, context of at least minContextTokens, proxy usable
+    HR->>Proxy: POST /v1/compress with session_id
+    Proxy-->>HR: compressed messages
+    HR->>HR: keep each shorter, aligned result in the replay memo
+  else no new candidate, small context, or proxy failure
+    HR->>HR: no new compression
+  end
+  HR->>HR: replace every memoised result with its first forwarded text
+  HR->>SD: publish Headroom Savings
+  HR-->>OMP: messages with compressed tool results
+  OMP->>Provider: request with compressed tool results
+```
+
+Replaying the first forwarded bytes for every result keeps the provider prompt cache valid. The proxy is never started by Headroom: `/headroom health` checks that it is reachable. See the [Headroom README](packages/headroom/README.md#compression-flow) for failure handling and the Headroom Savings formula.
+
+### RTK
+
+RTK works on the `bash` tool. Before a command runs, the `rtk` extension asks the `rtk` CLI for a filtered form of it. After the command finishes, it reads the savings that `rtk` recorded and publishes RTK Savings.
+
+```mermaid
+sequenceDiagram
+  participant Model
+  participant OMP as OMP bash tool
+  participant Ext as rtk extension
+  participant CLI as rtk CLI
+  participant DB as history.db
+  participant SD as Shared Display
+
+  Model->>OMP: bash tool call
+  OMP->>Ext: tool_call event
+  Ext->>Ext: check the skip guards
+  alt command not skipped
+    Ext->>CLI: rtk rewrite command, 2 s timeout
+    CLI-->>Ext: one changed line, or no rewrite
+  end
+  alt rewritten, or the command already runs rtk
+    Ext->>OMP: run the command with the per-session RTK_DB_PATH and RTK_RECALL_DB exports
+    OMP->>CLI: run the rewritten command
+    CLI-->>OMP: filtered output
+  else skipped, unchanged, or rtk missing
+    Note over OMP: the original command runs with unfiltered output
+  end
+  OMP-->>Model: tool result
+  OMP->>Ext: tool_execution_end event
+  Ext->>DB: read tokens saved and input, query-only
+  Ext->>SD: publish RTK Savings
+```
+
+Pipes, multiline commands, heredocs, `cat`-like readers, `git diff` and long-lived commands are skipped on purpose. Prefix a command with `RTK_DISABLED=1` for raw output, or run `rtk recall <hash>` for the full output behind a recovery hint. See the [rtk README](packages/rtk/README.md#behavior) for the full skip list.
+
+### Context Rail
+
+`prompt-border-style` replaces the prompt editor with a styled border and adds the Context Rail, a row that shows context usage. A Placement puts the rail `inside`, `above` or `below` the prompt box.
+
+![The OMP prompt box with a styled border; the Context Rail sits inside, above or below this box depending on its Placement](packages/prompt-border-style/assets/preview.png)
+
+### Shared Display
+
+Display Producers publish Status Segments, and the Display Host (`shared-display`) composes them into one widget. The Display Style sets the shape of the segments, the Display Palette sets their colors, and the layout sets the direction. Change all three in `/omp-plugins` under Shared Display. The defaults are `plain`, `theme` and `horizontal`.
+
+`powerline` and `rounded` need a [Nerd Font](https://www.nerdfonts.com/) in your terminal. `plain` and `bracketed` do not.
+
+#### Display Styles
+
+Each preview uses the `catppuccin` palette and the `horizontal` layout.
+
+`plain`
+
+![Shared Display in the plain style: segments joined by a separator](docs/assets/readme/shared-display-style-plain.png)
+
+`bracketed`
+
+![Shared Display in the bracketed style: each segment wrapped in square brackets](docs/assets/readme/shared-display-style-bracketed.png)
+
+`powerline`
+
+![Shared Display in the powerline style: colored segments joined by arrows, with rounded ends](docs/assets/readme/shared-display-style-powerline.png)
+
+`rounded`
+
+![Shared Display in the rounded style: a gradient start and rounded joints between colored segments](docs/assets/readme/shared-display-style-rounded.png)
+
+#### Display Palettes
+
+Each preview uses the `powerline` style and the `horizontal` layout. `theme` follows the active OMP theme and is shown here with Catppuccin Mocha. `none` adds no color and renders the `plain` shape.
+
+`none`
+
+![Shared Display with the none palette: no color added](docs/assets/readme/shared-display-palette-none.png)
+
+`theme`
+
+![Shared Display with the theme palette, using the Catppuccin Mocha theme colors](docs/assets/readme/shared-display-palette-theme.png)
+
+`gruvbox`
+
+![Shared Display with the gruvbox palette](docs/assets/readme/shared-display-palette-gruvbox.png)
+
+`catppuccin`
+
+![Shared Display with the catppuccin palette](docs/assets/readme/shared-display-palette-catppuccin.png)
+
+`pastel`
+
+![Shared Display with the pastel palette](docs/assets/readme/shared-display-palette-pastel.png)
+
+`tokyo-night`
+
+![Shared Display with the tokyo-night palette](docs/assets/readme/shared-display-palette-tokyo-night.png)
+
+#### Layouts
+
+Each preview uses the `powerline` style and the `catppuccin` palette.
+
+`horizontal`
+
+![Shared Display in the horizontal layout: all segments on one line](docs/assets/readme/shared-display-layout-horizontal.png)
+
+`vertical`
+
+<img src="docs/assets/readme/shared-display-layout-vertical.png" alt="Shared Display in the vertical layout: one segment per row, right-aligned" width="365">
+
+### Caveman
+
+Caveman is an Instruction Mode that makes answers terse: the answer comes first, the fluff goes, and every technical fact stays. Its levels are `caveman`, `ultracave` and `megacave`. The Status Segment below shows the three levels, in that order from top to bottom.
+
+<img src="docs/assets/readme/caveman.png" alt="Caveman Status Segments for the caveman, ultracave and megacave levels, top to bottom" width="203">
+
+### Ponytail
+
+Ponytail is an Instruction Mode that makes the agent act like a lazy senior developer and write the smallest complete change. Its levels are `off`, `lite`, `full` and `ultra`. The Status Segment below shows them top to bottom, with `review` last. `review` appears only when an older session entry holds it and cannot be set by command.
+
+<img src="docs/assets/readme/ponytail.png" alt="Ponytail Status Segments for the off, lite, full, ultra and review levels, top to bottom" width="213">
+
+### Matt Pocock Workflow
+
+`/use-matt-pocock-workflow` prepares a project for the [Matt Pocock engineering skills](https://github.com/mattpocock/skills) with Beads as the issue tracker. It runs only when the `setup-matt-pocock-skills` skill is installed. The agent shows one draft and writes files after one confirmation.
+
+```mermaid
+flowchart TD
+  Start["/use-matt-pocock-workflow"] --> Skill{"setup-matt-pocock-skills<br/>installed?"}
+  Skill -->|"no"| Install["Stop with an error:<br/>npx skills@latest add mattpocock/skills"]
+  Skill -->|"yes"| Ready{"Usable Beads<br/>workspace?"}
+  Ready -->|"yes, team or stealth"| Reuse["Reuse it, nothing changes"]
+  Ready -->|"no"| Hooks{"Hooks choice:<br/>No hooks or install"}
+  Hooks -->|"Esc"| Stop["Stop, no files changed"]
+  Hooks -->|"choose"| Init["Initialize a team workspace"]
+  Reuse --> Handoff["Hand the agent the setup skill<br/>with pre-filled answers"]
+  Init --> Handoff
+  Handoff --> Draft["Agent shows one draft"]
+  Draft --> Confirm{"One confirmation"}
+  Confirm -->|"yes"| Files["Write AGENTS.md and docs/agents/*.md"]
+  Confirm -->|"no"| Nothing["Nothing is written"]
+```
+
+The pre-filled answers are Beads as the tracker (seeded from the template shipped with `beads`), the five default triage labels, single-context domain docs, and `AGENTS.md`. `CLAUDE.md` is never edited. See the [Beads README](packages/beads/README.md#matt-pocock-workflow) for the full behavior.
+
 ## Features
 
 | Feature | What it does | Default | Needs |
@@ -216,6 +434,7 @@ omp plugin install "$PWD/packages/skill-stats"
 /megacave
 /codegraph [init|status|auto|off]
 /beads [init|status|tasks|auto|off]
+/use-matt-pocock-workflow
 /procs
 /skill-stats [project|reset [skill]|project reset [skill]|import]
 /prompt-border [status|<style> [layout]|layout <layout>|reset|rail toggle|glyphs debug [frames|demo|on|off]]
@@ -228,6 +447,8 @@ Incomplete `/prompt-border style`, `layout`, `rail`, `glyphs`, and `glyphs debug
 The Headroom menu's **Choose files to initialize** opens configuration, glyph, or combined choices. Explicit `/headroom init` still initializes **all** files directly. Existing files retain per-file overwrite prompts: declining an overwrite skips that file, not the whole operation. **Set proxy token** opens visible token input; saving replaces the configured token and checks proxy health.
 
 Beads initialization reuses ready data without setup choices. A new workspace opens a mode choice, then a Git-hook choice; their descriptions explain the continuation and native Git effects. Esc at either choice cancels initialization. CodeGraph initialization starts its existing native operation immediately. Neither operation changes project policy.
+
+`/use-matt-pocock-workflow` reuses the same initialization with the mode choice removed: it always creates a team workspace and still offers the hooks choice. See [Beads project integration](#beads-project-integration).
 
 Without an interactive selector, bare commands and incomplete menu routes show the available explicit commands and their outcomes. Explicit status routes remain accessible even when persistent status is hidden.
 
@@ -299,6 +520,8 @@ Global `behavior.beads.policy` (`auto`/`off`) and `display.beads.visibility` (`r
 
 Ready, permitted Beads guidance authorizes issue operations only after an explicit user request and within its scope. Availability alone never enables automatic issue tracking for unrelated work. Off removes only plugin guidance, not CLI access, data, or existing repository obligations. Status remains a read-only overlay even with hidden persistent display. Host-active display uses one shared segment; otherwise it uses the native footer. With open issues the segment shows `Beads: <ready> ready · <open> open` (template `display.beads.template`, tokens `{ready}`, `{open}`, `{inProgress}`), and `/beads tasks` opens a live read-only list grouped by status. Refresh follows startup, turns, commands, settings changes, project switches, and Beads writes to the workspace (a debounced directory watch, never timer polling).
 
+`/use-matt-pocock-workflow` sets up the Matt Pocock Workflow with Beads as the issue tracker. It needs the `setup-matt-pocock-skills` skill, installed with `npx skills@latest add mattpocock/skills`, and checks for it before it changes anything. When no usable workspace exists, it initializes a team (standard) workspace without the mode choice and still offers the hooks choice. A ready workspace, team or stealth, is reused untouched. Esc at the hooks choice, or any initialization refusal, stops the command before the hand-off. The command then hands the agent the setup skill with the answers filled in: Beads as the tracker through the shipped seed template, the five default triage labels, single-context domain docs, and `AGENTS.md` always, never `CLAUDE.md`. The agent shows one draft and waits for one confirmation before it writes files. Guidance policy is unchanged, and the command performs no issue operations.
+
 See [Beads package documentation](packages/beads/README.md) for independent installation and operation.
 
 ## Implemented ownership
@@ -324,6 +547,20 @@ bun run check
 bun run pack:check
 bun run verify
 ```
+
+### README images
+
+The images in [What it looks like](#what-it-looks-like) are rendered from the real display code. Regenerate them after you change a Display Style, a Display Palette or a mode glyph:
+
+```sh
+bun run readme:images
+```
+
+The script writes PNGs to `docs/assets/readme/`. It needs three things on the machine:
+
+- `freeze` on `PATH`. Install it with `go install github.com/charmbracelet/freeze@latest` or `brew install charmbracelet/tap/freeze`.
+- A Nerd Font Mono Regular `.ttf` with a 0.6em advance, so the Display Style joints line up. Put a `*NerdFontMono-Regular.ttf` file in `~/Library/Fonts`, or point `README_IMAGES_FONT=/path/to/font.ttf` at one.
+- Chrome or Chromium, or `CHROME_BIN` pointing at either. It rasterizes the SVG that `freeze` writes, so the Nerd Font is applied.
 
 ## Releasing pstack
 
