@@ -48,7 +48,7 @@ Subordinate to explicit user instructions. Run in order; done when every step ha
 1. File beads for remaining work.
 2. Run quality gates if code changed (`bun run verify`).
 3. Update issue status: close finished work, update in-progress items.
-4. Git and Dolt sync: report `git status` and proposed commands, then wait for approval. Only a user-authorized maintainer session runs `git pull --rebase`, `bd dolt push`, and pushes a branch plus `gh pr create`; `main` only changes through a merged pull request.
+4. Git and Dolt sync: report `git status` and proposed commands, then wait for approval. Only a user-authorized maintainer session runs `git pull --rebase` and `bd dolt push`, and ships code per `docs/agents/shipping.md`.
 5. Hand off: changed files, validation, issue status, any blocked commit/sync/push with exact command and error.
 
 `bd setup` appends managed Beads blocks to `AGENTS.md`/`CLAUDE.md`; delete them after running it. This file is the single source.

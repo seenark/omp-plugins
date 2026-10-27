@@ -8,6 +8,7 @@ This repository uses a single context: root `CONTEXT.md` and root `docs/adr/`. T
 - Read the ADRs in `docs/adr/` that affect the area being explored.
 - If a `CONTEXT-MAP.md` is introduced later, follow it to the relevant context glossaries and context-scoped ADRs instead of assuming package boundaries are domain boundaries.
 - Reading the omp extension API: each package typechecks against the `@oh-my-pi/pi-coding-agent` version in its own `devDependencies` (currently 18.2.8, 18.3.1 or 18.11.1). Read that copy under `node_modules/.bun/@oh-my-pi+pi-coding-agent@<version>+*/`, not the root `node_modules` copy. An API newer than the package's `peerDependencies` minimum needs a runtime guard, as `agentIdentity` in `packages/ponytail/src/index.ts` does for `ctx.agent`.
+- Reading oh-my-pi source or behavior beyond that typed API: use the local clone at `/Volumes/HadesGodBlue/Learn/public-repos/oh-my-pi`. Run `git pull` on `main`, then read at the latest release tag (`git tag --sort=-v:refname | head -1`).
 
 If a referenced glossary or ADR directory does not exist, proceed silently. Do not propose creating domain docs upfront. Domain modeling creates them lazily when terms or decisions are resolved.
 
