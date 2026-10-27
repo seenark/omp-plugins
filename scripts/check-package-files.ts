@@ -6,7 +6,7 @@ type JsonObject = Record<string, unknown>;
 const ANSI_ESCAPE = /\u001B\[[0-?]*[ -/]*[@-~]/g;
 const PACKED_LINE = /^\s*packed\s+\S+\s+(.+?)\s*$/i;
 const TEST_FILE = /(?:^|[._-])(?:test|spec)(?:[._-]|$)/i;
-const PUBLISHED_DIRECTORIES = ["skills/", "agents/", "rules/", "assets/"];
+const PUBLISHED_DIRECTORIES = ["skills/", "agents/", "rules/", "assets/", "templates/"];
 const TEST_DIRECTORY: Record<string, true> = {
   test: true,
   tests: true,

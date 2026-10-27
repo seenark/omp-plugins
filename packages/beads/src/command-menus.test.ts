@@ -57,7 +57,7 @@ function runScenario(scenario: string): void {
 			},
 			setStatus: (_key, text) => { policyStatus = text; }, notify: (text, level) => notifications.push({ text, level }),
 		} };
-		extension({ registerCommand: (name, value) => { commandName = name; command = value; }, on: (name, value) => hooks.set(name, value), events: { on: () => () => {}, emit() {} },
+		extension({ registerCommand: (name, value) => { if (name !== "beads") return; commandName = name; command = value; }, on: (name, value) => hooks.set(name, value), events: { on: () => () => {}, emit() {} },
 			exec: async (_command, args) => {
 				writeFileSync(nativeStartup, "native inspection reached");
 				if (args[0] === "where") return existsSync(data) ? { code: 0, stderr: "", stdout: JSON.stringify({ path: workspace, database_path: path.join(workspace, "dolt") }) } : { code: 1, stderr: "", stdout: '{"error":"no_beads_directory"}' };

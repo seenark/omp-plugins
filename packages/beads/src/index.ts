@@ -1,5 +1,7 @@
-import { lstatSync, readdirSync, watch } from "node:fs";
+import { existsSync, lstatSync, readdirSync, watch } from "node:fs";
+import * as os from "node:os";
 import * as path from "node:path";
+import { fileURLToPath } from "node:url";
 import type { ExtensionAPI, ExtensionContext } from "@oh-my-pi/pi-coding-agent";
 import { matchesKey, truncateToWidth, type Component } from "@oh-my-pi/pi-tui";
 import { connectSharedDisplay, type SharedDisplayPublisher } from "@codesook/omp-shared-display/client";
@@ -17,7 +19,7 @@ const COMMAND_CHOICES = [
 ];
 
 export type BeadsTimers = { set: (callback: () => void, delayMs: number) => unknown; clear: (handle: unknown) => void };
-export type BeadsOptions = { globalConfigPath?: string; debounceMs?: number; timers?: BeadsTimers };
+export type BeadsOptions = { globalConfigPath?: string; debounceMs?: number; timers?: BeadsTimers; homeDir?: string };
 // Beads rewrites these two files, by atomic rename, on every write; reads never touch them.
 const isChangeMarker = (filename: string | null): boolean => filename === "last-touched" || filename === "export-state.json";
 export type BeadsStatus = Omit<BeadsInspection, "state"> & {
@@ -51,6 +53,38 @@ function existsForInitialization(file: string): boolean {
 		if (isRecord(error) && error.code === "ENOENT") return false;
 		throw error;
 	}
+}
+
+const SETUP_SKILL = "setup-matt-pocock-skills";
+const SEED_TEMPLATE = fileURLToPath(new URL("../templates/issue-tracker-beads.md", import.meta.url));
+// Mirrors OMP 18.3.1 skill discovery (discovery/builtin.ts, agents.ts, claude.ts): project roots exist at every ancestor of cwd below $HOME; user roots sit under $HOME.
+const PROJECT_SKILL_ROOTS = [".omp/skills", ".agents/skills", ".agent/skills", ".claude/skills"];
+const USER_SKILL_ROOTS = [".omp/agent/skills", ".agents/skills", ".agent/skills", ".claude/skills"];
+
+/** Absolute SKILL.md of the installed setup skill; an explicit `home` pins the user roots and ignores the agent/Claude directory overrides. */
+function findSetupSkill(cwd: string, home?: string): string | undefined {
+	const userHome = home ?? os.homedir();
+	const env = home === undefined ? process.env : {};
+	const userRoots = USER_SKILL_ROOTS.map(root => path.join(userHome, root));
+	if (env.PI_CODING_AGENT_DIR) userRoots.push(path.join(path.resolve(env.PI_CODING_AGENT_DIR), "skills"));
+	if (env.CLAUDE_CONFIG_DIR?.trim()) userRoots.push(path.join(path.resolve(env.CLAUDE_CONFIG_DIR.trim()), "skills"));
+	const projectRoots: string[] = [];
+	for (let directory = path.resolve(cwd); directory !== userHome; directory = path.dirname(directory)) {
+		projectRoots.push(...PROJECT_SKILL_ROOTS.map(root => path.join(directory, root)));
+		if (directory === path.dirname(directory)) break;
+	}
+	return [...projectRoots, ...userRoots].map(root => path.join(root, SETUP_SKILL, "SKILL.md")).find(file => existsSync(file));
+}
+
+function setupMessage(skillFile: string): string {
+	return [
+		`Read ${skillFile} and follow it to set up this project for the Matt Pocock engineering skills. Answer its questions as follows, without asking me again:`,
+		`- Issue tracker: Other, Beads (\`bd\`). Seed docs/agents/issue-tracker.md from ${SEED_TEMPLATE}, and adapt it only where this repository requires.`,
+		"- Triage labels: the five defaults, keep them as-is.",
+		"- Domain docs: single-context.",
+		"- Instructions file: AGENTS.md always. Create it if missing. Never edit CLAUDE.md.",
+		"Keep the skill's draft-confirmation step: show me the draft and wait for one confirmation before writing files. Do not create or modify Beads issues.",
+	].join("\n");
 }
 
 /** On-demand guidance and explicit initialization; no issue operations or tool registration. */
@@ -240,7 +274,8 @@ export default function beadsExtension(pi: ExtensionAPI, options: BeadsOptions =
 			return component;
 		}, { overlay: true });
 	};
-	const initialize = async (ctx: ExtensionContext): Promise<void> => {
+	type InitializeOutcome = "ready" | "cancelled" | "failed";
+	const initialize = async (ctx: ExtensionContext, mode?: "team"): Promise<InitializeOutcome> => {
 		const cwd = ctx.cwd;
 		try {
 			let current = await refresh(ctx);
@@ -256,14 +291,16 @@ export default function beadsExtension(pi: ExtensionAPI, options: BeadsOptions =
 				};
 				ensureEmpty();
 				if (!ctx.hasUI || typeof ctx.ui.select !== "function") throw new Error("Run /beads init in interactive OMP to choose mode and approve hooks, or use bd init directly with --skip-agents and --skip-hooks.");
-				const modes = [
-					{ label: "Standard/team", description: "Continue to a hooks choice before creating a team workspace; native initialization may make a Git commit." },
-					{ label: "Stealth (personal, no Git hooks)", description: "Continue to a no-hooks choice before creating a personal workspace without native setup commits." },
-				];
-				const mode = await ctx.ui.select(`Initialize Beads: ${project}`, modes);
-				if (mode === undefined) { ctx.ui.notify("Beads initialization cancelled; no files changed.", "info"); return; }
-				if (!modes.some(value => value.label === mode)) throw new Error("Unknown Beads initialization mode; no files changed.");
-				stealth = mode === modes[1]!.label;
+				if (mode === undefined) {
+					const modes = [
+						{ label: "Standard/team", description: "Continue to a hooks choice before creating a team workspace; native initialization may make a Git commit." },
+						{ label: "Stealth (personal, no Git hooks)", description: "Continue to a no-hooks choice before creating a personal workspace without native setup commits." },
+					];
+					const selected = await ctx.ui.select(`Initialize Beads: ${project}`, modes);
+					if (selected === undefined) { ctx.ui.notify("Beads initialization cancelled; no files changed.", "info"); return "cancelled"; }
+					if (!modes.some(value => value.label === selected)) throw new Error("Unknown Beads initialization mode; no files changed.");
+					stealth = selected === modes[1]!.label;
+				}
 				const hookChoices = stealth
 					? [{ label: "No hooks (stealth mode)", description: "Initialize the personal workspace now without installing Git hooks; leave existing hooks unchanged." }]
 					: [
@@ -271,7 +308,7 @@ export default function beadsExtension(pi: ExtensionAPI, options: BeadsOptions =
 						{ label: "Install supported Git hooks", description: "Initialize the team workspace now and install native supported hooks; may migrate hooks and make a setup commit." },
 					];
 				const hooks = await ctx.ui.select("Beads Git hooks (Esc cancels initialization)", hookChoices);
-				if (hooks === undefined) { ctx.ui.notify("Beads initialization cancelled; no files changed.", "info"); return; }
+				if (hooks === undefined) { ctx.ui.notify("Beads initialization cancelled; no files changed.", "info"); return "cancelled"; }
 				if (!hookChoices.some(value => value.label === hooks)) throw new Error("Unknown Git-hook choice; no files changed.");
 				installHooks = !stealth && hooks === hookChoices[1]!.label;
 				if (ctx.cwd !== cwd) throw new Error("Project changed during initialization choices; run /beads init again.");
@@ -281,7 +318,7 @@ export default function beadsExtension(pi: ExtensionAPI, options: BeadsOptions =
 			}
 			if (current.workspaceState === "ready") {
 				ctx.ui.notify(`Reusing existing Beads workspace; data and hooks unchanged.\n${formatBeadsStatus(current)}`, "info");
-				return;
+				return "ready";
 			}
 			const git = await pi.exec("env", ["LC_ALL=C", "LANG=C", "git", "rev-parse", "--is-inside-work-tree"], { cwd: project, timeout: 5000 });
 			const outsideGit = git.code === 128 && /^fatal: not a git repository(?: |\r?\n|$)/u.test(git.stderr.trim());
@@ -324,9 +361,11 @@ export default function beadsExtension(pi: ExtensionAPI, options: BeadsOptions =
 			if (result.code !== 0) throw new Error(`bd init refused or failed (exit ${result.code}). ${diagnostic}\n${after ? formatBeadsStatus(after) : "Project changed; run /beads status."}`);
 			if (!after || !after.integrationProject || after.integrationProject !== project || after.workspaceState !== "ready" || after.errors.length) throw new Error(`bd init completed, but resulting workspace is not ready. ${diagnostic}\n${after ? formatBeadsStatus(after) : "Project changed; run /beads status."}`);
 			ctx.ui.notify(`Beads workspace initialized; project policy unchanged. Issue operations still require an explicit request.\n${formatBeadsStatus(after)}${result.stderr.trim() ? `\nNative diagnostics:\n${result.stderr.trim()}` : ""}`, result.stderr.trim() ? "warning" : "info");
+			return "ready";
 		} catch (error) {
 			await refresh(ctx);
 			ctx.ui.notify(error instanceof Error ? error.message : String(error), "error");
+			return "failed";
 		}
 	};
 	pi.registerCommand("beads", {
@@ -374,6 +413,18 @@ export default function beadsExtension(pi: ExtensionAPI, options: BeadsOptions =
 				await refresh(ctx);
 				ctx.ui.notify(error instanceof Error ? error.message : String(error), "error");
 			}
+		},
+	});
+	pi.registerCommand("use-matt-pocock-workflow", {
+		description: "Set up the Matt Pocock Workflow: Beads as issue tracker, default labels, single-context docs, AGENTS.md",
+		handler: async (_args, ctx) => {
+			const skill = findSetupSkill(ctx.cwd, options.homeDir);
+			if (!skill) {
+				ctx.ui.notify("The setup-matt-pocock-skills skill is not installed. Install it with `npx skills@latest add mattpocock/skills`, then run /use-matt-pocock-workflow again.", "error");
+				return;
+			}
+			if (await initialize(ctx, "team") !== "ready") return;
+			pi.sendUserMessage(setupMessage(skill));
 		},
 	});
 	pi.on("session_start", (_event, ctx) => startSession(ctx));
