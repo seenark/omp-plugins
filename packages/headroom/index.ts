@@ -76,8 +76,11 @@ type HeadroomRuntimeState = {
 	proxyStartAttempted: boolean;
 	remoteWarningShown: boolean;
 	offlineWarningShown: boolean;
-	/** Agent Session scope: id sent to Headroom and toolCallId -> text already forwarded compressed. */
-	session: { id: string | undefined; memo: Map<string, string> };
+	/**
+	 * Agent Session scope: id sent to Headroom, toolCallId -> text already forwarded compressed, and every
+	 * candidate toolCallId the server has already answered for (a superset of memo keys).
+	 */
+	session: { id: string | undefined; memo: Map<string, string>; sent: Set<string> };
 	stats: HeadroomStats;
 };
 
@@ -232,7 +235,7 @@ function createRuntime(options: HeadroomConfigLoadOptions & { glyphDirectory?: s
 		proxyStartAttempted: false,
 		remoteWarningShown: false,
 		offlineWarningShown: false,
-		session: { id: undefined, memo: new Map() },
+		session: { id: undefined, memo: new Map(), sent: new Set() },
 		stats: emptyStats(),
 	};
 	const runtime: HeadroomRuntime = {
@@ -286,7 +289,7 @@ function resetSession(
 	runtime.state.enabled = preserveSession ? runtime.state.enabled : nextConfig.enabled;
 	if (!preserveSession) {
 		runtime.state.sessionEnabledOverride = undefined;
-		runtime.state.session = { id: undefined, memo: new Map() };
+		runtime.state.session = { id: undefined, memo: new Map(), sent: new Set() };
 		runtime.state.stats = emptyStats();
 	}
 	clearAvailability(runtime.state);
@@ -455,22 +458,26 @@ async function handleContextCompression(
 ): Promise<{ messages?: AgentMessage[] } | undefined> {
 	if (shouldSkipBeforePayload(runtime, ctx)) return undefined;
 	const { state } = runtime;
-	const memo = state.session.memo;
+	const { memo, sent } = state.session;
 	const contextTokens = ctx.getContextUsage()?.tokens ?? undefined;
 	const payload = buildCompressionPayload(event.messages, runtime.config.minMessageChars);
-	const hasNewCandidate = payload.mappings.some(({ applyTo, toolCallId }) => applyTo && toolCallId && !memo.has(toolCallId));
+	// The server session freezes every result it already returned, so re-sending one cannot change it.
+	const hasNewCandidate = payload.mappings.some(({ applyTo, toolCallId }) => applyTo && toolCallId && !sent.has(toolCallId));
 	const requested =
 		hasNewCandidate && !(contextTokens !== undefined && contextTokens < runtime.config.minContextTokens) && (await proxyReady(runtime, ctx))
 			? await requestCompression(runtime, ctx, payload)
 			: undefined;
 
-	// Replay invariant: text forwarded compressed once is forwarded identically on every later call,
-	// whether or not this call reached the server.
+	// Replay invariant: a result the server already answered for keeps the bytes first forwarded on every
+	// later call, whether or not this call reached the server.
 	let newMessages = 0;
 	for (const [id, text] of requested?.replacements ?? []) {
-		if (memo.has(id)) continue;
+		if (sent.has(id)) continue;
 		memo.set(id, text);
 		newMessages++;
+	}
+	if (requested) {
+		for (const { applyTo, toolCallId } of payload.mappings) if (applyTo && toolCallId) sent.add(toolCallId);
 	}
 	const anchorIndex = findUsageAnchor(event.messages);
 	const out = replaceToolResultTexts(event.messages, memo, anchorIndex);

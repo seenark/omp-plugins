@@ -140,8 +140,8 @@ Each `context` event (one per model request):
 
 1. Build the Headroom OpenAI-shaped payload with real tool names and JSON-stringified arguments.
 2. Candidates are `toolResult` messages of at least `minMessageChars` that are not errors (`isError`) and whose bash command does not run `rtk` (`(^|[;&|(]\s*)rtk\s`). Other messages are sent as context only.
-3. If a candidate is not yet compressed, context is at least `minContextTokens`, and the proxy is usable, POST `/v1/compress` with `config.session_id` set to `ctx.sessionManager.getSessionId()`. Nothing else is sent in `config`.
-4. Take each changed candidate independently when it is aligned (role, `tool_call_id`), non-empty, and shorter. Ignore server changes to everything else.
+3. If a candidate has no successful server answer yet in this Agent Session, context is at least `minContextTokens`, and the proxy is usable, POST `/v1/compress` with `config.session_id` set to `ctx.sessionManager.getSessionId()`. Nothing else is sent in `config`. The server session freezes every result it already returned, so a candidate it left unchanged is not sent again.
+4. Take each changed candidate independently when it is aligned (role, `tool_call_id`), non-empty, shorter, and not answered before. Ignore server changes to everything else.
 5. Add newly compressed results to the replay memo (`toolCallId` → forwarded text) and forward every memoised result with its memoised text. This runs on every request, including skipped ones, so bytes forwarded once never change within the Agent Session.
 
 Failures never forward raw text for results already in the memo:
