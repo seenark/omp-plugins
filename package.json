@@ -1,6 +1,6 @@
 {
   "name": "omp-plugins",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "private": true,
   "description": "Monorepo for standalone oh-my-pi plugins installable from GitHub or publishable as separate packages.",
   "workspaces": [

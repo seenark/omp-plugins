@@ -298,6 +298,32 @@ describe("Headroom Agent Session compression", () => {
 		expect(h.requests.compress).toBe(2);
 	});
 
+	it("sends a result the server returned unchanged only once per Agent Session", async () => {
+		const h = await createHarness();
+		await h.start();
+		h.setCompress((body, count) =>
+			count === 1
+				? Response.json({ messages: body.messages, tokens_before: 1, tokens_after: 1, tokens_saved: 0, compression_ratio: 1, transforms_applied: [] })
+				: shrinkAll(body, count),
+		);
+		const history: Message[] = [call("c1"), result("c1", "a".repeat(400))];
+		expect(await h.context(history)).toBeUndefined();
+		expect(h.requests.compress).toBe(1);
+
+		history.push(user("next"));
+		expect(await h.context(history)).toBeUndefined();
+		expect(h.requests.compress).toBe(1);
+
+		history.push(call("c2"), result("c2", "b".repeat(400)));
+		expect(texts(await h.context(history))).toEqual({ c1: "a".repeat(400), c2: "small" });
+		expect(h.requests.compress).toBe(2);
+
+		h.session.id = "agent-session-2";
+		await h.fire("session_switch");
+		await h.context([call("c1"), result("c1", "a".repeat(400))]);
+		expect(h.requests.compress).toBe(3);
+	});
+
 	it("never replaces failed or RTK-processed results", async () => {
 		const h = await createHarness();
 		await h.start();
