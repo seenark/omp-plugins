@@ -4,7 +4,7 @@ Beads shows how much work is left in the status-line segment, for example `Beads
 
 ## Sub-features
 
-- `beads-segment-state` shows `Beads: ready` while the project has no open issues. Under the default `ready` visibility the segment is hidden in every other state. The other state words (`uninitialized`, `suppressed`, `error`, `missing-prerequisite`) show only with `display.beads.visibility` set to `always`.
+- `beads-segment-state` shows `Beads: ready` while the project has no open issues. Under the default `ready` visibility the segment is hidden in every other state. The other state words (`uninitialized`, `suppressed`, `error`, `missing-prerequisite`) show only with `display.beads.visibility` set to `always`. `never` hides the segment in every state.
 - `beads-segment-counts` shows `Beads: <ready> ready · <open> open` once open issues exist. Open means not closed and not deferred.
 - `beads-live-refresh` updates the segment shortly after an issue changes from another terminal, with no command or turn.
 - `beads-tasks-view` opens `/beads tasks`, a scrollable overlay grouped as In progress, Ready, Blocked, sorted by priority then most recent update.
