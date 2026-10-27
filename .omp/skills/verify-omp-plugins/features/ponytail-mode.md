@@ -25,7 +25,7 @@ Preconditions:
 
 - A fresh `verify-omp launch` with `doctor` all `ok`.
 - `PONYTAIL_DEFAULT_MODE` is unset in the launching shell.
-- The status line shows `○ 🐴⚡ ponytail`. The segment has no Mode Level text, only the glyph: lite `🐴🌿`, full `🐴⚡`, ultra `🐴🔥`. The scratch HOME seeds these packaged glyphs into `$SCRATCH_HOME/.config/codesook-omp/ponytail/`, so every launch renders them.
+- The status line shows `○ 🐴⚡ ponytail`. The segment has no Mode Level text, only the glyph: lite `🐴🌿`, full `🐴⚡`, ultra `🐴🔥`. A fresh scratch HOME has no `$SCRATCH_HOME/.config/codesook-omp/ponytail/` directory, so these glyphs come from the plugin's packaged assets. `/omp-plugins init config` copies them there.
 
 - **Baseline.** Read the status. Run `$OMP_PTY submit $PTY "/ponytail status"`, then `$OMP_PTY wait $PTY 'Ponytail: current full • default full'`. Save the screen with `$OMP_PTY screen $PTY --out $EVID/ponytail/01-baseline.txt`. Copy the config with `cp $SCRATCH_HOME/.config/codesook-omp/config.json $EVID/ponytail/config-before.json`.
 - **Session mode.** Switch to ultra. Run `$OMP_PTY submit $PTY "/ponytail ultra"`, then `$OMP_PTY wait $PTY 'Ponytail mode set to ultra\.'` and `$OMP_PTY wait $PTY '🐴🔥 ponytail'`. Save `02-ultra.txt`.

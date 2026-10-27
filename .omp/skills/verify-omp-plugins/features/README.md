@@ -42,8 +42,8 @@ Keep implementation details out of the map. Name only user paths, stable on-scre
 
 - [Ponytail mode](./ponytail-mode.md): `/ponytail` session modes, the persisted default, status, and the status-line segment.
 - [Caveman mode](./caveman-mode.md): `/caveman` menu and arguments, aliases, standalone `/ultracave` and `/megacave`, off, errors, and the segment.
-- [Plugin settings](./plugin-settings.md): `/omp-plugins` status, `init config` file creation, and the settings menu.
-- [Headroom](./headroom.md): `/headroom` status, health, on and off against a missing proxy, and the segment.
+- [Plugin settings](./plugin-settings.md): `/omp-plugins` status, `init config` file creation, the settings menu, and Shared Display Style and Palette.
+- [Headroom](./headroom.md): `/headroom` menu, status, health, stats, token cancel, on and off against a missing proxy, usage, and the segment.
 - [Skill stats](./skill-stats.md): `/skill-stats` dashboards, recording a Ponytail helper use, reset, import, and the Git-ignored project store.
 - [pstack](./pstack.md): `/pstack` status and doctor.
 - [Process monitor](./process-monitor.md): `/procs` overlay, leftover rows, view-only unknown rows, confirmed stop, and the `⚠ N ports` segment, driven with a tagged stand-in process.
@@ -51,4 +51,4 @@ Keep implementation details out of the map. Name only user paths, stable on-scre
 
 Skill stats, Process monitor and Beads also ship a journey script, `features/<name>.sh RUN_ID`, that drives the recipe's main path against a launched run and prints `PASS`/`FAIL` per step. Steps the feature file marks as outside the journey are driven by hand.
 
-Not mapped yet: `/prompt-border`, `/context-rail`, `/rtk`, `/codegraph`, `/pstack setup`, `/pstack preset`, `/poteto`, and the `/ponytail-audit` and `/ponytail-debt` helpers, which send an LLM prompt. `/ponytail-review` is exercised only as the Skill stats recording path, not as a review. `/beads init` is not mapped, and `/beads status` is used only as a refresh trigger.
+Not mapped yet: `/prompt-border`, `/context-rail`, `/rtk`, `/codegraph`, `/pstack setup`, `/pstack preset`, `/poteto`, `/headroom init`, the settings menu's `Edit glyph frames` action, and the `/ponytail-audit`, `/ponytail-debt`, `/ponytail-gain` and `/ponytail-help` helpers, which send an LLM prompt. `/ponytail-review` is exercised only as the Skill stats recording path, not as a review. `/beads init` is not mapped, and `/beads status` is used only as a refresh trigger.

@@ -43,7 +43,8 @@ trap cleanup EXIT
 
 # Sets STANDIN_PID and STANDIN_PORT. Not callable inside $(...): a background job started there dies with the subshell.
 start_standin() { # ENV=value marker the process carries
-	env "$1" nohup bun -e 'Bun.serve({port:0,fetch:()=>new Response("x")});setInterval(()=>{},1e6)' >/dev/null 2>&1 &
+	# -u: a shell inside omp exports its own OMP_PLUGINS_SESSION, which would attribute the untagged stand-in to that session
+	env -u OMP_PLUGINS_SESSION "$1" nohup bun -e 'Bun.serve({port:0,fetch:()=>new Response("x")});setInterval(()=>{},1e6)' >/dev/null 2>&1 &
 	sleep 2
 	STANDIN_PID=$(pgrep -n -f 'Bun.serve\(\{port:0')
 	has_marker "$STANDIN_PID" "$1" || { echo "pid $STANDIN_PID does not carry $1" >&2; return 1; }

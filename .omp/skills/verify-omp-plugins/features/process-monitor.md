@@ -14,7 +14,7 @@ Process monitor lists the processes OMP started, with their listening ports and 
 
 ## How to get to it (user POV)
 
-- Type `/procs` in the editor. Inside the overlay, `↑`/`↓` move, `Space` or `Tab` folds a group, `k` or `Backspace` stops the selected row, `Enter` or `Esc` closes.
+- Type `/procs` in the editor. Inside the overlay, `↑`/`↓` move, `Space` or `Tab` on the `OMP internals` header expands or collapses it (the only collapsible group), `k` or `Backspace` stops the selected row, `Enter` or `Esc` closes.
 - Look at the status line for `⚠ N ports`.
 - Start a new session (`/new`) while the previous one left attributed processes running, to get the `Close all` / `Keep` prompt.
 
@@ -27,7 +27,7 @@ Preconditions:
   `OMP_PLUGINS_SESSION=verify-demo nohup bun -e 'Bun.serve({port:0,fetch:()=>new Response("x")});setInterval(()=>{},1e6)' >/dev/null 2>&1 &`, then `sleep 2; D=$(pgrep -n -f 'Bun.serve\(\{port:0')`.
 - `OMP_PLUGINS_SESSION` is the tag every bash tool command gets. No omp session holds the id `verify-demo`, so the stand-in counts as left over.
 - The listening port is `lsof -nP -a -p $D -iTCP -sTCP:LISTEN -Fn | sed -n 's/^n.*://p'`. Note it as `$DPORT`.
-- A second stand-in started without `OMP_PLUGINS_SESSION` carries no session tag, so the monitor lists it under `Unknown origin (view-only)`. Note its pid as `$U`.
+- A second stand-in started without `OMP_PLUGINS_SESSION` carries no session tag, so the monitor lists it under `Unknown origin (view-only)`. Start it with `env -u OMP_PLUGINS_SESSION …`: a shell running inside omp exports its own session's tag, and the stand-in would inherit it. Note its pid as `$U`.
 
 - **One command.** `.omp/skills/verify-omp-plugins/features/process-monitor.sh <run-id>` runs every step below against a launched run. It saves screens to `$EVID/process-monitor/NN-step.txt`, prints `PASS <step>` lines, exits non-zero at the first failure, and kills only the stand-ins it started.
 - **Overlay.** Run `$OMP_PTY submit $PTY "/procs"`, then `$OMP_PTY wait $PTY 'OMP processes'` and `$OMP_PTY wait $PTY 'Enter/Esc close'`. Save `$EVID/process-monitor/01-overlay.txt` with `$OMP_PTY screen $PTY --out …`.
@@ -47,6 +47,7 @@ Preconditions:
 - The tag is read from the process environment, so it only works for a process the current user owns and that `ps` shows an environment for. A stand-in launched through `/bin/sleep` or another hardened system binary shows no tag; use `bun`.
 - The session column is truncated to the last 8 characters of the id. Match `"$PID .*⚠ leftover$"`, not the session text.
 - A stand-in started with `cmd & D=$!` gives a wrapper pid, and one started inside `$(...)` dies with the subshell. Start it at the top level of the shell, wait 2 s, and look the pid up with `pgrep -n -f`.
+- A driving shell inside an omp session exports `OMP_PLUGINS_SESSION` for that session. A stand-in that inherits it is attributed to the user's real session and offers a stop. The journey strips it with `env -u OMP_PLUGINS_SESSION` before setting its own tag.
 - An agent-started process, and therefore the marker added to bash tool commands, needs a model turn and cannot be driven here. Report it as unverified, not as passing through the stand-in.
 - The `OMP internals` group stays collapsed (`▸ OMP internals`) when the scratch omp has workers. The journey does not assert it because a fresh scratch omp may have none.
 - Do not type `k` through `submit`, which closes dialogs first. Use `key bspace` or `key char:k`.
