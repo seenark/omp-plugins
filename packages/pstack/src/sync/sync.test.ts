@@ -230,6 +230,14 @@ describe("collision renames", () => {
 		expect(result.collisions).toEqual([{ name: "pstack-tdd", directory: other }]);
 		expect(sync(upstream, shippedGroups, { skillDirectories: [scratch()] }).result.collisions).toEqual([]);
 	});
+
+	it("reports a rename as unused only when none of its reference shapes occurs", () => {
+		expect(sync(upstream, shippedGroups).result.unusedRules.filter(id => id.startsWith("rename/"))).toEqual([]);
+		const unreferenced = upstreamTree({ "pstack/skills/tdd/SKILL.md": skill("tdd"), "pstack/skills/teach/SKILL.md": skill("teach") });
+		expect(sync(unreferenced, shippedGroups).result.unusedRules).toEqual(
+			expect.arrayContaining(["rename/tdd/slash-command", "rename/tdd/path", "rename/tdd/mention"]),
+		);
+	});
 });
 
 describe("re-running sync", () => {
@@ -587,17 +595,9 @@ describe("dispatch adaptations", () => {
 		"dispatch/playbook-pickup-no-cloud-url": { file: `${PB}session-pickup.md`, input: "Locate it: a transcript, a cloud-agent URL, or a pushed branch.", expected: "Locate it: a transcript, or a pushed branch." },
 		"dispatch/playbook-pickup-isolated": { file: `${PB}session-pickup.md`, input: "Resist the bias to re-derive it.\nNext.", expected: "Run any agent that continues the prior work as an isolated background `task`" },
 		"dispatch/playbook-pickup-transcript-task": { file: `${PB}session-pickup.md`, input: "Parse a long transcript in a subagent and keep the timeline.", expected: "Parse a long transcript in a read-only `pstack-explore` task and keep the timeline." },
-		"dispatch/playbook-orchestrate-task-tools": { file: `${PB}orchestrate.md`, input: "drained only through the Task tool.", expected: "drained only through the `task` and `wait` tools." },
-		"dispatch/playbook-orchestrate-nesting": { file: `${PB}orchestrate.md`, input: "(nesting works to depth 3, and a nested spawn has the full Task schema including `environment`)", expected: "(nesting is bounded by OMP's `task.maxRecursionDepth`, 2 by default, and a nested spawn has the full `task` schema including `isolated`)" },
-		"dispatch/playbook-orchestrate-worker-isolation": { file: `${PB}orchestrate.md`, input: 'Always `environment: "cloud"` unless the task needs this machine: a simulator.', expected: "Always a background `task` with `isolated: true`, so each gets its own worktree." },
-		"dispatch/playbook-orchestrate-local-store": { file: `${PB}orchestrate.md`, input: "Cloud agents cannot read the local store, so their briefs inline what they need or point at repo paths.", expected: "An isolated task cannot read this chat's local store, so its brief inlines what it needs or points at repo paths." },
-		"dispatch/playbook-orchestrate-verbatim": { file: `${PB}orchestrate.md`, input: "Verbatim paste is for cloud spawns and every resume.", expected: "Verbatim paste is for isolated spawns and every resume." },
-		"dispatch/playbook-orchestrate-budget": { file: `${PB}orchestrate.md`, input: "its spawn budget with the cloud default and the local exception list, the drain protocol", expected: "its spawn budget with the isolated default and the non-isolated exception list, the drain protocol" },
-		"dispatch/playbook-orchestrate-rebase": { file: `${PB}orchestrate.md`, input: "Chain rebases run in cloud. A local rebase at this scale takes the laptop down.", expected: "Chain rebases run in an isolated task, so a rebase at this scale never touches the coordinator's checkout." },
-		"dispatch/playbook-orchestrate-externalize": { file: `${PB}orchestrate.md`, input: "Work that exists only on one VM when that VM dies was never done.", expected: "Work that exists only in one isolated worktree when the session ends was never done." },
-		"dispatch/playbook-orchestrate-probe": { file: `${PB}orchestrate.md`, input: "Probe the ledger, the cloud agent's status in the Cursor dashboard.", expected: "Probe the ledger, the task's entry under `history://`." },
-		"dispatch/playbook-orchestrate-restart": { file: `${PB}orchestrate.md`, input: "After a Cursor restart: local agents are dead, cloud work is not. Re-read.", expected: "After an OMP restart: running tasks are dead, pushed branches and PRs are not. Re-read." },
-		"dispatch/playbook-orchestrate-reattach": { file: `${PB}orchestrate.md`, input: "then reattach cloud work by PR and branch rather than agent id.", expected: "then reattach work by PR and branch rather than agent id." },
+		"dispatch/playbook-orchestrate-spawn": { file: `${PB}orchestrate.md`, input: "Run it with your own tools. Spawn workers with `Task`. Keep the rest.", expected: "Spawn workers with the `task` tool and collect their results with `wait`." },
+		"dispatch/playbook-orchestrate-state": { file: `${PB}orchestrate.md`, input: "Keep the program's state in the Project tracker (`notes.md`) and the Project store. Watch each PR.", expected: "Keep the program's state in the tracker file `local://notes.md` and any other `local://` artifacts." },
+		"dispatch/playbook-orchestrate-worker-isolation": { file: `${PB}orchestrate.md`, input: 'Workers can\'t see their siblings. Run workers on a new cloud VM (`environment: "cloud"`) unless the work needs this machine: a `control-ui` runtime check, a simulator.', expected: "Run each worker as a background `task` with `isolated: true`, so it gets its own worktree, unless the work needs this machine's live state:" },
 		"dispatch/playbook-pause-restart": { file: POTETO, input: "going offline, a Cursor restart, or imminent compaction.", expected: "going offline, an OMP restart, or imminent compaction." },
 		"dispatch/playbook-cleanup-editor-state": {
 			file: `${PB}worktree-cleanup.md`,
@@ -607,12 +607,12 @@ describe("dispatch adaptations", () => {
 		"dispatch/playbook-authoring-create-skill": { file: `${PB}authoring-a-skill.md`, input: "1. Use the **create-skill** skill (Cursor's built-in for authoring SKILL.md files).", expected: "1. Use the **create-skill** skill when the session lists one. Otherwise write the SKILL.md directly:" },
 		"dispatch/interrogate-reviewers": {
 			file: "skills/interrogate/SKILL.md",
-			input: "Launch all reviewers in a single message with the Task tool, one per entry.\n\n| Reviewer A | `x` |\n\nNever treat an alias entry as a rejected slug or apply either fallback to it.\n\nAfter.",
-			expected: "Launch all reviewers in a single `task` call, one critic per configured panel seat",
+			input: "Run Phase A steps 3 and 4 and Phase B of the **arena** skill, with four changes. Read the `interrogate reviewers` line in place of `arena runners`. Copy the scope's uncommitted changes into each worktree. Spawn each adversary as `generalPurpose`. In place of the arena task and rationale, give each adversary the scope, the intent, and this brief:\n\nAfter.",
+			expected: "Each adversary is that seat's builder agent, `pstack-panel-<seat>-builder`, so it runs on its seat's model.",
 		},
 		"dispatch/arena-runners": { file: "skills/arena/SKILL.md", input: "3. Pick the runners. Use the `arena runners` line in the rule.", expected: "3. Pick the runners. Each runner is the builder agent of one configured panel seat" },
 		"dispatch/arena-fan-out": { file: "skills/arena/SKILL.md", input: "Spawn all N subagents in one message with `run_in_background: true`, each with the task.", expected: "Spawn all N subagents in one `task` call with `isolated: true`, each with the task." },
-		"dispatch/arena-cross-judge": { file: "skills/arena/SKILL.md", input: "After all Phase B candidates complete, choose one model from the pool. Spawn one readonly judge subagent on that model. It sees the rubric.", expected: "After all Phase B candidates complete, spawn one `pstack-judge` lane as the cross-judge. It is read-only. It sees the rubric." },
+		"dispatch/arena-cross-judge": { file: "skills/arena/SKILL.md", input: "After all Phase B candidates complete, choose one model from the `arena cross-judge pool` line in `~/.cursor/rules/pstack-models.mdc`. If the rule or that line is missing, choose from `claude-opus-5-5-xhigh`. Spawn one readonly judge subagent. It sees the rubric.", expected: "After all Phase B candidates complete, pick the cross-judge from the roster. It is `pstack-panel-<seat>-critic` of the first roster seat" },
 		"dispatch/architect-runners": { file: "skills/architect/SKILL.md", input: "Take the runners from the `architect runners` line in the rule, in place of arena.", expected: "Take the runners from the configured panel seats, exactly as the **arena** skill's Phase A does." },
 		"dispatch/how-lanes": { file: "skills/how/SKILL.md", input: "Every spawn is a Task subagent with `subagent_type: generalPurpose` and `readonly: true`.", expected: "Every spawn is a read-only `task`. Explorers are `pstack-explore` agents" },
 		"dispatch/why-lanes": { file: "skills/why/SKILL.md", input: "Each spawn below names a role line in the rule and a default.", expected: "Each spawn below names a lane agent" },
@@ -632,8 +632,8 @@ describe("dispatch adaptations", () => {
 		"dispatch/reflect-example-slug": { file: "skills/reflect/references/synthesizer.md", input: "- \"we renamed `gpt-4` to `gpt-4o` in `encodingForModel`\"", expected: "- \"we renamed `fetchUser` to `loadUser` in `sessionStore`\"" },
 		"dispatch/automate-me-create-skill-intro": { file: "skills/automate-me/SKILL.md", input: "three others: Cursor's built-in `create-skill` (authoring), and prose.", expected: "three others: the `create-skill` skill when the session lists one (authoring), and prose." },
 		"dispatch/automate-me-create-skill-use": { file: "skills/automate-me/SKILL.md", input: "Use Cursor's built-in `create-skill` skill to author the skill. Placement:", expected: "Use the `create-skill` skill, when the session lists one, to author the skill. Otherwise follow the Authoring or modifying a skill playbook. Placement:" },
-		"dispatch/swarm-worker-lane": { file: "skills/swarm/SKILL.md", input: "4. Pick the worker model from the `swarm workers` line in the rule.", expected: "4. Pick the worker lane: `pstack-build` when a worker writes" },
-		"dispatch/swarm-fan-out": { file: "skills/swarm/SKILL.md", input: 'Spawn all N workers in one message with `subagent_type: generalPurpose`, `environment: "cloud"`.', expected: "Spawn all N workers in one `task` call, each with `agent` set to the step 4 lane and `isolated: true`" },
+		"dispatch/swarm-worker-lane": { file: "skills/swarm/SKILL.md", input: "3. Pick the worker model from the `swarm workers` line in `~/.cursor/rules/pstack-models.mdc`. If the rule or that line is missing, use `grok-4.7-xhigh-fast`. For a model race, name each arm's model up front.", expected: "3. Pick the worker lane: `pstack-build` when a worker writes" },
+		"dispatch/swarm-fan-out": { file: "skills/swarm/SKILL.md", input: 'Spawn all N workers in one message with `subagent_type: generalPurpose`, `environment: "cloud"`, `run_in_background: true`, and the step 3 model, left unset for `auto` or `inherit-parent`. Use `environment: "local"` only when the worker needs access to something on the user\'s computer.', expected: "Spawn all N workers in one `task` call, each with `agent` set to the step 3 lane and `isolated: true`" },
 		"dispatch/swarm-base-branch": { file: "skills/swarm/SKILL.md", input: "When a worker must start from a non-default pushed branch, pass `cloud_base_branch`.", expected: "When a worker must start from a non-default branch, name the branch and its SHA in the brief" },
 		"dispatch/no-comments-agent": { file: "skills/no-comments/SKILL.md", input: '1. Spawn `Task` with `subagent_type: "comment-sicko"`. Pass the scope.', expected: '1. Spawn a `task` with `agent: "comment-sicko"`. Pass the scope.' },
 		"dispatch/help-custom-mode": { file: HELP, input: "Do the work, and mention once that a Custom Mode keeps it on.", expected: "Do the work, and mention once that `/poteto <task>` starts it directly." },
@@ -644,7 +644,7 @@ describe("dispatch adaptations", () => {
 		"dispatch/help-setup-step": { file: HELP, input: "2. Run [`/setup-pstack`](../setup-pstack/SKILL.md). It asks for a reasoning budget, maps a model to each role, and writes a rule. The rule applies to new chats.", expected: "2. Run [`/pstack setup`](../setup-pstack/SKILL.md). It offers presets," },
 		"dispatch/help-loads": { file: HELP, input: "Installing changes nothing until the user invokes a skill. Only `/setup-pstack` loads from the user's words.", expected: "Installing changes nothing until the user starts a run with `/poteto <task>` or `/skill:poteto-mode`." },
 		"dispatch/help-cost": { file: HELP, input: "Rerun `/setup-pstack` and pick a smaller budget or cheaper models. A shorter panel list runs fewer subagents, one for each entry. Save it.", expected: "Rerun `/pstack setup` and pick cheaper models for the roles." },
-		"dispatch/help-built-for": { file: HELP, input: "pstack is built for Cursor. Its skills use the Agent Skills format.", expected: "pstack is built for OMP. Its skills use the Agent Skills format, so other tools can read them." },
+		"dispatch/help-built-for": { file: HELP, input: "pstack is built for Cursor, and it also installs in Claude Code with `/plugin marketplace add cursor/plugins`, then `/plugin install pstack@cursor-plugins`. There, each command takes a `pstack:` prefix.\n\nOther tools can read the skills, because they use the Agent Skills format. But most workflow skills, including `/poteto-mode`, `/how`, `/why`, and `/teach`, spawn Cursor subagents with per-role models, and Custom Modes and `/loop` are Cursor features, so those parts may not work there.", expected: "pstack is built for OMP's `task` lanes. Its workflow skills, including `/poteto-mode`, `/how`, `/why`, and `/pstack-teach`, spawn OMP `task` subagents on `pstack-*` model roles." },
 		"dispatch/help-stays-on": {
 			file: HELP,
 			input: 'Whether `/poteto-mode` stays on depends on how the user starts it:\n\n- Enter on it.\n\nLink [docs](https://example.test). To get the same style, spawn it with `subagent_type: "poteto-agent"`.',

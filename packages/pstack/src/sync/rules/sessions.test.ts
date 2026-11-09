@@ -146,7 +146,7 @@ describe("sessions group", () => {
 	});
 
 	it("leaves paths, URLs and non-pstack slash commands alone", () => {
-		const text = "See skills/how/SKILL.md, ../how/SKILL.md, https://example.test/why, /tmp/swarm-1/, ~/how and /loop.\n";
+		const text = "See skills/how/SKILL.md, ../how/SKILL.md, https://example.test/why, /tmp/swarm-1/, ~/how, entry=$(dirname \"$self\")/how.ts and /loop.\n";
 		const { read } = syncFiles({ "skills/a/SKILL.md": withFrontmatter("skills/a/SKILL.md", text) }, sessions);
 		expect(read("skills/a/SKILL.md")).toContain(text.trim());
 	});

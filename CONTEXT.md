@@ -295,7 +295,7 @@ A named entry in OMP's `modelRoles` that a pstack Lane resolves its model throug
 _Avoid_: model alias, agent model, lane config
 
 **Panel Seat**:
-One of up to five independent reviewer slots (`pstack-panel-a` to `pstack-panel-e`), each holding a different model. An unset seat is absent, not a failure.
+One of up to five independent model slots (`pstack-panel-a` to `pstack-panel-e`), each holding a different model and served by a builder Lane and a critic Lane. An unset seat is absent, not a failure.
 _Avoid_: reviewer slot, vote, expert
 
 **Lane**:

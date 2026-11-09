@@ -25,11 +25,11 @@ Label every candidate by its seat and the model on the roster (Candidate A, `ant
 
 ## Phase C: Cross-judge
 
-After all Phase B candidates complete, spawn one `pstack-judge` lane as the cross-judge. It is read-only. It sees the rubric and the candidates by path label (the patch path or branch of each), scores each criterion, and recommends a base with rationale. It runs in parallel with your reading in Phase D. Don't spawn it while candidates are still writing.
+After all Phase B candidates complete, pick the cross-judge from the roster. It is `pstack-panel-<seat>-critic` of the first roster seat, in roster order, whose vendor differs from the vendor of the model this session runs on. A seat of the session model's vendor never judges. If no roster seat has another vendor, or you do not know the session model's vendor, skip the judge, pick the base alone in Phase D, and say so. Spawn the judge as a read-only `task`. It sees the rubric and the candidates by path label (the patch path or branch of each), scores each criterion, and recommends a base with rationale. It runs in parallel with your reading in Phase D. Don't spawn it while candidates are still writing.
 
 ## Phase D: Pick a base
 
-Read every candidate end to end before picking. Score each against the rubric criterion by criterion, not on holistic feel, and compare with the cross-judge. Agreement on the base confirms the pick. Disagreement means one of you is biased or the rubric was ambiguous. Read both rationales before deciding.
+Read every candidate end to end before picking. Score each against the rubric criterion by criterion, not on holistic feel, and compare with the cross-judge when Phase C ran one. Agreement on the base confirms the pick. Disagreement means one of you is biased or the rubric was ambiguous. Read both rationales before deciding.
 
 Pick the base a future maintainer can extend most easily without breaking invariants. When two feel tied, prefer the cleaner boundary or smaller API, per the Laziness Protocol.
 
@@ -45,4 +45,4 @@ Verify the synthesized artifact like any other output, per the **prove-it-works*
 
 ## Outputs
 
-One synthesized artifact, with a short synthesis note alongside naming the base and why, the cross-judge's verdict, each graft with its source candidate and the model that built it, what was rejected and why, any convergence or dropouts, and the verification result. When every seat that built a candidate is one vendor, the note states `diversity reduced: single vendor`: the candidates share one lineage's blind spots, so their convergence is weaker evidence.
+One synthesized artifact, with a short synthesis note alongside naming the base and why, the cross-judge's verdict or that Phase C skipped the judge, each graft with its source candidate and the model that built it, what was rejected and why, any convergence or dropouts, and the verification result. When every seat that built a candidate is one vendor, the note states `diversity reduced: single vendor`, because the candidates share one lineage's blind spots and their convergence is weaker evidence.

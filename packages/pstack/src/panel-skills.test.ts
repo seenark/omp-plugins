@@ -30,20 +30,26 @@ describe("panel skills dispatch the role table's agents", () => {
 		}
 	});
 
-	it("interrogate dispatches a critic per seat, arena a builder per seat (as a range)", () => {
+	it("interrogate dispatches a builder per seat and no critic, arena a builder range and a critic for the judge", () => {
 		const interrogate = agentsNamedIn(read("interrogate/SKILL.md"));
 		const arena = agentsNamedIn(read("arena/SKILL.md"));
-		for (const seat of PANEL_SEATS) expect(interrogate).toContain(`pstack-panel-${seat}-critic`);
+		for (const seat of PANEL_SEATS) expect(interrogate).toContain(`pstack-panel-${seat}-builder`);
+		expect(interrogate.some(name => name.endsWith("-critic"))).toBe(false);
 		// Arena names the range once: `pstack-panel-a-builder` through `pstack-panel-e-builder`.
 		expect(arena).toEqual(expect.arrayContaining(["pstack-panel-a-builder", "pstack-panel-e-builder"]));
-		expect(interrogate.some(name => name.endsWith("-builder"))).toBe(false);
-		expect(arena.some(name => name.endsWith("-critic"))).toBe(false);
+		for (const seat of PANEL_SEATS) expect(arena).toContain(`pstack-panel-${seat}-critic`);
 	});
 
-	it("synthesize with the judge lane, never a seat", () => {
-		expect(agentsNamedIn(read("interrogate/SKILL.md"))).toContain("pstack-judge");
-		expect(agentsNamedIn(read("arena/SKILL.md"))).toContain("pstack-judge");
+	it("runs no judge lane in interrogate or arena, and synthesizes with the judge lane elsewhere", () => {
+		expect(agentsNamedIn(read("interrogate/SKILL.md"))).not.toContain("pstack-judge");
+		expect(agentsNamedIn(read("arena/SKILL.md"))).not.toContain("pstack-judge");
 		expect(agentsNamedIn(read("poteto-mode/references/panel-verdicts.md"))).toContain("pstack-judge");
+	});
+
+	it("interrogate stops without a seat and never applies fixes", () => {
+		const text = read("interrogate/SKILL.md");
+		expect(text).toContain("/pstack setup");
+		expect(text).toContain("Do not apply fixes");
 	});
 });
 

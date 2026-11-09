@@ -11,6 +11,10 @@ export const core: Group = {
 			path: "skills/make-bot-ui/**",
 			reason: "Wakes a Grok Bot over a webhook, a Cursor product. Out of scope for OMP.",
 		},
+		{
+			path: "skills/statechart/scripts/test/**",
+			reason: "Upstream compiler tests users never run, about 3.7 MB of the skill's 3.9 MB. This repo's verify does not run them.",
+		},
 	],
 	rules: [
 		{
@@ -47,6 +51,40 @@ export const core: Group = {
 			files: "skills/poteto-help/SKILL.md",
 			pattern: "the skills and guide pages that hold",
 			replacement: "the skills that hold",
+		},
+		{
+			id: "core/ketchup-video-reply-as-file-and-stills",
+			reason:
+				"OMP's chat cannot embed or play video but shows images. The agent writes the video to a file outside the repo and replies with its path plus one still per slide.",
+			files: "skills/ketchup-video/SKILL.md",
+			pattern:
+				"The reply is ketchup's opening sentence, the embedded video, one line naming any work left that you can do yourself, and the action items.",
+			replacement:
+				"The reply is ketchup's opening sentence, the path of the rendered video file, one still per slide extracted from the video with ffmpeg and shown inline as an image, one line naming any work left that you can do yourself, and the action items. OMP's chat cannot embed or play video, so the file path and the stills stand in for it.",
+		},
+		{
+			id: "core/ketchup-video-check-before-reply",
+			reason: "There is no embed step in OMP. The check runs before the reply, on the stills the reply shows.",
+			files: "skills/ketchup-video/SKILL.md",
+			pattern:
+				"Before you embed the video, check the rendered file. Look at one frame from each slide at chat size, and check that",
+			replacement:
+				"Before you reply, check the rendered file. Extract one still from each slide's hold with ffmpeg, look at it at chat size, and check that",
+		},
+		{
+			id: "core/ketchup-video-stills-in-reply",
+			reason: "The checked stills are what the reply shows in place of the embedded video.",
+			files: "skills/ketchup-video/SKILL.md",
+			pattern: "render again, and check again.",
+			replacement:
+				"render again, and check again. Show those stills in the reply, one per slide, as inline images, under the video's file path.",
+		},
+		{
+			id: "core/statechart-drop-test-script",
+			reason: "The statechart test subtree is Excluded, so its test script and the property-test dependency would point at files that do not ship.",
+			files: "skills/statechart/scripts/package.json",
+			pattern: /,\n {2}"scripts": \{\n {4}"test": "node [^\n]*test\/\*\.test\.ts"\n {2}\},\n {2}"devDependencies": \{\n {4}"fast-check": "[^"]+"\n {2}\}/,
+			replacement: "",
 		},
 	],
 	terms: [

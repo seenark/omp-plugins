@@ -17,7 +17,7 @@ const GOAL_MODE = "OMP goal mode (an extension cannot start it, so tell the user
  */
 const slashForm: SkillPattern = skills =>
 	new RegExp(
-		`(?<![\\w/.:~<>-])/((?:${skills.filter(name => !name.startsWith("principle-")).join("|")}|principle-(?:<name>|[a-z-]+)|verify-<app>))(?![\\w/-])`,
+		`(?<![\\w/.:~<>-])/((?:${skills.filter(name => !name.startsWith("principle-")).join("|")}|principle-(?:<name>|[a-z-]+)|verify-<app>))(?![\\w/-]|\\.\\w)`,
 	);
 
 const transcripts: Rule[] = [
@@ -70,13 +70,6 @@ const transcripts: Rule[] = [
 		files: "skills/poteto-mode/playbooks/session-pickup.md",
 		pattern: "under the active workspace's `agent-transcripts/` directory (the system prompt names the path. ",
 		replacement: `from \`history://<id>\` or a session file under \`${SESSIONS}/<encoded-cwd>/\` (`,
-	},
-	{
-		id: "sessions/orchestrate-transcripts",
-		reason: "Local transcripts live in OMP's session directory.",
-		files: "skills/poteto-mode/playbooks/orchestrate.md",
-		pattern: "Reading local transcripts under `agent-transcripts/`.",
-		replacement: `Reading local transcripts under \`${SESSIONS}/\`.`,
 	},
 	{
 		id: "sessions/no-cross-project-glob",
@@ -148,10 +141,17 @@ const drivers: Rule[] = [
 	},
 	{
 		id: "sessions/driver-orchestrate-worker",
-		reason: "Runtime verification runs through the OMP browser tool or bash.",
+		reason: "Runtime checks run through the OMP browser tool or bash, not control-ui or control-cli from cursor-team-kit.",
 		files: "skills/poteto-mode/playbooks/orchestrate.md",
-		pattern: "`control-ui` or `control-cli` runtime verification (from `cursor-team-kit`)",
-		replacement: "`browser` or `bash` runtime verification",
+		pattern: "a `control-ui` or `control-cli` runtime check (from `cursor-team-kit`)",
+		replacement: "a runtime check through the `browser` tool or `bash`",
+	},
+	{
+		id: "sessions/driver-orchestrate-evidence",
+		reason: "A control skill check is a check through the OMP browser tool or bash.",
+		files: "skills/poteto-mode/playbooks/orchestrate.md",
+		pattern: "a control-skill check",
+		replacement: "a `browser` tool or `bash` check",
 	},
 	{
 		id: "sessions/driver-such-as",

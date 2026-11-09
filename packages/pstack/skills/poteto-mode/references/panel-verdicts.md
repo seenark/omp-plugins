@@ -1,6 +1,6 @@
 # Running a panel and merging its verdicts
 
-Interrogate, the **how** critique step and every other review that asks several models the same question follow this file. It builds on `provider-dispatch.md`, which has the seats, the dropout policy and the spawn rules.
+The **how** critique step, **swarm** model races and every other review that asks several models the same question follow this file. It builds on `provider-dispatch.md`, which has the seats, the dropout policy and the spawn rules. **Interrogate** reads section 1 for the roster and section 4 for the single-vendor note and the dropout notes. **Arena** reads section 1 for the roster. Neither merges verdicts.
 
 ## 1. Read the roster
 

@@ -44,10 +44,11 @@ export const pr: Group = {
 	rules: [
 		{
 			id: "pr/scripts-package",
-			reason: "watch-pr and check-plan are Excluded, so their test and typecheck entries would point at missing files.",
+			reason:
+				"watch-pr and check-plan are Excluded and no other script test remains, so the test and typecheck entries would point at missing files and the whole scripts block goes.",
 			files: "skills/poteto-mode/scripts/package.json",
-			pattern: /"test": "bun test orch watch-pr check-plan\.test\.ts",\n\s*"typecheck": "tsc --project watch-pr\/tsconfig\.json[^"]*"/,
-			replacement: '"test": "bun test orch"',
+			pattern: /\n\s*"scripts": \{\n\s*"test": "bun test watch-pr check-plan\.test\.ts",\n\s*"typecheck": "tsc --project watch-pr\/tsconfig\.json[^"]*"\n\s*\},/,
+			replacement: "",
 		},
 		literal(
 			"opening-base-chained",
@@ -188,10 +189,10 @@ export const pr: Group = {
 			"skills/reflect/references/synthesizer.md",
 		),
 		literal(
-			"orchestrate-frontier-watch",
-			"The Cursor loop skill armed the frontier watcher; on OMP an async bash job and `wait` do it, with the same long heartbeat as fallback.",
-			"(arm it via the loop skill, with a long heartbeat fallback)",
-			`(arm it as an async \`bash\` job on the event, such as \`gh pr checks <pr> --watch\` or the OMP GitHub tool's \`run_watch\`, then \`wait\`, with a long \`sleep\` in an async \`bash\` job as the heartbeat fallback)`,
+			"orchestrate-pr-watch",
+			"PR and CI event subscriptions are a Cursor feature; on OMP an async `bash` job on the checks, drained with `wait`, is the event.",
+			"Watch each PR with PR and CI event subscriptions when your harness has them.",
+			"Watch each PR with an async `bash` job on its checks, such as `gh pr checks <pr> --watch` or the OMP GitHub tool's `run_watch`, and `wait` on it.",
 			"skills/poteto-mode/playbooks/orchestrate.md",
 		),
 		literal(
@@ -224,7 +225,7 @@ export const pr: Group = {
 			patterns: {
 				Graphite: /Graphite/,
 				gt: /`gt`/,
-				"/loop": /\/loop\b/,
+				"/loop": /(?<![\w.])\/loop(?![\w-])/,
 				Bugbot: /[Bb]ugbot/,
 				"watch-pr": /watch-pr/,
 			},

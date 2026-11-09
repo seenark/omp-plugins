@@ -6,7 +6,7 @@
 
 [pstack](https://github.com/cursor/plugins/tree/main/pstack) workflows for [oh-my-pi](https://github.com/can1357/oh-my-pi). pstack does nothing until you start it.
 
-Tracks Upstream pstack 0.15.25, Pinned Revision `f713f14203cd6420cec13cd7c55c32d598dbab68`. Vendored Content and its file list are recorded in `THIRD-PARTY-NOTICES.txt`.
+Tracks Upstream pstack 0.15.36, Pinned Revision `6b0300214a09fd6029cfb7077043125758cd1fd2`. Vendored Content and its file list are recorded in `THIRD-PARTY-NOTICES.txt`.
 
 ## Install
 
@@ -170,15 +170,15 @@ What each role is, when pstack uses it and what kind of model suits it (the text
 | `pstack-build` | Implements a scoped change end to end: edits, runs, and fixes its own failures. | Feature, fix and refactor steps that write code. | A strong coding model with reliable tool use; a mid-tier model is usually enough. |
 | `pstack-mechanical` | Applies fully specified mechanical edits: renames, codemods, formatting and bulk updates. | Steps where the change is already decided and only needs doing. | The cheapest model that follows instructions exactly. |
 | `pstack-design` | Proposes and critiques design: architecture, module boundaries, types and interfaces. | Architect and design steps, before code is written. | A model with strong design and visual judgment. |
-| `pstack-judge` | Merges the panel's verdicts into one decision and breaks ties. | The end of a panel review (interrogate, arena, swarm, architect) and final reviews. | Your strongest reasoning model. |
+| `pstack-judge` | Merges the panel's verdicts into one decision and breaks ties. | Merging panel critics' verdicts (how, swarm), synthesis in how, why and reflect, and final reviews. | Your strongest reasoning model. |
 | `pstack-security` | Reviews a change for security flaws. | Review steps that touch authentication, input handling, secrets or dependencies. | A strong reasoning model; a different vendor from your judge adds coverage. |
-| `pstack-panel-a` … `pstack-panel-e` | Panel seat A to E: an independent reviewer whose verdict is compared with the other seats. | Panel workflows (interrogate, arena, swarm, architect, how critics) dispatch every configured seat in parallel. | A distinct model per seat, ideally from different vendors. Leave a seat unset to drop it: an unset seat is skipped, not an error. |
+| `pstack-panel-a` … `pstack-panel-e` | Panel seat A to E: an independent model, served by a builder and a critic, that panel workflows compare with the other seats. | Panel workflows (interrogate, arena, swarm, architect, how critics) dispatch every configured seat in parallel. | A distinct model per seat, ideally from different vendors. Leave a seat unset to drop it: an unset seat is skipped, not an error. |
 
 Work-role agents list the pstack role, then the built-in role, so OMP skips an unset pstack role. OMP does not skip an unset single role: that child fails on its first prompt. pstack therefore blocks the spawn of an unset seat's agents with a reason telling the agent to skip that seat. A fallback to another model during a seat's run is stored as a `dev.codesook.pstack.dropout` session entry. A fallback that keeps the model (a thinking level, a provider route, the Fast tier) is not a dropout.
 
 ## Panel workflows
 
-`interrogate`, `arena`, `swarm`, `architect` and the critique step of `how` run on the configured seats. The session learns its seats from a hidden roster note: on activation, and when one of these skills is started outside a run. The note lists each seat that has a model, in seat order and capped by `maxPanelSize`, with its model and vendor (the models API's family token), and says so when every seat is one vendor. A panel of two or more vendors carries no vendor note in the roster or the merged verdict, not even a negated one. Critics return the structured verdict; their findings are deduplicated with `judge_batch`, then `pstack-judge` synthesizes. The helpers for the mechanical part are in `src/verdict.ts` (`duplicateCandidates`, `mergeVerdicts`, `reviewerLines`); the skills import them from an `eval` cell, and `skills/poteto-mode/references/panel-verdicts.md` is the procedure. The merged verdict names each seat's model and carries `diversity reduced: single vendor` when the seats that answered are one vendor. Arena builders run as isolated tasks, and arena asks the user to turn `task.isolation.apply` off first, so each candidate stays a patch or task branch to graft from.
+`interrogate`, `arena`, `swarm`, `architect` and the critique step of `how` run on the configured seats. The session learns its seats from a hidden roster note: on activation, and when one of these skills is started outside a run. The note lists each seat that has a model, in seat order and capped by `maxPanelSize`, with its model and vendor (the models API's family token), and says so when every seat is one vendor. A panel of two or more vendors carries no vendor note in the roster or the merged verdict, not even a negated one. Critics return the structured verdict; their findings are deduplicated with `judge_batch`, then `pstack-judge` synthesizes. The helpers for the mechanical part are in `src/verdict.ts` (`duplicateCandidates`, `mergeVerdicts`, `reviewerLines`); the skills import them from an `eval` cell, and `skills/poteto-mode/references/panel-verdicts.md` is the procedure. The merged verdict names each seat's model and carries `diversity reduced: single vendor` when the seats that answered are one vendor. Interrogate has no critics and no judge. Each seat's builder runs as an isolated adversary that tries to break the change, and the lead keeps only the findings a rerun of their command proves. Its report names every Dropout and carries the same single-vendor note. Arena builders run as isolated tasks, and arena asks the user to turn `task.isolation.apply` off first, so each candidate stays a patch or task branch to graft from. Arena's cross-judge is the critic of the first seat whose vendor differs from the session model's vendor, and arena skips the judge when no seat qualifies.
 
 ## Behavior Configuration
 
@@ -219,7 +219,7 @@ A stop continuation fires once per stop: it never answers a `stop_hook_active` t
 
 ## Vendored Content
 
-`skills/` and `agents/` are generated by `bun run sync` from Upstream at the Pinned Revision recorded in `upstream.json` and `THIRD-PARTY-NOTICES.txt`: every pstack skill except `make-bot-ui`, all playbooks and references, the `poteto-agent` and `comment-sicko` agents, and `deslop` from the cursor-team-kit component at the same pin. Do not edit these files by hand: sync overwrites them unless the path has a fork entry.
+`skills/` and `agents/` are generated by `bun run sync` from Upstream at the Pinned Revision recorded in `upstream.json` and `THIRD-PARTY-NOTICES.txt`: every pstack skill except `make-bot-ui`, all playbooks and references, the `poteto-agent` and `comment-sicko` agents, and `deslop` from the cursor-team-kit component at the same pin. `statechart` ships without Upstream's compiler test corpus. Do not edit these files by hand: sync overwrites them unless the path has a fork entry.
 
 ## Adaptations
 
@@ -228,7 +228,7 @@ Adaptations are code, in `src/sync/rules/`, one file per group:
 | File | Owns |
 | --- | --- |
 | `collisions.ts` | Skill renames (`tdd` to `pstack-tdd`, `teach` to `pstack-teach`); the engine moves the skill and derives the rules that rewrite references to it |
-| `core.ts` | Excluded parts (`make-bot-ui`; `automations` and `docs/guide` are never imported), the references they leave dangling, residual terms nobody owns |
+| `core.ts` | Excluded parts (`make-bot-ui`, the `statechart` test corpus; `automations` and `docs/guide` are never imported), the references they leave dangling, `ketchup-video`'s reply as a file path plus stills (OMP's chat cannot play video), residual terms nobody owns |
 | `panel.ts` | Forks for the multi-model skills (`interrogate`, `arena`, `swarm`, `architect`, `how`) and the `panel-verdicts.md` reference, all hand-edited; their reasons live in the file |
 | `guards.ts` | Upstream's `check-plan` script (Excluded; the todo guard replaces it) and the playbook text that called it |
 | `frontmatter.ts` | Skill frontmatter: principle skills get `hide: true`, Cursor's `icon` and `color` keys are stripped |
