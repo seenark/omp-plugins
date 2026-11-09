@@ -14,15 +14,11 @@ export const panel: Group = {
 	forks: [
 		patched(
 			"skills/interrogate/SKILL.md",
-			"Reviewers are the critics of the roster's panel seats. Their verdicts are merged as the panel-verdicts reference says (`judge_batch` dedupe, then a `pstack-judge` synthesis), and the verdict names every seat's model and carries the single-vendor note.",
-		),
-		patched(
-			"skills/interrogate/references/reviewer-prompt.md",
-			"A seat critic yields the structured verdict (`blocker`, `major`, `minor`, `nit`, with file, line, claim and evidence) instead of a prose findings list, so the merge can read it.",
+			"Adversaries are the builder agents of the roster's panel seats, one per seat, each run as an isolated `task` under arena's isolation checks that receives the scope's uncommitted changes. Upstream's `interrogate reviewers` line and `generalPurpose` map to the roster. With no seat configured the skill stops and points to `/pstack setup`. The report adds the single-vendor note and every named Dropout to Upstream's Intent, Findings and Dropped.",
 		),
 		patched(
 			"skills/arena/SKILL.md",
-			"Candidates are isolated builders of the roster's seats. OMP lands an isolated run in the checkout unless `task.isolation.apply` is off, so the skill checks it first and treats each captured patch or task branch as the candidate to compare and graft from.",
+			"Candidates are isolated builders of the roster's seats. OMP lands an isolated run in the checkout unless `task.isolation.apply` is off, so the skill checks it first and treats each captured patch or task branch as the candidate to compare and graft from. The cross-judge is the critic of the first roster seat whose vendor differs from the session model's vendor, and Phase C skips the judge when no seat qualifies.",
 		),
 		patched(
 			"skills/swarm/SKILL.md",

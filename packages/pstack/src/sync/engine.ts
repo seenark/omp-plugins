@@ -231,10 +231,16 @@ function build(upstream: Tree, config: Config): BuildResult {
 		if (text !== before) files.set(filePath, withText(file, text));
 	}
 
+	const idle = new Set(rules.filter((_, index) => original[index] === 0 && atTurn[index] === 0).map(rule => rule.id));
+	// A rename needs only one of its reference shapes to occur in Upstream; it is unused when none does.
+	const renameIdle = (id: string) => {
+		const prefix = id.slice(0, id.lastIndexOf("/") + 1);
+		return rules.every(rule => !rule.id.startsWith(prefix) || idle.has(rule.id));
+	};
 	return {
 		files,
 		shadowed: rules.filter((_, index) => original[index]! > 0 && atTurn[index] === 0).map(rule => rule.id),
-		unused: rules.filter((_, index) => original[index] === 0 && atTurn[index] === 0).map(rule => rule.id),
+		unused: [...idle].filter(id => !id.startsWith("rename/") || renameIdle(id)),
 	};
 }
 

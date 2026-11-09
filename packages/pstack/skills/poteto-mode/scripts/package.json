@@ -2,9 +2,6 @@
   "name": "@cursor-skill/poteto-mode-tools",
   "private": true,
   "type": "module",
-  "scripts": {
-    "test": "bun test orch"
-  },
   "dependencies": {
     "commander": "14.0.0"
   },

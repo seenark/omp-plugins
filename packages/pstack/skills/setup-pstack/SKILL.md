@@ -27,10 +27,14 @@ pstack's model choices live in the `pstack-*` model roles of the user's OMP conf
 | `pstack-design` | Proposing and critiquing designs | Falls back to `@designer` |
 | `pstack-judge` | Merging panel verdicts, judgment and prose | Falls back to `@slow` |
 | `pstack-security` | Security review | Falls back to `@slow` |
-| `pstack-panel-a` to `pstack-panel-e` | One independent reviewer per seat | The seat is absent and is skipped |
+| `pstack-panel-a` to `pstack-panel-e` | One independent model per seat, for panel builders and critics | The seat is absent and is skipped |
 
 A role the user never set changes nothing for the work roles, because each falls back to a built-in role. A panel seat has no fallback, so a panel runs only on the seats the user configured. `../poteto-mode/references/provider-dispatch.md` explains seats, dropouts and isolation.
 
 ## Offer a verification skill (optional)
 
 When setup is done, check whether the project has a way to drive the real app for proof (a `verify-*` skill, or an existing harness). If not, offer once: "want a project-local verification skill, so agents can drive the app the way a user does and prove changes work? I can generate one with /skill:create-verification-skill." On yes, invoke `/skill:create-verification-skill`. On no, move on without pushing.
+
+## Offer a formal verification skill (optional)
+
+Then check whether the project already has a formal verification skill (a Project Skill that runs a model checker, a proof, or another verifier against the code). If not, offer once: "want a formal verification skill, so agents can prove a key property of your code holds in every case in scope, not only the cases tests reach? I can generate one with /skill:create-formal-verification-skill." On yes, invoke `/skill:create-formal-verification-skill`. On no, move on without pushing.

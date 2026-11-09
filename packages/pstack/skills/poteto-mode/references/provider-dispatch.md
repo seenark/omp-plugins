@@ -29,7 +29,7 @@ A read-only lane cannot write, and that is a hard boundary. A write lane that mu
 
 ## Panel seats
 
-A panel is the set of configured seats. Panel workflows (interrogate, arena, swarm, architect, how critics) run every configured seat in parallel. A hidden roster note tells the session which seats those are, with each seat's model and vendor. `panel-verdicts.md` in this directory says how to read the roster, dispatch the critics and merge their verdicts.
+A panel is the set of configured seats. Panel workflows (interrogate, arena, swarm, architect, how critics) run every configured seat in parallel. Interrogate runs each seat's builder as an adversary, arena runs builders as candidates and takes its cross-judge from a critic, and swarm and how critics read through critics. A hidden roster note tells the session which seats those are, with each seat's model and vendor. `panel-verdicts.md` in this directory says how to read the roster, dispatch the critics and merge their verdicts.
 
 - There are five seats, `a` to `e`, with model roles `pstack-panel-a` to `pstack-panel-e`. A seat has no built-in fallback. A seat whose role is unset is absent: skip it, do not report an error.
 - Each seat has two agents. `pstack-panel-<seat>-critic` is read-only and returns a structured verdict: `approve`, `concerns` or `reject`, with findings that carry severity (`blocker`, `major`, `minor`, `nit`), file, line, claim and evidence. `pstack-panel-<seat>-builder` writes, and runs only with `isolated: true`.

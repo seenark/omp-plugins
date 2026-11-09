@@ -164,81 +164,25 @@ const rules: Rule[] = [
 		replacement: "Parse a long transcript in a read-only `pstack-explore` task",
 	},
 	{
-		id: "dispatch/playbook-orchestrate-task-tools",
-		reason: "Agents are spawned and drained through `task` and `wait`.",
+		id: "dispatch/playbook-orchestrate-spawn",
+		reason: "Workers are spawned with `task`, and their results are collected with `wait`.",
 		files: `${PLAYBOOKS}orchestrate.md`,
-		pattern: "only through the Task tool.",
-		replacement: "only through the `task` and `wait` tools.",
+		pattern: "Spawn workers with `Task`.",
+		replacement: "Spawn workers with the `task` tool and collect their results with `wait`.",
 	},
 	{
-		id: "dispatch/playbook-orchestrate-nesting",
-		reason: "Nesting depth is OMP's `task.maxRecursionDepth`, and a nested spawn carries `isolated` instead of `environment`.",
+		id: "dispatch/playbook-orchestrate-state",
+		reason: "OMP has no Project tracker or Project store; the program's state lives in a `local://` artifact, the shared artifact scheme.",
 		files: `${PLAYBOOKS}orchestrate.md`,
-		pattern: "(nesting works to depth 3, and a nested spawn has the full Task schema including `environment`)",
-		replacement: "(nesting is bounded by OMP's `task.maxRecursionDepth`, 2 by default, and a nested spawn has the full `task` schema including `isolated`)",
+		pattern: "Keep the program's state in the Project tracker (`notes.md`) and the Project store.",
+		replacement: "Keep the program's state in the tracker file `local://notes.md` and any other `local://` artifacts.",
 	},
 	{
 		id: "dispatch/playbook-orchestrate-worker-isolation",
-		reason: "Workers and verifiers defaulted to the cloud; they default to isolated background tasks.",
+		reason: "Workers defaulted to a new cloud VM; they default to isolated background tasks, each in its own worktree.",
 		files: `${PLAYBOOKS}orchestrate.md`,
-		pattern: 'Always `environment: "cloud"` unless the task needs this machine:',
-		replacement: "Always a background `task` with `isolated: true`, so each gets its own worktree. Run one without isolation only when it needs this machine's live state:",
-	},
-	{
-		id: "dispatch/playbook-orchestrate-local-store",
-		reason: "An isolated task cannot read the coordinator's local store, as a cloud agent could not.",
-		files: `${PLAYBOOKS}orchestrate.md`,
-		pattern: "Cloud agents cannot read the local store, so their briefs inline what they need or point at repo paths.",
-		replacement: "An isolated task cannot read this chat's local store, so its brief inlines what it needs or points at repo paths.",
-	},
-	{
-		id: "dispatch/playbook-orchestrate-verbatim",
-		reason: "Cloud spawns become isolated spawns.",
-		files: `${PLAYBOOKS}orchestrate.md`,
-		pattern: "Verbatim paste is for cloud spawns and every resume.",
-		replacement: "Verbatim paste is for isolated spawns and every resume.",
-	},
-	{
-		id: "dispatch/playbook-orchestrate-budget",
-		reason: "The cloud default and local exception list become the isolated default and the non-isolated exception list.",
-		files: `${PLAYBOOKS}orchestrate.md`,
-		pattern: "its spawn budget with the cloud default and the local exception list",
-		replacement: "its spawn budget with the isolated default and the non-isolated exception list",
-	},
-	{
-		id: "dispatch/playbook-orchestrate-rebase",
-		reason: "Chain rebases run in an isolated task, not in the coordinator's checkout.",
-		files: `${PLAYBOOKS}orchestrate.md`,
-		pattern: "Chain rebases run in cloud. A local rebase at this scale takes the laptop down.",
-		replacement: "Chain rebases run in an isolated task, so a rebase at this scale never touches the coordinator's checkout.",
-	},
-	{
-		id: "dispatch/playbook-orchestrate-externalize",
-		reason: "Work that lives only in one isolated worktree is lost when the session ends.",
-		files: `${PLAYBOOKS}orchestrate.md`,
-		pattern: "Work that exists only on one VM when that VM dies was never done.",
-		replacement: "Work that exists only in one isolated worktree when the session ends was never done.",
-	},
-	{
-		id: "dispatch/playbook-orchestrate-probe",
-		reason: "There is no cloud dashboard; a task is probed through its entry under `history://`.",
-		files: `${PLAYBOOKS}orchestrate.md`,
-		pattern: "the cloud agent's status in the Cursor dashboard.",
-		replacement: "the task's entry under `history://`.",
-	},
-	{
-		id: "dispatch/playbook-orchestrate-restart",
-		reason: "After an OMP restart every running task is dead; only pushed branches and PRs survive.",
-		files: `${PLAYBOOKS}orchestrate.md`,
-		pattern: "After a Cursor restart: local agents are dead, cloud work is not.",
-		replacement: "After an OMP restart: running tasks are dead, pushed branches and PRs are not.",
-	},
-	{
-		id: "dispatch/playbook-orchestrate-reattach",
-		reason: "Work is reattached by PR and branch, not by cloud agent.",
-		files: `${PLAYBOOKS}orchestrate.md`,
-		pattern: "reattach cloud work by PR and branch rather than agent id",
-		replacement: "reattach work by PR and branch rather than agent id",
+		pattern: 'Run workers on a new cloud VM (`environment: "cloud"`) unless the work needs this machine:',
+		replacement: "Run each worker as a background `task` with `isolated: true`, so it gets its own worktree, unless the work needs this machine's live state:",
 	},
 	{
 		id: "dispatch/playbook-pause-restart",
@@ -268,23 +212,11 @@ const rules: Rule[] = [
 	{
 		id: "dispatch/interrogate-reviewers",
 		reason:
-			"Interrogate's reviewers are the critics of the configured panel seats, not Cursor models from a rule file. Unset seats are absent and diversity is stated.",
+			"Interrogate's adversaries are the builder agents of the configured panel seats, each in an isolated worktree, not `generalPurpose` models from a rule file. Unset seats are absent and diversity is stated.",
 		files: "skills/interrogate/SKILL.md",
-		pattern: span(
-			"Launch all reviewers in a single message",
-			"Never treat an alias entry as a rejected slug or apply either fallback to it.",
-		),
-		replacement: `Launch all reviewers in a single \`task\` call, one critic per configured panel seat (see \`${REF_FROM_SKILL}\`), labeled Reviewer A for seat A, Reviewer B for seat B, and so on. A seat with no model is skipped, not an error. At most \`maxPanelSize\` seats run, and never more than five. With no seat configured, stop and tell the user to run \`/pstack setup\`.
-
-| Subagent | Agent |
-|----------|-------|
-| Reviewer A | \`pstack-panel-a-critic\` |
-| Reviewer B | \`pstack-panel-b-critic\` |
-| Reviewer C | \`pstack-panel-c-critic\` |
-| Reviewer D | \`pstack-panel-d-critic\` |
-| Reviewer E | \`pstack-panel-e-critic\` |
-
-Each critic is read-only and returns a structured verdict with findings. Report any seat whose run fell back to another model as a dropout. When every seat that ran resolves to one vendor, the verdict states \`diversity reduced: single vendor\`.`,
+		pattern: line("Run Phase A steps 3 and 4 and Phase B of the **arena** skill"),
+		replacement:
+			"Run Phase A steps 3 and 4 and Phase B of the **arena** skill, with these changes. Send one adversary per seat on the roster, the hidden note of configured panel seats, already capped by `maxPanelSize`. Each adversary is that seat's builder agent, `pstack-panel-<seat>-builder`, so it runs on its seat's model. Run each seat once and never repeat a seat. An unset seat is absent, not an error. With no seat configured, stop and tell the user to run `/pstack setup`. Run every adversary as an isolated `task` under the isolation checks of arena Phase A step 4, including the `task.isolation.apply` check, and do not fan out until they pass. Copy the scope's uncommitted changes into each worktree. In place of the arena task and rationale, give each adversary the scope, the intent, and this brief:",
 	},
 	{
 		id: "dispatch/arena-runners",
@@ -302,10 +234,12 @@ Each critic is read-only and returns a structured verdict with findings. Report 
 	},
 	{
 		id: "dispatch/arena-cross-judge",
-		reason: "The cross-judge is the `pstack-judge` lane, which is read-only, instead of a model picked from a pool.",
+		reason:
+			"The cross-judge is the critic agent of a roster seat whose vendor differs from the session model's vendor, and the judge is skipped when no seat qualifies, instead of a model picked from a pool by family prefix.",
 		files: "skills/arena/SKILL.md",
-		pattern: span("After all Phase B candidates complete, choose one model", "Spawn one readonly judge subagent on that model."),
-		replacement: "After all Phase B candidates complete, spawn one `pstack-judge` lane as the cross-judge. It is read-only.",
+		pattern: line("After all Phase B candidates complete, choose one model"),
+		replacement:
+			"After all Phase B candidates complete, pick the cross-judge from the roster. It is `pstack-panel-<seat>-critic` of the first roster seat, in roster order, whose vendor differs from the vendor of the model this session runs on. A seat of the session model's vendor never judges. If no roster seat has another vendor, or you do not know the session model's vendor, skip the judge, pick the base alone in Phase D, and say so. Spawn the judge as a read-only `task`. It sees the rubric and the candidates by path label (the patch path or branch of each), scores each criterion, and recommends a base with rationale. It runs in parallel with your reading in Phase D. Don't spawn it while candidates are still writing.",
 	},
 	{
 		id: "dispatch/architect-runners",
@@ -423,17 +357,17 @@ Each critic is read-only and returns a structured verdict with findings. Report 
 	},
 	{
 		id: "dispatch/swarm-worker-lane",
-		reason: "Swarm workers are `pstack-build` or `pstack-explore` lanes, not a model from a rule file.",
+		reason: "Swarm workers are `pstack-build` or `pstack-explore` lanes, or the roster's panel-seat agents for a model race, not a model from a rule file.",
 		files: "skills/swarm/SKILL.md",
-		pattern: line("4. Pick the worker model from the `swarm workers` line"),
-		replacement: `4. Pick the worker lane: \`pstack-build\` when a worker writes or runs commands, \`pstack-explore\` when it only reads. Workers on one lane share one model, so race different panel seats' builders (\`pstack-panel-<seat>-builder\`) when a model race is the point, and name each arm's agent up front (see \`${REF_FROM_SKILL}\`). Pick each subagent's lane and \`effort\` for the job, per the Subagents section of the **poteto-mode** skill.`,
+		pattern: line("3. Pick the worker model from the `swarm workers` line"),
+		replacement: `3. Pick the worker lane: \`pstack-build\` when a worker writes or runs commands, \`pstack-explore\` when it only reads. Workers on one lane share one model, so race the roster's seats when a model race is the point: \`pstack-panel-<seat>-builder\` for writing arms, \`pstack-panel-<seat>-critic\` for read-only arms that return a structured verdict. The roster is the hidden note of configured panel seats, already capped by \`maxPanelSize\` (see \`${REF_FROM_SKILL.replace("provider-dispatch", "panel-verdicts")}\`). An unset seat is absent, not an error. For a model race, name each arm's agent and seat model up front (see \`${REF_FROM_SKILL}\`). Pick each subagent's lane and \`effort\` for the job, per the Subagents section of the **poteto-mode** skill.`,
 	},
 	{
 		id: "dispatch/swarm-fan-out",
 		reason: "Swarm workers were Cursor cloud agents; they are isolated background tasks.",
 		files: "skills/swarm/SKILL.md",
 		pattern: line("Spawn all N workers in one message with `subagent_type: generalPurpose`"),
-		replacement: `Spawn all N workers in one \`task\` call, each with \`agent\` set to the step 4 lane and \`isolated: true\`, so each runs as a background task in its own worktree. Run a worker without isolation only when it needs state that lives in this checkout, such as uncommitted files or a service running here. If the \`task\` schema has no \`isolated\` field, isolation is off: read the Isolation section of \`${REF_FROM_SKILL}\` and do not fan out writers.`,
+		replacement: `Spawn all N workers in one \`task\` call, each with \`agent\` set to the step 3 lane and \`isolated: true\`, so each runs as a background task in its own worktree. Run a worker without isolation only when it needs state that lives in this checkout, such as uncommitted files or a service running here. If the \`task\` schema has no \`isolated\` field, isolation is off: read the Isolation section of \`${REF_FROM_SKILL}\` and do not fan out writers.`,
 	},
 	{
 		id: "dispatch/swarm-base-branch",
@@ -512,11 +446,12 @@ Each critic is read-only and returns a structured verdict with findings. Report 
 	},
 	{
 		id: "dispatch/help-built-for",
-		reason: "pstack on OMP is built for OMP's `task` lanes, not for Cursor.",
+		reason:
+			"pstack on OMP is built for OMP's `task` lanes, not for Cursor. Upstream's Claude Code install steps and adapter link are dropped, because the package installs only as an OMP package.",
 		files: "skills/poteto-help/SKILL.md",
-		pattern: line("pstack is built for Cursor."),
+		pattern: span("pstack is built for Cursor, and it also installs in Claude Code", "so those parts may not work there."),
 		replacement:
-			"pstack is built for OMP. Its skills use the Agent Skills format, so other tools can read them. But the workflow skills, including `/poteto-mode`, `/how`, `/why`, and `/pstack-teach`, spawn OMP `task` subagents on `pstack-*` model roles, so those parts may not work elsewhere.",
+			"pstack is built for OMP's `task` lanes. Its workflow skills, including `/poteto-mode`, `/how`, `/why`, and `/pstack-teach`, spawn OMP `task` subagents on `pstack-*` model roles.\n\nOther tools can read the skills, because they use the Agent Skills format. But the parts that spawn `task` subagents on those roles may not work there.",
 	},
 	{
 		id: "dispatch/help-stays-on",
@@ -632,7 +567,7 @@ export const dispatch: Group = {
 			path: "skills/setup-pstack/SKILL.md",
 			kind: "rewritten",
 			reason:
-				"Upstream writes a Cursor rules file of model slugs. On OMP the `/pstack setup` command writes the `pstack-*` model roles. The skill is kept so that asking an agent to configure pstack models points at the command, and every reference to `setup-pstack` still resolves.",
+				"Upstream writes a Cursor rules file of model slugs. On OMP the `/pstack setup` command writes the `pstack-*` model roles. The skill is kept so that asking an agent to configure pstack models points at the command, and every reference to `setup-pstack` still resolves. It keeps Upstream's closing offers of a verification skill and a formal verification skill.",
 			since: "0.15.25",
 		},
 	],

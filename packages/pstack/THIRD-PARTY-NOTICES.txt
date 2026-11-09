@@ -5,9 +5,9 @@ Third-party notices for @codesook/omp-pstack
 pstack (Upstream)
 ======================================================================
 
-Upstream: cursor/plugins, pstack component (pstack 0.15.25, author Lauren Tan)
-Pinned Revision: f713f14203cd6420cec13cd7c55c32d598dbab68
-URL: https://github.com/cursor/plugins/tree/f713f14203cd6420cec13cd7c55c32d598dbab68/pstack
+Upstream: cursor/plugins, pstack component (pstack 0.15.36, author Lauren Tan)
+Pinned Revision: 6b0300214a09fd6029cfb7077043125758cd1fd2
+URL: https://github.com/cursor/plugins/tree/6b0300214a09fd6029cfb7077043125758cd1fd2/pstack
 deslop: cursor-team-kit component of the same repository, at the same Pinned Revision.
 
 Vendored Content, adapted by src/sync (Adaptations are listed in README.md):
@@ -17,6 +17,7 @@ Vendored Content, adapted by src/sync (Adaptations are listed in README.md):
 
 Excluded from Vendored Content:
   skills/make-bot-ui/**
+  skills/statechart/scripts/test/**
   skills/poteto-mode/scripts/watch-pr/**
   skills/poteto-mode/scripts/check-plan.{mjs,test.ts}
   (every other Upstream path, including pstack/automations, pstack/docs, thermos and

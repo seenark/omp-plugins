@@ -45,7 +45,8 @@ const FILE_OF: Record<string, string> = {
 
 /** Upstream text a rule must apply to. A literal rule applies to its own pattern; a regex rule needs a sample. */
 const SAMPLE_OF: Record<string, string> = {
-	"pr/scripts-package": '{\n  "scripts": {\n    "test": "bun test orch watch-pr check-plan.test.ts",\n    "typecheck": "tsc --project watch-pr/tsconfig.json --noEmit --strict"\n  }\n}\n',
+	"pr/scripts-package":
+		'{\n  "type": "module",\n  "scripts": {\n    "test": "bun test watch-pr check-plan.test.ts",\n    "typecheck": "tsc --project watch-pr/tsconfig.json --noEmit --strict"\n  },\n  "dependencies": {}\n}\n',
 	"pr/drop-graphite-requirement": "Stay on `gh`. Never require Graphite (`gt`). Record it. Never require `gt`.\n",
 	"pr/shipping-watch-run":
 		"On GitHub, watch the run with the queued watcher from `playbooks/babysit.md` (`scripts/watch-pr/watch-pr --queued-stack --stack-prs <bottom-to-top>`) under `/loop` until it reports `COMPLETE` at the ceiling.\n",
@@ -112,6 +113,11 @@ describe("PR term scan", () => {
 
 	it("does not flag the shell test operator or a quoted forge name in code", () => {
 		expect(names('[ "$age" -gt 0 ] && forge "gt" && gt-free')).toEqual([]);
+	});
+
+	it("does not flag a module path that merely contains loop", () => {
+		expect(names('import { loopCheck } from "./passes/loop-check.ts";')).toEqual([]);
+		expect(names("Drive it with `/loop` or /loop 1h, or /loop.")).toEqual(["/loop"]);
 	});
 });
 
