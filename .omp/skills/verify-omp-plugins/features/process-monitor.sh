@@ -68,10 +68,10 @@ step "overlay opens"
 shot overlay
 pass
 
-step "stand-in listed as leftover"
-"$OMP_PTY" wait "$PTY" "$D .*⚠ leftover\$"
+step "stand-in listed as a Stop Candidate"
+"$OMP_PTY" wait "$PTY" "$D .*⚠ stop\\?\$"
 screen_has "$D +:$DPORT " # the row names the listening port
-shot leftover
+shot stop-candidate
 pass
 
 step "unknown-origin row is view-only"
@@ -88,14 +88,14 @@ step "overlay closes"
 "$OMP_PTY" wait "$PTY" 'OMP processes' --absent
 pass
 
-step "status segment counts leftover ports"
+step "status segment counts Stop Candidate ports"
 "$OMP_PTY" wait "$PTY" '⚠ \d+ ports' --timeout 45
 shot segment
 pass
 
 step "stop is confirmed and kills the stand-in"
 "$OMP_PTY" submit "$PTY" "/procs"
-"$OMP_PTY" wait "$PTY" "$D .*⚠ leftover\$"
+"$OMP_PTY" wait "$PTY" "$D .*⚠ stop\\?\$"
 "$OMP_PTY" scroll-until "$PTY" "^› +$D " --max 80
 "$OMP_PTY" key "$PTY" bspace
 "$OMP_PTY" wait "$PTY" "Stop pid $D\\?"
@@ -104,20 +104,20 @@ shot confirm
 "$OMP_PTY" key "$PTY" enter # Yes is the default row
 "$OMP_PTY" wait "$PTY" "Stop pid $D\\?" --absent
 gone "$D"
-"$OMP_PTY" wait "$PTY" "$D .*⚠ leftover\$" --absent # the refreshed list dropped the row
+"$OMP_PTY" wait "$PTY" "$D .*⚠ stop\\?\$" --absent # the refreshed list dropped the row
 shot stopped
 pass
 
 step "declined stop leaves the process"
 start_standin "OMP_PLUGINS_SESSION=$TAG"; D2=$STANDIN_PID
 "$OMP_PTY" submit "$PTY" "/procs"
-"$OMP_PTY" wait "$PTY" "$D2 .*⚠ leftover\$"
+"$OMP_PTY" wait "$PTY" "$D2 .*⚠ stop\\?\$"
 "$OMP_PTY" scroll-until "$PTY" "^› +$D2 " --max 80
 "$OMP_PTY" key "$PTY" bspace
 "$OMP_PTY" wait "$PTY" "Stop pid $D2\\?"
 "$OMP_PTY" key "$PTY" down enter # No
 "$OMP_PTY" wait "$PTY" "Stop pid $D2\\?" --absent
-"$OMP_PTY" wait "$PTY" "$D2 .*⚠ leftover\$"
+"$OMP_PTY" wait "$PTY" "$D2 .*⚠ stop\\?\$"
 alive "$D2"
 shot declined
 "$OMP_PTY" key "$PTY" esc

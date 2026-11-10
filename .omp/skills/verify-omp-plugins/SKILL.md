@@ -86,7 +86,7 @@ A failed `wait` prints the full screen and exits 1. Treat that as a failed step.
 Stable handles on screen:
 
 - **Editor box:** `╔══ π > ⬢ no-model > 🗑 omp-verify/<run>/project > ⑂ main …`, then `║` rows, then `╚═…`.
-- **Status line:** the row under `╚`. Segments show with the default config: `○ 🐴⚡ ponytail` (the Mode Level shows only through its glyph; absent when off), a caveman spinner plus mode name (`caveman`, `ultracave` or `megacave`; gone when off), `⏹ Headroom not running` or `⦸ Headroom off`, and `✂ rtk 0 saved · 0 cmds`. A `⚠ N ports` segment can show on a fresh launch: process-monitor sees the whole machine, so leftover processes from the user's real omp sessions count.
+- **Status line:** the row under `╚`. Segments show with the default config: `○ 🐴⚡ ponytail` (the Mode Level shows only through its glyph; absent when off), a caveman spinner plus mode name (`caveman`, `ultracave` or `megacave`; gone when off), `⏹ Headroom not running` or `⦸ Headroom off`, and `✂ rtk 0 saved · 0 cmds`. A `⚠ N ports` segment can show on a fresh launch: process-monitor sees the whole machine, so Stop Candidates from the user's real omp sessions that hold a port count.
 - **Notifications:** single lines above the editor, for example `Caveman ultracave.`, `Ponytail mode set to ultra.` or `Error: Unknown Caveman command: …`.
 - **Dialogs:** a title line plus `Enter/Esc close` (status views), or a `╭─ Title ─╮` select box with `❯` on the highlighted row and `↑/↓ navigate  ⏎ select  ⎋ cancel`.
 
