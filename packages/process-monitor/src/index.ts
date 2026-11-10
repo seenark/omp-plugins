@@ -5,7 +5,8 @@ import { CODESOOK_OMP_CONFIG_CHANGED, isRecord } from "@codesook/omp-shared-disp
 import { collectSnapshot, killProcess, type Exec } from "./collect.ts";
 import { loadProcessMonitorDisplay, normalizeProcessMonitorDisplay, renderSegment } from "./display.ts";
 import { clearEndedSessions, endedSessionsDir, readEndedSessions, recordEndedSession } from "./ended-sessions.ts";
-import { isKillable, leftoverPortCount, withSessionMarker, type Snapshot, type TrackedProcess } from "./snapshot.ts";
+import { createSessionReader } from "./session-files.ts";
+import { isKept, isKillable, isStopCandidate, stopCandidatePortCount, withSessionMarker, type Snapshot, type TrackedProcess } from "./snapshot.ts";
 import { DEFAULT_ROW_WIDTH, formatRow, formatSnapshotText, procsOverlay, type ProcsChoice, type ViewState } from "./view.ts";
 
 export const REFRESH_MS = 30_000;
@@ -34,7 +35,7 @@ const defaultTimers: Timers = {
 	clearInterval: handle => clearInterval(handle as NodeJS.Timeout),
 };
 
-const describe = (process: TrackedProcess): string => `  ${formatRow(process, undefined, DEFAULT_ROW_WIDTH - 2)}`;
+const describe = (process: TrackedProcess, sessions: Snapshot["sessions"]): string => `  ${formatRow(process, sessions, undefined, DEFAULT_ROW_WIDTH - 2)}`;
 
 /** Lists processes OMP started, tags bash commands with their Agent Session, and publishes the leftover-port count. */
 export default function processMonitorExtension(pi: ExtensionAPI, options: ProcessMonitorOptions = {}): void {
@@ -43,6 +44,7 @@ export default function processMonitorExtension(pi: ExtensionAPI, options: Proce
 	const timers = options.timers ?? defaultTimers;
 	const endedDir = endedSessionsDir(homeDir);
 	const exec: Exec = (command, args, execOptions) => pi.exec(command, args, execOptions);
+	const readSessions = createSessionReader(homeDir);
 
 	let display = loadProcessMonitorDisplay(options.configPath);
 	let publisher: SharedDisplayPublisher | undefined;
@@ -50,18 +52,18 @@ export default function processMonitorExtension(pi: ExtensionAPI, options: Proce
 	let timer: unknown;
 	let activeContext: ExtensionContext | undefined;
 	let session: string | undefined;
-	let leftoverPorts = 0;
+	let stopCandidatePorts = 0;
 	let refreshing = false;
 
 	const publish = (): void => {
-		const sequence = renderSegment(leftoverPorts, display);
+		const sequence = renderSegment(stopCandidatePorts, display);
 		publisher?.publish(sequence);
 		activeContext?.ui.setStatus(STATUS_KEY, publisher?.hostAvailable ? undefined : sequence?.frames[0]?.[0]);
 	};
 	const inspect = async (ctx: ExtensionContext): Promise<Snapshot> => {
-		const snapshot = await collectSnapshot(exec, { platform, homeDir, currentSession: ctx.sessionManager.getSessionId(), currentProject: ctx.cwd });
+		const snapshot = await collectSnapshot(exec, { platform, homeDir, currentSession: ctx.sessionManager.getSessionId(), currentProject: ctx.cwd, readSessions });
 		if (publisher) {
-			leftoverPorts = leftoverPortCount(snapshot.processes);
+			stopCandidatePorts = stopCandidatePortCount(snapshot.processes);
 			publish();
 		}
 		return snapshot;
@@ -86,11 +88,11 @@ export default function processMonitorExtension(pi: ExtensionAPI, options: Proce
 	const announceEndedSessions = (ctx: ExtensionContext, snapshot: Snapshot): void => {
 		const recorded = readEndedSessions(endedDir);
 		if (recorded.length === 0) return;
-		const rows = snapshot.processes.filter(process => isKillable(process) && process.session !== undefined && recorded.includes(process.session));
+		const rows = snapshot.processes.filter(process => isStopCandidate(process) && process.session !== undefined && recorded.includes(process.session));
 		clearEndedSessions(endedDir, recorded);
 		if (rows.length === 0) return;
 		ctx.ui.notify(
-			[`${rows.length} process${rows.length === 1 ? "" : "es"} started by an earlier OMP session ${rows.length === 1 ? "is" : "are"} still running:`, ...rows.map(describe), "Run /procs to review or stop them."].join("\n"),
+			[`${rows.length} process${rows.length === 1 ? "" : "es"} started by an earlier OMP session ${rows.length === 1 ? "is" : "are"} still running:`, ...rows.map(row => describe(row, snapshot.sessions)), "Run /procs to review or stop them."].join("\n"),
 			"warning",
 		);
 	};
@@ -105,18 +107,19 @@ export default function processMonitorExtension(pi: ExtensionAPI, options: Proce
 		display = loadProcessMonitorDisplay(options.configPath);
 		activeContext = ctx;
 		session = ctx.sessionManager.getSessionId();
-		leftoverPorts = 0;
+		stopCandidatePorts = 0;
 		timer = timers.setInterval(() => {
 			if (activeContext?.isIdle()) void refresh(activeContext);
 		}, REFRESH_MS);
 		void refresh(ctx).then(snapshot => snapshot && announceEndedSessions(ctx, snapshot));
 	};
 
-	/** The process may outlive its owner's confirmation, so the target is re-checked just before the signal. */
+	/** The process may outlive its owner's confirmation, so a target is compared with a fresh listing just before the signal. */
+	const staleReason = (current: TrackedProcess | undefined, target: TrackedProcess): string | undefined =>
+		!current || current.command !== target.command || !isKillable(current) ? `pid ${target.pid} is gone or no longer the same process; nothing was stopped.` : undefined;
 	const stop = async (ctx: ExtensionContext, target: TrackedProcess): Promise<string | undefined> => {
-		const current = (await inspect(ctx)).processes.find(process => process.pid === target.pid);
-		if (!current || current.command !== target.command || !isKillable(current)) return `pid ${target.pid} is gone or no longer the same process; nothing was stopped.`;
-		return killProcess(exec, target.pid);
+		const stale = staleReason((await inspect(ctx)).processes.find(process => process.pid === target.pid), target);
+		return stale ?? killProcess(exec, target.pid);
 	};
 	const settle = async (): Promise<void> => {
 		const ms = options.settleMs ?? 300;
@@ -133,15 +136,28 @@ export default function processMonitorExtension(pi: ExtensionAPI, options: Proce
 		} catch {
 			return;
 		}
-		const rows = snapshot.processes.filter(process => process.session === previous && isKillable(process));
+		const rows = snapshot.processes.filter(process => process.session === previous && isKillable(process) && !isKept(process));
 		if (rows.length === 0) return;
 		const choice = await ctx.ui.select(
-			[`The previous session left ${rows.length} process${rows.length === 1 ? "" : "es"} running:`, ...rows.map(describe)].join("\n"),
+			[`The previous session left ${rows.length} process${rows.length === 1 ? "" : "es"} running:`, ...rows.map(row => describe(row, snapshot.sessions))].join("\n"),
 			["Close all", "Keep"],
 		);
 		if (choice !== "Close all") return;
+		let fresh: Snapshot;
+		try {
+			fresh = await inspect(ctx);
+		} catch (error) {
+			ctx.ui.notify(`Could not re-check the processes; nothing was stopped: ${error instanceof Error ? error.message : String(error)}`, "error");
+			return;
+		}
 		const failures: string[] = [];
 		for (const row of rows) {
+			const current = fresh.processes.find(process => process.pid === row.pid);
+			const stale = staleReason(current, row) ?? (current && isKept(current) ? `pid ${row.pid} is now a kept process; nothing was stopped.` : undefined);
+			if (stale) {
+				failures.push(stale);
+				continue;
+			}
 			const failure = await killProcess(exec, row.pid);
 			if (failure) failures.push(`pid ${row.pid}: ${failure}`);
 		}
@@ -172,7 +188,7 @@ export default function processMonitorExtension(pi: ExtensionAPI, options: Proce
 			if (!target) return;
 			const confirmed = await ctx.ui.confirm(
 				`Stop pid ${target.pid}?`,
-				[`Send SIGTERM to pid ${target.pid}.`, `Command: ${target.command}`, `Ports: ${target.ports.length > 0 ? target.ports.join(", ") : "none"}`].join("\n"),
+				[`Send SIGTERM to pid ${target.pid}.`, `Command: ${target.displayCommand}`, `Ports: ${target.ports.length > 0 ? target.ports.join(", ") : "none"}`].join("\n"),
 			);
 			state.notice = undefined;
 			if (confirmed) {

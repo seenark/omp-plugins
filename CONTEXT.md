@@ -234,6 +234,14 @@ _Avoid_: Clear, wipe, delete stats
 A process started on behalf of an Agent Session that is still running after that Agent Session has ended.
 _Avoid_: Orphan, zombie, stale server
 
+**Kept Process**:
+A Leftover Process that the user or agent explicitly asked to keep running after its Agent Session ends.
+_Avoid_: Pinned process, persistent process
+
+**Stop Candidate**:
+A Leftover Process that OMP can prove it started and that nobody asked to keep, so it is suggested for stopping. A suggestion only, never a guarantee that stopping it is harmless.
+_Avoid_: Safe to kill, orphan, zombie
+
 ### Vendoring
 
 **Upstream**:

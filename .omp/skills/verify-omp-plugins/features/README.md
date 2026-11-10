@@ -46,7 +46,7 @@ Keep implementation details out of the map. Name only user paths, stable on-scre
 - [Headroom](./headroom.md): `/headroom` menu, status, health, stats, token cancel, on and off against a missing proxy, usage, and the segment.
 - [Skill stats](./skill-stats.md): `/skill-stats` dashboards, recording a Ponytail helper use, reset, import, and the Git-ignored project store.
 - [pstack](./pstack.md): `/pstack` status and doctor.
-- [Process monitor](./process-monitor.md): `/procs` overlay, leftover rows, view-only unknown rows, confirmed stop, and the `⚠ N ports` segment, driven with a tagged stand-in process.
+- [Process monitor](./process-monitor.md): `/procs` overlay with its header row, `⚠ stop?` and `📌 kept` badges and detail pane, view-only unknown rows, confirmed stop, and the `⚠ N ports` segment that counts Stop Candidates holding a port, driven with a tagged stand-in process.
 - [Beads](./beads.md): the Beads segment counts, `/beads tasks` live overlay, the menu entry, empty and error states, and live refresh from another terminal.
 
 Skill stats, Process monitor and Beads also ship a journey script, `features/<name>.sh RUN_ID`, that drives the recipe's main path against a launched run and prints `PASS`/`FAIL` per step. Steps the feature file marks as outside the journey are driven by hand.

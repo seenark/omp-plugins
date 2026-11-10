@@ -1,5 +1,6 @@
 import * as path from "node:path";
-import { buildSnapshot, type Snapshot } from "./snapshot.ts";
+import type { SessionReader } from "./session-files.ts";
+import { buildSnapshot, type Snapshot, type SnapshotInputs } from "./snapshot.ts";
 
 export type ExecResult = { code: number; stdout: string; stderr: string };
 export type Exec = (command: string, args: string[], options?: { timeout?: number }) => Promise<ExecResult>;
@@ -9,6 +10,7 @@ export type CollectEnvironment = {
 	homeDir: string;
 	currentSession?: string;
 	currentProject: string;
+	readSessions: SessionReader;
 };
 
 const TIMEOUT = 10_000;
@@ -30,7 +32,7 @@ export async function collectSnapshot(exec: Exec, environment: CollectEnvironmen
 	const locksDir = path.join(environment.homeDir, ".omp", "run", "session-owners");
 	const [ompPs, processTable, environTable, listeners, cwds, lockFiles, heldLocks] = await Promise.all([
 		read(exec, "omp", ["ps", "--all", "--json"]),
-		read(exec, ps, ["-axww", "-o", "pid=,ppid=,command="]),
+		read(exec, ps, ["-axww", "-o", "pid=,ppid=,etime=,command="]),
 		// Only macOS prints a process environment in one `ps` call; the marker is the only value read from it.
 		darwin ? read(exec, ps, ["-axwwE", "-o", "pid=,command="]) : undefined,
 		read(exec, "lsof", ["-nP", "-iTCP", "-sTCP:LISTEN", "-F", "pcn"], true),
@@ -40,7 +42,7 @@ export async function collectSnapshot(exec: Exec, environment: CollectEnvironmen
 		read(exec, "lsof", ["-nP", "-F", "pn", "+d", locksDir], true),
 	]);
 	if (processTable === undefined) throw new Error("The process table could not be read (ps failed).");
-	return buildSnapshot({
+	const inputs: SnapshotInputs = {
 		processTable,
 		ompPs,
 		environTable,
@@ -50,7 +52,10 @@ export async function collectSnapshot(exec: Exec, environment: CollectEnvironmen
 		heldLocks,
 		currentSession: environment.currentSession,
 		currentProject: environment.currentProject,
-	});
+	};
+	// Which sessions to look up is only known once the processes are attributed; the build is pure and cheap, so it runs again with the session files in.
+	const sessionIds = new Set(buildSnapshot(inputs).processes.flatMap(process => (process.session === undefined ? [] : [process.session])));
+	return buildSnapshot({ ...inputs, sessions: environment.readSessions([...sessionIds]) });
 }
 
 /** One numeric PID, never a name. Returns the failure text, or undefined when the signal was delivered. */
