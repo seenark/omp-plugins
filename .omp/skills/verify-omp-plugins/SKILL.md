@@ -26,7 +26,7 @@ eval "$(.omp/skills/verify-omp-plugins/scripts/verify-omp env r1)" # exports RUN
 
 What `launch` does, from an empty directory, in about 7 s:
 
-1. Creates `/tmp/omp-verify/r1/{home,project}` and writes `home/.omp/agent/config.yml` with `setupVersion: 2`. Without that line, omp opens its first-run onboarding wizard instead of the editor.
+1. Creates `/tmp/omp-verify/r1/{home,project}` and writes `home/.omp/agent/config.yml` with `setupVersion: 3`. Without that line, omp opens its first-run onboarding wizard instead of the editor. A newer omp that adds a setup scene raises the version again: doctor then fails `screen past onboarding`, and the number here must follow.
 2. Runs `git init` in `project/`, which is the cwd omp starts in.
 3. With `HOME=/tmp/omp-verify/r1/home`, runs the documented developer install (`docs/agents/setup.md` Phase 6):
    - `omp plugin link <repo>`
