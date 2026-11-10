@@ -48,7 +48,7 @@ launch)
 	if [[ -S "$PTY/ctl.sock" ]]; then echo "verify-omp: $run_id already running; run doctor or cleanup" >&2; exit 1; fi
 	command -v omp >/dev/null && command -v uv >/dev/null || { echo "verify-omp: need omp and uv on PATH" >&2; exit 1; }
 	mkdir -p "$SCRATCH_HOME/.omp/agent" "$PROJECT" "$EVID"
-	printf 'setupVersion: 2\n' >"$SCRATCH_HOME/.omp/agent/config.yml" # skips the first-run onboarding wizard
+	printf 'setupVersion: 3\n' >"$SCRATCH_HOME/.omp/agent/config.yml" # skips the first-run onboarding wizard; omp 18.18 added an update scene at version 3
 	git -C "$PROJECT" init -q
 	scratch omp plugin link "$REPO" >/dev/null
 	# --enable replaces the feature set; name every root feature or the defaults (headroom, prompt-border-style) drop out.
