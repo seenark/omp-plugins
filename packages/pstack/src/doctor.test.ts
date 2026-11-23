@@ -232,6 +232,6 @@ describe("workflowCalledSkills", () => {
 
 	it("covers the vendored workflows", () => {
 		const called = workflowCalledSkills(path.dirname(DEFAULT_POTETO_DIRECTORY));
-		for (const name of ["poteto-mode", "pstack-tdd", "interrogate", "arena", "swarm", "architect", "how", "why"]) expect(called).toContain(name);
+		for (const name of ["poteto-mode", "pstack-tdd", "interrogate", "arena", "swarm", "architect", "why"]) expect(called).toContain(name);
 	});
 });

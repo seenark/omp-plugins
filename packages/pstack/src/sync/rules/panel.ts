@@ -24,14 +24,6 @@ export const panel: Group = {
 			"skills/swarm/SKILL.md",
 			"A model race takes its arms from the roster's seats (builders to write, critics to read), skips unset seats, and names the single-vendor note.",
 		),
-		patched(
-			"skills/architect/SKILL.md",
-			"Runners are the roster's seat builders, so they can write sketch files; the read-only `pstack-design` lane screens candidates and takes no runner's place.",
-		),
-		patched(
-			"skills/how/SKILL.md",
-			"A complex explanation is checked by the roster's seat critics before it is presented, and the step is skipped when no seat is configured. Upstream's `how` has no critics.",
-		),
 		{
 			path: "skills/poteto-mode/references/panel-verdicts.md",
 			kind: "rewritten",

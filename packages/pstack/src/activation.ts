@@ -12,7 +12,7 @@ export const ROSTER_MESSAGE_TYPE = "dev.codesook.pstack.roster";
 export const REMINDER_MESSAGE_TYPE = "dev.codesook.pstack.reminder";
 
 /** Skills that dispatch the panel seats. Invoked outside an Activation they still need the seat roster. */
-export const PANEL_SKILLS = ["interrogate", "arena", "swarm", "architect", "how"] as const;
+export const PANEL_SKILLS = ["interrogate", "arena", "swarm"] as const;
 
 const SKILL_COMMAND = new RegExp(`^\\s*/skill:${POTETO_SKILL}(?=\\s|$)`);
 const PANEL_SKILL_COMMAND = new RegExp(`^\\s*/skill:(?:${PANEL_SKILLS.join("|")})(?=\\s|$)`);

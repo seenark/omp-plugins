@@ -81,7 +81,7 @@ export const WORK_ROLES: readonly WorkRole[] = [
 		access: "read-only",
 		lane: "Read-only pstack lane that merges panel verdicts into one decision.",
 		what: "Merges the panel's verdicts into one decision and breaks ties.",
-		when: "Merging panel critics' verdicts (how, swarm), synthesis in how, why and reflect, and final reviews.",
+		when: "Merging panel critics' verdicts (swarm) and final reviews.",
 		recommended: "Your strongest reasoning model.",
 	},
 	{
@@ -104,7 +104,7 @@ export const PANEL_ROLES: readonly PanelRole[] = PANEL_SEATS.map(seat => ({
 	seat,
 	fallback: null,
 	what: `Panel seat ${seat.toUpperCase()}: an independent model, served by a builder and a critic, that panel workflows compare with the other seats.`,
-	when: "Panel workflows (interrogate, arena, swarm, architect, how critics) dispatch every configured seat in parallel.",
+	when: "Panel workflows (interrogate, arena, swarm) dispatch every configured seat in parallel.",
 	recommended:
 		"A distinct model per seat, ideally from different vendors. Leave a seat unset to drop it: an unset seat is skipped, not an error.",
 }));

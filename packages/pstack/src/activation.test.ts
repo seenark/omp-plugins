@@ -242,7 +242,7 @@ describe("seat roster and the panel skills", () => {
 	});
 
 	it("sends the roster when a panel skill starts outside a run, for interactive and print modes", async () => {
-		for (const skill of ["interrogate", "arena", "swarm", "architect", "how"]) {
+		for (const skill of ["interrogate", "arena", "swarm"]) {
 			const typed = createHarness();
 			await typed.fire("session_start");
 			await typed.fire("input", { type: "input", text: `/skill:${skill} the diff`, source: "interactive" });

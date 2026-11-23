@@ -15,7 +15,7 @@ Scripts (run from the repo root):
 - `.omp/skills/verify-omp-plugins/scripts/omp-pty`: PTY driver (`submit`, `send`, `key`, `wait`, `scroll-until`, `screen`, `status`, `stop`). It runs through `uv run --with pyte==0.8.2`, and the first call downloads pyte into the uv cache.
 - `.omp/skills/verify-omp-plugins/features/<feature>.sh`: one-command journeys for `process-monitor`, `skill-stats` and `beads` (see Journeys).
 
-Requirements on `PATH`: `omp` (proved on 18.12.6), `uv`, `git`, `bash`. macOS `/bin/ps` is used to check the child's environment.
+Requirements on `PATH`: `omp` (proved on 19.1.0), `uv`, `git`, `bash`. macOS `/bin/ps` is used to check the child's environment.
 
 ## Launch
 
@@ -76,7 +76,7 @@ All driving goes through `$OMP_PTY` with `$PTY` from `verify-omp env`:
 `submit` does this in order:
 
 1. Presses Esc, which closes any open dialog.
-2. Presses `ctrl-u`, which clears the editor.
+2. Presses `ctrl-c`, which clears the whole editor. omp 19 puts a prompt refused for no model back into the editor as multi-line text, which `ctrl-u` clears only one line of. A second `ctrl-c` within 500 ms exits omp, so do not send `key ctrl-c` right before `submit`.
 3. Types the text and waits until it appears inside the editor box (`║`).
 4. Presses Esc again, which dismisses the autocomplete popup.
 5. Presses Enter.

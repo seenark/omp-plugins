@@ -49,7 +49,6 @@ const REGEX_INPUT: Record<string, string> = {
 
 /** A concrete file for rules scoped by a glob or by the default Markdown scope. */
 const CONCRETE_FILE: Record<string, string> = {
-	"sessions/reflect-skill-use": "skills/reflect/references/judgment-reviewer.md",
 	"sessions/no-cross-project-glob": "skills/recall/SKILL.md",
 	"sessions/user-skill-directory": "skills/automate-me/SKILL.md",
 	"sessions/project-skill-directory": "skills/automate-me/SKILL.md",

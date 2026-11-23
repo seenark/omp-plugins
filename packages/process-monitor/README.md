@@ -57,7 +57,7 @@ Stopping asks for confirmation naming the PID, command (marker and wrapper remov
 
 First match wins:
 
-1. **Supervised.** A process in `omp ps --all --json` with a live PID whose daemon is not in a terminal state (`exited` or `failed`). Its `owner` is the Agent Session. A daemon in a terminal state no longer runs, so an unrelated process that now holds its recorded PID is never attributed to it. A daemon that is an OMP worker (`omp __omp_worker_*`) is internal instead: it has no session and stopping it breaks OMP. The daemon spec files are never read because they hold environment snapshots.
+1. **Supervised.** A process in `omp ps --all --json` with a live PID whose daemon is not in a terminal state (`exited` or `failed`). Its `owner` is the Agent Session. A daemon in a terminal state no longer runs, so an unrelated process that now holds its recorded PID is never attributed to it. A daemon that is an OMP worker (`omp __omp_worker_*`) is internal instead: it has no session and stopping it breaks OMP. The exception is `__omp_worker_shell_process`, which omp 19 runs every `bash` service under. omp 19 prints one daemon's `{ daemon, reports: [{ scope, units }] }` and only its `proc` units are read; omp 18's per-scope broker list is read too. The daemon spec files are never read because they hold environment snapshots.
 2. **Tagged.** A process whose environment carries `OMP_PLUGINS_SESSION`. Every bash tool command is prefixed with `export OMP_PLUGINS_SESSION='<session id>'; `, so servers started with `&` or `nohup` stay attributed after OMP exits. Only the value of this one variable is read; no other environment value is stored, shown or logged. Of the processes in one tagged tree, only the root and port holders are listed.
 3. **OMP internal.** Worker processes and the daemon broker. View-only.
 4. **Unknown origin.** Anything else with a listening TCP port. View-only. Processes started before this feature was installed land here.
@@ -72,7 +72,7 @@ A process whose session has ended is a Leftover Process.
 
 ### Kept Process and Stop Candidate
 
-- **Kept Process.** A supervised process whose `omp ps` entry has `persist: true` or `detached: true`. It was started to outlive its session, so ending the session does not make it something to stop. A tagged process is never kept.
+- **Kept Process.** A supervised process whose `omp ps` entry has `persist: true` or `detached: true` (omp 19: `policy.hold` is `persist` or `detached`). It was started to outlive its session, so ending the session does not make it something to stop. A tagged process is never kept.
 - **Stop Candidate.** A killable (supervised or tagged) Leftover Process that is not a Kept Process. It needs no port and no waiting period: the session has ended, so it qualifies. OMP internals and unknown-origin processes are view-only and are never Stop Candidates.
 
 To keep a process, start it as a service in persist mode (or detached) so `omp ps` lists it that way. A plain `&` or `nohup` process from the bash tool is tagged, so it is a Stop Candidate once its session ends.
