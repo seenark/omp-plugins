@@ -46,12 +46,10 @@ const FILE_OF: Record<string, string> = {
 /** Upstream text a rule must apply to. A literal rule applies to its own pattern; a regex rule needs a sample. */
 const SAMPLE_OF: Record<string, string> = {
 	"pr/scripts-package":
-		'{\n  "type": "module",\n  "scripts": {\n    "test": "bun test watch-pr check-plan.test.ts",\n    "typecheck": "tsc --project watch-pr/tsconfig.json --noEmit --strict"\n  },\n  "dependencies": {}\n}\n',
+		'{\n  "type": "module",\n  "scripts": {\n    "test": "bun test watch-pr",\n    "typecheck": "tsc --project watch-pr/tsconfig.json --noEmit --strict"\n  },\n  "dependencies": {}\n}\n',
 	"pr/drop-graphite-requirement": "Stay on `gh`. Never require Graphite (`gt`). Record it. Never require `gt`.\n",
 	"pr/shipping-watch-run":
-		"On GitHub, watch the run with the queued watcher from `playbooks/babysit.md` (`scripts/watch-pr/watch-pr --queued-stack --stack-prs <bottom-to-top>`) under `/loop` until it reports `COMPLETE` at the ceiling.\n",
-	"pr/babysit-status-and-stop":
-		"6. **Trust the active forge's verdict, not a green check list.** Run `scripts/watch-pr/watch-pr` under `/loop`.\n\n   Stop at `READY`.\n\n   Answer a user question. Revise the list and rearm with the corrected snapshot.\n7. **Next.**\n",
+		"On GitHub, watch the run with `scripts/watch-pr/watch-pr --queued-stack` under `/loop` until it reports `COMPLETE` at the ceiling. Pass the run's PR numbers, bottom-to-top, in `--stack-prs`, and pass the same list each time you restart the watcher.\n",
 	"pr/triage-reference-wording": "# Bugbot triage\nSkip when: Bugbot flags it; the Bugbot comment is only that; six Bugbot passes.\n",
 };
 

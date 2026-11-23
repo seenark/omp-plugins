@@ -10,7 +10,7 @@ import processMonitor, { REFRESH_MS, type Timers } from "./index.ts";
 type Handler = (event: unknown, context: ExtensionContext) => unknown;
 type Listing = { pid: number; ppid: number; command: string; env?: string; ports?: number[]; cwd?: string; etime?: string };
 /** `locks` are lock files a process holds open; `staleLocks` exist on disk with no holder; `lockDirMissing` is a home no session ever ran in. */
-type World = { ompPs: unknown[]; processes: Listing[]; locks: string[]; staleLocks?: string[]; lockDirMissing?: boolean; killFailure?: string; psFails?: boolean };
+type World = { ompPs: unknown; processes: Listing[]; locks: string[]; staleLocks?: string[]; lockDirMissing?: boolean; killFailure?: string; psFails?: boolean };
 
 const directories: string[] = [];
 afterEach(() => {
@@ -259,6 +259,43 @@ test("attribution precedence is supervised, then tagged, then internal, then unk
 	expect(rows.has(121)).toBe(false);
 	expect(text).not.toContain("hunter2");
 	expect(text).not.toContain("HOME=");
+});
+
+test("omp 19's single-daemon board attributes proc units, run under the shell worker, by scope, owner and hold", async () => {
+	const unit = (key: string, pid: number, extra: object) => ({ kind: "proc", key, label: key, pids: [pid], state: "ready", policy: { hold: "leases" }, ...extra });
+	const shellWorker = "/bin/omp __omp_worker_shell_process --source /run/web/shell.sh -- export OMP_PLUGINS_SESSION='S-old'; bun run dev";
+	const world: World = {
+		ompPs: {
+			daemon: { pid: 900, build: "19.1.0", startedAt: 0 },
+			reports: [
+				{ scope: { kind: "global" }, units: [{ kind: "lsp", key: "tsserver", label: "tsserver", pids: [130], state: "ready", policy: { hold: "leases" } }] },
+				{
+					scope: { kind: "project", dir: "/work/app" },
+					units: [unit("web", 100, { owner: "S-old", command: shellWorker }), unit("db", 101, { owner: "S-old", policy: { hold: "persist" } }), unit("gone", 102, { owner: "S-old", state: "exited" })],
+				},
+			],
+		},
+		processes: [
+			{ pid: 100, ppid: 900, command: shellWorker, ports: [3000] },
+			{ pid: 101, ppid: 1, command: "postgres -D data", ports: [5432] },
+			{ pid: 102, ppid: 1, command: "reused pid", ports: [4000] },
+			{ pid: 130, ppid: 900, command: "typescript-language-server --stdio", ports: [7000] },
+			{ pid: 900, ppid: 1, command: "/bin/omp __omp_worker_daemon" },
+		],
+		locks: ["S-now"],
+	};
+	const h = harness({ world });
+	await h.runProcs();
+	const text = h.notifications.at(-1)!.text;
+	const rows = parseListing(text);
+	expect(text).not.toContain("omp ps unavailable");
+	expect(rows.get(100)).toMatchObject({ group: "app (this project)", path: "/work/app" });
+	expect(rows.get(100)!.line).toMatch(/^100\s+:3000\s+web\s+bun run dev\s/);
+	expect(rows.get(100)!.line).toEndWith("⚠ stop?");
+	expect(rows.get(101)!.line).not.toContain("stop?");
+	expect(rows.get(102)).toMatchObject({ group: "Unknown origin (view-only)" });
+	expect(rows.get(130)).toMatchObject({ group: "Unknown origin (view-only)" });
+	expect(rows.get(900)).toMatchObject({ group: "OMP internals" });
 });
 
 test("the stop badge marks processes whose session holds no owner lock, including a scope whose broker exited", async () => {

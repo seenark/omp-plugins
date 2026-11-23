@@ -6,7 +6,7 @@
 
 [pstack](https://github.com/cursor/plugins/tree/main/pstack) workflows for [oh-my-pi](https://github.com/can1357/oh-my-pi). pstack does nothing until you start it.
 
-Tracks Upstream pstack 0.15.36, Pinned Revision `6b0300214a09fd6029cfb7077043125758cd1fd2`. Vendored Content and its file list are recorded in `THIRD-PARTY-NOTICES.txt`.
+Tracks Upstream pstack 0.15.46, Pinned Revision `7a583913eb1b8d1a0ee76753d1a2cf072e7b54f9`. Vendored Content and its file list are recorded in `THIRD-PARTY-NOTICES.txt`.
 
 ## Install
 
@@ -170,15 +170,15 @@ What each role is, when pstack uses it and what kind of model suits it (the text
 | `pstack-build` | Implements a scoped change end to end: edits, runs, and fixes its own failures. | Feature, fix and refactor steps that write code. | A strong coding model with reliable tool use; a mid-tier model is usually enough. |
 | `pstack-mechanical` | Applies fully specified mechanical edits: renames, codemods, formatting and bulk updates. | Steps where the change is already decided and only needs doing. | The cheapest model that follows instructions exactly. |
 | `pstack-design` | Proposes and critiques design: architecture, module boundaries, types and interfaces. | Architect and design steps, before code is written. | A model with strong design and visual judgment. |
-| `pstack-judge` | Merges the panel's verdicts into one decision and breaks ties. | Merging panel critics' verdicts (how, swarm), synthesis in how, why and reflect, and final reviews. | Your strongest reasoning model. |
+| `pstack-judge` | Merges the panel's verdicts into one decision and breaks ties. | Merging panel critics' verdicts (swarm) and final reviews. | Your strongest reasoning model. |
 | `pstack-security` | Reviews a change for security flaws. | Review steps that touch authentication, input handling, secrets or dependencies. | A strong reasoning model; a different vendor from your judge adds coverage. |
-| `pstack-panel-a` … `pstack-panel-e` | Panel seat A to E: an independent model, served by a builder and a critic, that panel workflows compare with the other seats. | Panel workflows (interrogate, arena, swarm, architect, how critics) dispatch every configured seat in parallel. | A distinct model per seat, ideally from different vendors. Leave a seat unset to drop it: an unset seat is skipped, not an error. |
+| `pstack-panel-a` … `pstack-panel-e` | Panel seat A to E: an independent model, served by a builder and a critic, that panel workflows compare with the other seats. | Panel workflows (interrogate, arena, swarm) dispatch every configured seat in parallel. | A distinct model per seat, ideally from different vendors. Leave a seat unset to drop it: an unset seat is skipped, not an error. |
 
 Work-role agents list the pstack role, then the built-in role, so OMP skips an unset pstack role. OMP does not skip an unset single role: that child fails on its first prompt. pstack therefore blocks the spawn of an unset seat's agents with a reason telling the agent to skip that seat. A fallback to another model during a seat's run is stored as a `dev.codesook.pstack.dropout` session entry. A fallback that keeps the model (a thinking level, a provider route, the Fast tier) is not a dropout.
 
 ## Panel workflows
 
-`interrogate`, `arena`, `swarm`, `architect` and the critique step of `how` run on the configured seats. The session learns its seats from a hidden roster note: on activation, and when one of these skills is started outside a run. The note lists each seat that has a model, in seat order and capped by `maxPanelSize`, with its model and vendor (the models API's family token), and says so when every seat is one vendor. A panel of two or more vendors carries no vendor note in the roster or the merged verdict, not even a negated one. Critics return the structured verdict; their findings are deduplicated with `judge_batch`, then `pstack-judge` synthesizes. The helpers for the mechanical part are in `src/verdict.ts` (`duplicateCandidates`, `mergeVerdicts`, `reviewerLines`); the skills import them from an `eval` cell, and `skills/poteto-mode/references/panel-verdicts.md` is the procedure. The merged verdict names each seat's model and carries `diversity reduced: single vendor` when the seats that answered are one vendor. Interrogate has no critics and no judge. Each seat's builder runs as an isolated adversary that tries to break the change, and the lead keeps only the findings a rerun of their command proves. Its report names every Dropout and carries the same single-vendor note. Arena builders run as isolated tasks, and arena asks the user to turn `task.isolation.apply` off first, so each candidate stays a patch or task branch to graft from. Arena's cross-judge is the critic of the first seat whose vendor differs from the session model's vendor, and arena skips the judge when no seat qualifies.
+`interrogate`, `arena` and `swarm` run on the configured seats. The session learns its seats from a hidden roster note: on activation, and when one of these skills is started outside a run. The note lists each seat that has a model, in seat order and capped by `maxPanelSize`, with its model and vendor (the models API's family token), and says so when every seat is one vendor. A panel of two or more vendors carries no vendor note in the roster or the merged verdict, not even a negated one. Critics return the structured verdict; their findings are deduplicated with `judge_batch`, then `pstack-judge` synthesizes. The helpers for the mechanical part are in `src/verdict.ts` (`duplicateCandidates`, `mergeVerdicts`, `reviewerLines`); the skills import them from an `eval` cell, and `skills/poteto-mode/references/panel-verdicts.md` is the procedure. The merged verdict names each seat's model and carries `diversity reduced: single vendor` when the seats that answered are one vendor. Interrogate has no critics and no judge. Each seat's builder runs as an isolated adversary that tries to break the change, and the lead keeps only the findings a rerun of their command proves. Its report names every Dropout and carries the same single-vendor note. Arena builders run as isolated tasks, and arena asks the user to turn `task.isolation.apply` off first, so each candidate stays a patch or task branch to graft from. Arena's cross-judge is the critic of the first seat whose vendor differs from the session model's vendor, and arena skips the judge when no seat qualifies.
 
 ## Behavior Configuration
 
@@ -215,7 +215,7 @@ Style signals that never block. They speak only in an Agent Session where pstack
 | Missing throughput checkpoint | `session_stop` continuation | the active playbook asks for one and the assistant never wrote it, in prose or as todo items |
 | Done without runtime proof | `session_stop` continuation | the final reply claims the work is done, yet `edit`, `write` or `ast_edit` ran after the last `bash`, `eval` or `browser` call |
 
-A stop continuation fires once per stop: it never answers a `stop_hook_active` turn, so OMP's cap of 8 continuations is never approached, and the checkpoint warning is given once per session. pstack ships no OMP rules: a rule cannot see whether pstack is active or read the strictness setting. The todo guard replaces Upstream's `check-plan` script (`src/sync/rules/guards.ts`).
+A stop continuation fires once per stop: it never answers a `stop_hook_active` turn, so OMP's cap of 8 continuations is never approached, and the checkpoint warning is given once per session. pstack ships no OMP rules: a rule cannot see whether pstack is active or read the strictness setting.
 
 ## Vendored Content
 
@@ -229,8 +229,7 @@ Adaptations are code, in `src/sync/rules/`, one file per group:
 | --- | --- |
 | `collisions.ts` | Skill renames (`tdd` to `pstack-tdd`, `teach` to `pstack-teach`); the engine moves the skill and derives the rules that rewrite references to it |
 | `core.ts` | Excluded parts (`make-bot-ui`, the `statechart` test corpus; `automations` and `docs/guide` are never imported), the references they leave dangling, `ketchup-video`'s reply as a file path plus stills (OMP's chat cannot play video), residual terms nobody owns |
-| `panel.ts` | Forks for the multi-model skills (`interrogate`, `arena`, `swarm`, `architect`, `how`) and the `panel-verdicts.md` reference, all hand-edited; their reasons live in the file |
-| `guards.ts` | Upstream's `check-plan` script (Excluded; the todo guard replaces it) and the playbook text that called it |
+| `panel.ts` | Forks for the multi-model skills (`interrogate`, `arena`, `swarm`) and the `panel-verdicts.md` reference, all hand-edited; their reasons live in the file |
 | `frontmatter.ts` | Skill frontmatter: principle skills get `hide: true`, Cursor's `icon` and `color` keys are stripped |
 | `dispatch.ts`, `pr.ts`, `sessions.ts` | Cursor primitives replaced by OMP ones: lane dispatch, PR workflows, session paths, goal mode, drivers, and the `/skill:<name>` form of slash commands (the skill set is the one the current sync run produces, so a skill Upstream adds is rewritten in the same run) |
 

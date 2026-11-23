@@ -200,8 +200,9 @@ def main():
         request(run_dir, {"op": "write", "data": args.text})
     elif args.op == "submit":
         # Esc closes an open dialog; Enter on an open autocomplete popup would accept the completion, so Esc again before Enter.
+        # Ctrl+C clears the whole editor (omp 19 puts a prompt refused for no model back as multi-line text; Ctrl+U clears one line).
         # Each key is its own write with a pause: ESC followed by another byte in one read parses as a Meta chord.
-        press(run_dir, "esc", "ctrl-u")
+        press(run_dir, "esc", "ctrl-c")
         request(run_dir, {"op": "write", "data": args.text})
         deadline = time.time() + 5
         # omp draws the editor inside ║ box edges; match there so stale notifications do not count.

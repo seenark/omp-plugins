@@ -101,8 +101,10 @@ export function withSessionMarker(command: string, sessionId: string): string {
 }
 
 const WORKER = /\bomp __omp_worker_(\w+)/;
+/** omp 19 runs every `bash` service under this worker, so a supervised launch with it is the user's command, not an OMP internal. */
+const SERVICE_WORKER = "shell_process";
 
-const SHELL_WRAPPER = /^(?:\S*\/)?(?:sh|bash|zsh)\s+(?:-l\s+-c|-lc|-c)\s+/;
+const SHELL_WRAPPER = /^(?:(?:\S*\/)?(?:sh|bash|zsh)\s+(?:-l\s+-c|-lc|-c)|(?:\S*\/)?omp __omp_worker_shell_process(?:\s+--source\s+\S+)?\s+--)\s+/;
 const INTERPRETER = /^(?:node|bun|deno|python[\d.]*)$/;
 const PACKAGE_RUNNER = /^(?:bunx|npx|pnpx)$/;
 const PACKAGE_MANAGER = /^(?:npm|pnpm|yarn)$/;
@@ -255,7 +257,9 @@ export function parseOmpPs(raw: string): Scope[] | undefined {
 	} catch {
 		return undefined;
 	}
+	if (isRecord(parsed) && Array.isArray(parsed.reports)) return parseBoard(parsed);
 	if (!Array.isArray(parsed)) return undefined;
+	// omp < 19: one broker per scope, `daemons` listing its launches.
 	return parsed.filter(isRecord).map(scope => ({
 		projectDir: scope.kind === "project" ? text(scope.projectDir) : undefined,
 		brokerPid: integer(scope.brokerPid),
@@ -268,6 +272,30 @@ export function parseOmpPs(raw: string): Scope[] | undefined {
 			ended: daemon.state === "exited" || daemon.state === "failed",
 		})),
 	}));
+}
+
+/** omp >= 19: one daemon for every scope, `{ daemon, reports: [{ scope, units }] }`; `proc` units are the supervised launches. */
+function parseBoard(board: Record<string, unknown>): Scope[] {
+	const brokerPid = isRecord(board.daemon) ? integer(board.daemon.pid) : undefined;
+	return (board.reports as unknown[]).filter(isRecord).map(report => {
+		const scope = isRecord(report.scope) ? report.scope : {};
+		const units = (Array.isArray(report.units) ? report.units : []).filter(isRecord).filter(unit => unit.kind === "proc");
+		return {
+			projectDir: scope.kind === "project" ? text(scope.dir) : undefined,
+			brokerPid,
+			daemons: units.map(unit => {
+				const hold = isRecord(unit.policy) ? unit.policy.hold : undefined;
+				return {
+					name: text(unit.label) ?? text(unit.key) ?? "daemon",
+					pid: Array.isArray(unit.pids) ? integer(unit.pids[0]) : undefined,
+					owner: text(unit.owner),
+					command: text(unit.command),
+					kept: hold === "persist" || hold === "detached",
+					ended: unit.state === "exited" || unit.state === "failed",
+				};
+			}),
+		};
+	});
 }
 
 type ProcessEntry = { ppid: number; command: string; elapsedSeconds?: number };
@@ -422,7 +450,8 @@ export function buildSnapshot(inputs: SnapshotInputs): Snapshot {
 	for (const scope of scopes ?? []) {
 		for (const daemon of scope.daemons) {
 			const entry = daemon.pid === undefined ? undefined : table.get(daemon.pid);
-			if (daemon.pid !== undefined && !daemon.ended && entry && !WORKER.test(daemon.command ?? entry.command) && !supervised.has(daemon.pid)) supervised.set(daemon.pid, { scope, daemon });
+			const worker = WORKER.exec(daemon.command ?? entry?.command ?? "")?.[1];
+			if (daemon.pid !== undefined && !daemon.ended && entry && (worker === undefined || worker === SERVICE_WORKER) && !supervised.has(daemon.pid)) supervised.set(daemon.pid, { scope, daemon });
 		}
 	}
 

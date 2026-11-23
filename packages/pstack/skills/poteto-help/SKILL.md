@@ -49,7 +49,7 @@ Other tools can read the skills, because they use the Agent Skills format. But t
 
 ## Start a task with `/skill:poteto-mode`
 
-`/skill:poteto-mode` matches the task to a playbook, copies the playbook's steps into the todo list, and runs the other skills as the steps need them. A step it skips stays in the list as `skip: <reason>`. A good prompt states the goal and how to tell it's done. It doesn't list skills, because a hand-written sequence tends to drop or reorder steps the playbook would keep. Read [`references/prompting.md`](references/prompting.md) before you help word one.
+`/skill:poteto-mode` matches the task to a playbook, copies the playbook's steps into the todo list, and runs the other skills as the steps need them. A good prompt states the goal and how to tell it's done. It doesn't list skills, because a hand-written sequence tends to drop or reorder steps the playbook would keep. Read [`references/prompting.md`](references/prompting.md) before you help word one.
 
 `/poteto <task>` starts the skill on the task and marks pstack active for the Agent Session. Invoking `/skill:poteto-mode` activates it too. Mid-chat, "new task" makes the mode match a fresh playbook. `/skill:poteto-mode` already uses `poteto-agent` for the subagents its playbook steps spawn. To get the same style from a subagent of your own, spawn it with `agent: "poteto-agent"`.
 
@@ -99,16 +99,15 @@ Close calls:
 
 - `/skill:how` explains what the code does. `/skill:why` explains the reasons. `/skill:pstack-teach` runs one or both and explains the result plainly.
 - `/skill:arena` gives every worker the same brief and merges the best parts. `/skill:swarm` splits work into slices or a race and returns one report.
-- `/skill:architect` implements right after it settles the design. Add "with checkpoint" to review the design before it writes code.
 - `/skill:interrogate` reviews the diff. `/skill:blast-radius` looks for breakage outside the diff and proves the one fact that makes the change safe.
 - `/skill:recall` rebuilds context across recent chats. `/skill:ketchup` covers only this chat since the user's last message. Resuming one specific chat or branch is the Session pickup playbook.
-- `/skill:figure-it-out` designs one rigorous run. The Orchestrate playbook runs a program that spans days and many PRs. The Autonomous run playbook drives one task to a finish condition.
+- `/skill:figure-it-out` designs one rigorous run. The Autonomous run playbook drives one task to a finish condition.
 
 Not in pstack:
 
 - pstack has no driver skills. The OMP `browser` tool drives web UIs and `bash` drives CLIs and TUIs.
 - Use OMP goal mode (`/goal set <objective>`) for a long run that must reach a finish condition.
-- pstack has no `/orchestrate` skill. Orchestrate is a `/skill:poteto-mode` playbook. If the slash menu shows `/orchestrate`, another plugin provides it.
+- pstack has no `/orchestrate` skill. If the slash menu shows `/orchestrate`, another plugin provides it.
 
 ## Playbooks and principles
 
@@ -121,7 +120,7 @@ Playbooks are step lists inside `/skill:poteto-mode`, not skills, so they have n
 - "full autopilot on this queue" runs Autopilot-full. "autopilot, don't merge" runs Autopilot-stack.
 - "run the eval playbook" runs Eval.
 
-Without `/skill:poteto-mode`, a phrase such as "babysit this pr" can start a separately installed babysit skill for the same job instead. The Playbooks section of [`poteto-mode`](../poteto-mode/SKILL.md) lists every playbook and when it applies.
+Without `/skill:poteto-mode`, a phrase such as "babysit this pr" can start a separately installed babysit skill for the same job instead. The Playbooks section of [`poteto-mode`](../poteto-mode/SKILL.md) lists every playbook.
 
 pstack has no planning skill. OMP's plan mode works alongside it. For work that spans phases or stacked PRs, asking `/skill:poteto-mode` for a plan runs the [Multi-phase plan playbook](../poteto-mode/playbooks/multi-phase-plan.md), which writes the plan and doesn't implement it. For a design question, the Prototype playbook or `/skill:architect` settles it in code first.
 

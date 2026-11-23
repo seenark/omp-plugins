@@ -7,7 +7,7 @@ import type { Group, Rule, SkillPattern } from "../types.ts";
 
 const SESSIONS = "~/.omp/agent/sessions";
 const SESSION_DIRECTORY = `\`${SESSIONS}/<encoded-cwd>/\` (one directory per working directory, named from its path with each "/" turned into "-")`;
-const BROWSER_TOOL = "the OMP `browser` tool (the `browser` global in `eval`, documented at `xd://eval/browser`)";
+const BROWSER_TOOL = "the OMP `browser` tool (the `browser` global in `eval`, documented at `help://eval/browser`)";
 const GOAL_MODE = "OMP goal mode (an extension cannot start it, so tell the user to run `/goal set <objective>`)";
 
 /**
@@ -21,20 +21,6 @@ const slashForm: SkillPattern = skills =>
 	);
 
 const transcripts: Rule[] = [
-	{
-		id: "sessions/reflect-transcript",
-		reason: "OMP names no transcript directory in the system prompt; history:// and the session directory replace Cursor's agent-transcripts/.",
-		files: "skills/reflect/SKILL.md",
-		pattern: "in the `agent-transcripts/` directory the system prompt names.",
-		replacement: `with \`history://\` (bare \`history://\` lists agent ids, \`history://<id>\` reads one) or in the workspace's session directory, ${SESSION_DIRECTORY}.`,
-	},
-	{
-		id: "sessions/reflect-listing",
-		reason: "OMP stores subagent transcripts one level down, in a directory named after the session file; there is no subagents/ folder.",
-		files: "skills/reflect/SKILL.md",
-		pattern: "<agent-transcripts>/*.jsonl <agent-transcripts>/*/*.jsonl <agent-transcripts>/*/subagents/*.jsonl",
-		replacement: "<session-directory>/*.jsonl <session-directory>/*/*.jsonl",
-	},
 	{
 		id: "sessions/recall-location",
 		reason: "Cursor keeps transcripts in ~/.cursor/projects/<slug>/agent-transcripts/<uuid>/; OMP keeps session files in one directory per working directory.",
@@ -96,13 +82,6 @@ const transcripts: Rule[] = [
 
 const skillLocations: Rule[] = [
 	{
-		id: "sessions/reflect-skill-use",
-		reason: "A skill counts as used when the transcript shows it read through skill:// or from an OMP skill directory.",
-		files: "skills/reflect/references/*.md",
-		pattern: "(under `.cursor/skills/`, `~/.cursor/skills/`, or `~/.cursor/plugins/`)",
-		replacement: "(by its `skill://<name>` URL, or under `.omp/skills/`, `~/.omp/agent/skills/`, or an installed plugin's `skills/` directory)",
-	},
-	{
 		id: "sessions/poteto-agent-locate-skill",
 		reason: "OMP resolves a skill by name through skill://, so the agent does not search a Cursor plugin directory or read .cursor-plugin/plugin.json.",
 		files: "agents/poteto-agent.md",
@@ -126,34 +105,6 @@ const skillLocations: Rule[] = [
 
 const drivers: Rule[] = [
 	{
-		id: "sessions/driver-by-surface",
-		reason: "control-ui and control-cli come from cursor-team-kit; OMP drives a browser with its browser tool and a CLI or TUI with bash.",
-		files: "skills/poteto-mode/playbooks/multi-phase-plan.md",
-		pattern: "Browser, Electron, and web UIs use `control-ui` from `cursor-team-kit`. CLIs and TUIs use `control-cli` from `cursor-team-kit`.",
-		replacement: `Browser and web UIs use ${BROWSER_TOOL}. CLIs and TUIs use \`bash\` with \`pty: true\`, or a managed service (\`bash\` with \`name\` and \`ready\`) for a long-running app. Electron and native windows launch through \`bash\` and use the driver the repo ships.`,
-	},
-	{
-		id: "sessions/driver-live-lane",
-		reason: "Live lanes drive the real surface through the OMP browser tool or bash, not cursor-team-kit skills.",
-		files: "skills/poteto-mode/playbooks/multi-phase-plan.md",
-		pattern: "Drive through `control-ui` or `control-cli` from `cursor-team-kit`.",
-		replacement: "Drive through the `browser` tool or `bash`.",
-	},
-	{
-		id: "sessions/driver-orchestrate-worker",
-		reason: "Runtime checks run through the OMP browser tool or bash, not control-ui or control-cli from cursor-team-kit.",
-		files: "skills/poteto-mode/playbooks/orchestrate.md",
-		pattern: "a `control-ui` or `control-cli` runtime check (from `cursor-team-kit`)",
-		replacement: "a runtime check through the `browser` tool or `bash`",
-	},
-	{
-		id: "sessions/driver-orchestrate-evidence",
-		reason: "A control skill check is a check through the OMP browser tool or bash.",
-		files: "skills/poteto-mode/playbooks/orchestrate.md",
-		pattern: "a control-skill check",
-		replacement: "a `browser` tool or `bash` check",
-	},
-	{
 		id: "sessions/driver-such-as",
 		reason: "The example drivers named in verifier steps become the OMP browser tool and bash.",
 		pattern: "(such as `control-ui` or `control-cli` from `cursor-team-kit`)",
@@ -163,8 +114,15 @@ const drivers: Rule[] = [
 		id: "sessions/driver-poteto-mode",
 		reason: "poteto-mode names the matching driver for UI, IDE and CLI work; OMP's are the browser tool and bash.",
 		files: "skills/poteto-mode/SKILL.md",
-		pattern: "`cursor-team-kit` publishes `control-cli` (CLIs and TUIs) and `control-ui` (browser / Electron / web UIs).",
-		replacement: `The OMP \`browser\` tool (the \`browser\` global in \`eval\`, documented at \`xd://eval/browser\`) drives browser and web UIs. \`bash\` drives CLIs and TUIs, with \`pty: true\` or a managed service (\`name\` and \`ready\`).`,
+		pattern: "Shipping UI / IDE / CLI → `control-ui` or `control-cli` from `cursor-team-kit`.",
+		replacement: `Shipping UI / IDE / CLI → ${BROWSER_TOOL} for browser and web UIs, and \`bash\` with \`pty: true\` or a managed service (\`name\` and \`ready\`) for CLIs and TUIs.`,
+	},
+	{
+		id: "sessions/deslop-poteto-mode",
+		reason: "deslop is vendored into pstack from cursor-team-kit, so it is no longer a plugin to name.",
+		files: "skills/poteto-mode/SKILL.md",
+		pattern: "`/deslop` from the `cursor-team-kit` plugin",
+		replacement: "`/deslop`",
 	},
 	{
 		id: "sessions/driver-help-not-in-pstack",
@@ -209,13 +167,6 @@ const goalMode: Rule[] = [
 		files: "skills/poteto-mode/playbooks/visual-parity.md",
 		pattern: "`/loop` per component until the diff is zero.",
 		replacement: "Repeat per component until the diff is zero. For an unattended run, tell the user to run `/goal set <objective>`.",
-	},
-	{
-		id: "sessions/goal-poteto-mode-trigger",
-		reason: "The user's unattended-run phrase (twice in poteto-mode) is OMP's /goal set.",
-		files: "skills/poteto-mode/SKILL.md",
-		pattern: "\"/loop until X\"",
-		replacement: "\"/goal set X\"",
 	},
 	{
 		id: "sessions/goal-session-overrides",

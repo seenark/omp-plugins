@@ -1,13 +1,13 @@
 # Running a panel and merging its verdicts
 
-The **how** critique step, **swarm** model races and every other review that asks several models the same question follow this file. It builds on `provider-dispatch.md`, which has the seats, the dropout policy and the spawn rules. **Interrogate** reads section 1 for the roster and section 4 for the single-vendor note and the dropout notes. **Arena** reads section 1 for the roster. Neither merges verdicts.
+**Swarm** model races and every other review that asks several models the same question follow this file. It builds on `provider-dispatch.md`, which has the seats, the dropout policy and the spawn rules. **Interrogate** reads section 1 for the roster and section 4 for the single-vendor note and the dropout notes. **Arena** reads section 1 for the roster. Neither merges verdicts.
 
 ## 1. Read the roster
 
 A hidden roster note names the panel: `pstack panel seats configured: A (pstack-panel-a: <provider>/<model>, vendor <vendor>), ...`. It lists only seats that have a model, in seat order, already capped by the `maxPanelSize` setting (default 5, which adds no cap). The panel is exactly those seats.
 
 - Spawn nothing for a seat the roster leaves out. An absent seat is skipped without a report of failure, and pstack refuses its spawn anyway.
-- An empty roster means no panel. Stop and tell the user to run `/pstack setup`. A workflow that can run without a panel (**how**) carries on without it.
+- An empty roster means no panel. Stop and tell the user to run `/pstack setup`. A workflow that can run without a panel carries on without it.
 - No roster note in the session means pstack's extension did not load. Say so and stop: without it no seat's model can be named.
 - The roster is the only source for a seat's model and vendor. Never name a model from memory or from what a critic says about itself.
 
